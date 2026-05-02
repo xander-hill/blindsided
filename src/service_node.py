@@ -1,6 +1,7 @@
 import os
 import random
 from concurrent import futures
+import time
 
 import grpc
 
@@ -181,6 +182,11 @@ class ServiceNode(pb2_grpc.MarketplaceServicer):
 
 
 def serve() -> None:
+    node = ServiceNode()
+    print("Waiting for Controller to be reachable...")
+    while not node._get_primary_address():
+        print("Controller not ready. Retrying in 2s...")
+        time.sleep(2)
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     pb2_grpc.add_MarketplaceServicer_to_server(ServiceNode(), server)
     server.add_insecure_port(f"[::]:{SERVICE_PORT}")

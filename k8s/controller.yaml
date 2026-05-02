@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: controller
-        image: marketplace-app:latest
+        image: blindsided:latest
         imagePullPolicy: IfNotPresent
         command: ["python", "-m", "src.controller"]
         env:

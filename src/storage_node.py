@@ -1,5 +1,6 @@
 import threading
 from concurrent import futures
+import time
 
 import grpc
 
@@ -27,25 +28,36 @@ class StorageNode(marketplace_pb2_grpc.StorageReplicaServicer):
         else:
             self.my_full_address = raw_address if ":" in raw_address else f"{raw_address}:{NODE_PORT}"
 
-        try:
-            with grpc.insecure_channel(CONTROLLER_ADDRESS) as channel:
-                stub = marketplace_pb2_grpc.ControllerStub(channel)
-                
-                # 1. Register with the controller
-                resp = stub.RegisterNode(marketplace_pb2.RegisterRequest(address=self.my_full_address))
-                self.role = "primary" if resp.is_primary else "backup"
-                print(f"Registered with Controller. Role assigned: {self.role.upper()}")
+        # --- NEW RETRY LOGIC STARTS HERE ---
+        connected = False
+        while not connected:
+            try:
+                print(f"Attempting to connect to Controller at {CONTROLLER_ADDRESS}...")
+                with grpc.insecure_channel(CONTROLLER_ADDRESS) as channel:
+                    stub = marketplace_pb2_grpc.ControllerStub(channel)
+                    
+                    # 1. Register with the controller
+                    resp = stub.RegisterNode(
+                        marketplace_pb2.RegisterRequest(address=self.my_full_address), 
+                        timeout=2.0
+                    )
+                    self.role = "primary" if resp.is_primary else "backup"
+                    print(f"Registered with Controller. Role assigned: {self.role.upper()}")
 
-                # 2. IF BACKUP: Ask Controller for the current Primary to sync state
-                if self.role == "backup":
-                    primary_resp = stub.GetPrimary(marketplace_pb2.Empty())
-                    if primary_resp.success and primary_resp.primary_address != self.my_full_address:
-                        self.sync_from_primary(primary_resp.primary_address)
-                    else:
-                        print("No primary found or I am the first node. Skipping initial sync.")
+                    # 2. IF BACKUP: Sync state
+                    if self.role == "backup":
+                        primary_resp = stub.GetPrimary(marketplace_pb2.GetPrimaryRequest())
+                        if primary_resp.success and primary_resp.primary_address != self.my_full_address:
+                            self.sync_from_primary(primary_resp.primary_address)
+                        else:
+                            print("No primary found or I am the first node. Skipping initial sync.")
+                    
+                    connected = True # Break the loop
 
-        except Exception as e:
-            print(f"Could not connect to Controller: {e}. Defaulting to {self.role}")
+            except Exception as e:
+                print(f"Controller/DNS not ready: {e}. Retrying in 2s...")
+                time.sleep(2)
+        # --- END RETRY LOGIC ---
 
     def PutItem(self, request: marketplace_pb2.PutRequest, context) -> marketplace_pb2.PutResponse:
         with self.cv:

@@ -27,7 +27,7 @@ spec:
     spec:
       containers:
       - name: storage-node
-        image: marketplace-app:latest
+        image: blindsided:latest
         imagePullPolicy: IfNotPresent
         command: ["python", "-m", "src.storage_node"]
         env:

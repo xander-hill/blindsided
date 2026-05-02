@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: service-node
-        image: marketplace-app:latest
+        image: blindsided:latest
         imagePullPolicy: IfNotPresent
         command: ["python", "-m", "src.service_node"]
         env:
