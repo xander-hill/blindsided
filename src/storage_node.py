@@ -51,46 +51,59 @@ class StorageNode(marketplace_pb2_grpc.StorageReplicaServicer):
         with self.cv:
             item_id = request.item.item_id
             existing = self.items_by_id.get(item_id)
+            incoming_item = request.item
 
-            # Logic for NEW items
+            # --- CASE A: NEW AUCTION ---
             if not existing:
-                # Force starting version to 1 if not set
-                if request.item.version == 0:
-                    request.item.version = 1
+                if incoming_item.version == 0:
+                    incoming_item.version = 1
+                # Ensure it starts as open unless specified
+                # incoming_item.highest_bid is already set via starting_price in proto logic
             
-            # Logic for UPDATES (Consistency Check)
+            # --- CASE B: BIDDING OR CLOSING (The Judge) ---
             elif not request.skip_consistency_check:
-                # The client must provide the version they CURRENTLY see
-                if request.item.version != existing.version:
+                # 1. Version Check (Optimistic Locking)
+                if incoming_item.version != existing.version:
                     return marketplace_pb2.PutResponse(
                         success=False,
                         current_version=existing.version,
-                        message=f"Stale write rejected. Storage has v{existing.version}, you sent v{request.item.version}",
+                        message=f"Fog of War conflict. Version mismatch (Storage: {existing.version})",
                     )
-                
-                # Increment version for the successful update
-                request.item.version = existing.version + 1
 
-            # --- Local Save ---
-            self.items_by_id[item_id] = request.item
-            print(f"[{self.role.upper()}] Saved item: {item_id} (v{request.item.version})")
-
-            # --- Active Replication ---
-            if self.role == "primary":
-                replication_success = self.PropagateToBackups(request.item)
-                if not replication_success:
-                    # Optional: Rollback local save if replication fails
-                    del self.items_by_id[item_id]
+                # 2. Status Check (Is the auction over?)
+                if existing.is_closed:
                     return marketplace_pb2.PutResponse(
                         success=False,
-                        current_version=existing.version if existing else 0,
-                        message="Failed to replicate to backups",
+                        current_version=existing.version,
+                        message="The Gavel has fallen. Auction is closed.",
                     )
+
+                # 3. The Secret Comparison
+                # If this is a bid (not just a metadata update like description)
+                if incoming_item.highest_bid <= existing.highest_bid:
+                    return marketplace_pb2.PutResponse(
+                        success=False,
+                        current_version=existing.version,
+                        message="Blindsided! Your bid was too low.",
+                    )
+                
+                # 4. Success: Increment version
+                incoming_item.version = existing.version + 1
+
+            # --- Save & Replicate ---
+            self.items_by_id[item_id] = incoming_item
+            
+            if self.role == "primary":
+                if not self.PropagateToBackups(incoming_item):
+                    # Rollback
+                    if existing: self.items_by_id[item_id] = existing
+                    else: del self.items_by_id[item_id]
+                    return marketplace_pb2.PutResponse(success=False, message="Sync failed.")
 
             return marketplace_pb2.PutResponse(
                 success=True,
-                current_version=request.item.version,
-                message=f"Item stored and replicated via {self.role}",
+                current_version=incoming_item.version,
+                message="Accepted into the Vault."
             )
 
     def PropagateToBackups(self, item: Item) -> bool:
