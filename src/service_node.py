@@ -102,8 +102,7 @@ class ServiceNode(pb2_grpc.MarketplaceServicer):
             item_id=request.item_id,
             seller_id=request.seller_id,
             description=request.description,
-            quantity=request.quantity,
-            status=request.status,
+            is_closed=request.status == "CLOSED",
             version=request.expected_version # Send the version we THINK it is
         )
 
@@ -152,7 +151,13 @@ class ServiceNode(pb2_grpc.MarketplaceServicer):
                 stub, channel = self._storage_stub(addr)
                 with channel:
                     response = stub.QueryItems(request, timeout=5.0)
-                    return response
+                    masked_items = [self._mask_item_for_client(it) for it in response.items]
+
+                    return pb2.QueryResponse(
+                        ok=response.ok,
+                        items=masked_items,
+                        items_found=len(masked_items)
+                    )
             except grpc.RpcError as e:
                 print(f"[ServiceNode] QueryItems failed on {addr}: {e}")
                 last_error = e
@@ -161,6 +166,17 @@ class ServiceNode(pb2_grpc.MarketplaceServicer):
         context.set_code(grpc.StatusCode.UNAVAILABLE)
         context.set_details(f"All replicas unreachable. Last error: {last_error}")
         return pb2.QueryResponse(ok=False, items=[], items_found=0)
+    
+    def _mask_item_for_client(self, item: pb2.Item) -> pb2.Item:
+        """If the auction is still open, hide the sensitive bid data."""
+        if not item.is_closed:
+            # We create a copy to avoid modifying the version held in memory/cache
+            masked_item = pb2.Item()
+            masked_item.CopyFrom(item)
+            masked_item.highest_bid = 0.0 
+            masked_item.highest_bidder_id = "HIDDEN"
+            return masked_item
+        return item
 
 
 
