@@ -128,34 +128,25 @@ class BlindSidedService(pb2_grpc.BlindSidedServicer):
 
         return pb2.BidResponse(success=False, message=f"Vault unreachable: {last_error}")
 
-    def DropTheGavel(self, request: pb2.GavelRequest, context) -> pb2.GavelResponse:
-        """The Reveal: Lifts the Fog of War for a specific auction."""
+    def DropTheGavel(self, request: pb2.GavelRequest, context):
         primary = self._get_primary_address()
-        if not primary:
-            return pb2.GavelResponse(ok=False, message="The Judge is unreachable")
-
-        reveal_state = pb2.Auction(
-            auction_id=request.auction_id,
-            seller_id=request.seller_id,
-            is_revealed=True,
-            version=request.expected_version
-        )
-
-        try:
-            stub, channel = self._judge_stub(primary)
-            with channel:
-                res = stub.CommitToVault(pb2.CommitRequest(
-                    auction=reveal_state,
-                    is_reveal_event=True,
-                    skip_consistency_check=False
-                ), timeout=5.0)
-
-                if res.success:
-                    return pb2.GavelResponse(ok=True, final_version=res.current_version, message="The Gavel has fallen. Truth revealed.")
-                return pb2.GavelResponse(ok=False, message=res.message)
-
-        except grpc.RpcError as e:
-            return pb2.GavelResponse(ok=False, message=f"Judge error: {e.details()}")
+        
+        # NEW: Fetch current version to ensure the Judge accepts the 'Reveal'
+        stub, channel = self._judge_stub(primary)
+        with channel:
+            status_res = stub.QueryVault(pb2.QueryRequest(filter=request.auction_id))
+            current_v = status_res.auctions[0].version if status_res.auctions else 0
+            
+            reveal_state = pb2.Auction(
+                auction_id=request.auction_id,
+                is_revealed=True,
+                version=current_v # Use the real version!
+            )
+            
+            return stub.CommitToVault(pb2.CommitRequest(
+                auction=reveal_state,
+                is_reveal_event=True
+            ))
 
     def SearchAuctions(self, request: pb2.SearchRequest, context) -> pb2.SearchResponse:
         """Queries the vault and applies the Fog masking logic to results."""
