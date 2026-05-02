@@ -9,10 +9,10 @@ message Auction {
     string category = 4;
     string description = 5;
     float reserve_price = 6;
-    float sealed_bid = 7;
-    string lead_bidder_id = 8;
-    bool is_revealed = 9;
-    int32 version = 10;
+    map<string, float> bids = 7;
+    bool is_revealed = 8;
+    int32 version = 9;
+    bool reserve_met = 10;
 }
 
 service BlindSided {
@@ -63,14 +63,18 @@ message BidRequest {
     float amount = 3;
     int32 expected_version = 4;
 }
-message BidResponse { bool success = 1; float revealed_price = 2; string message = 3; }
+message BidResponse { bool success = 1; string message = 2; }
 
 message AuctionRequest { string auction_id = 1; string user_id = 2; }
 message AuctionUpdate {
-    float revealed_price = 1; 
-    string lead_bidder_id = 2;
-    bool is_revealed = 3;
-    string message = 4;
+    bool is_revealed = 1;
+    string message = 2;
+    float high_range = 3;
+    float low_range = 4;
+    int32 bidder_count = 5;
+    bool reserve_status = 6;
+    float final_price = 7;
+    string winner_id = 8;
 }
 
 message CommitRequest { 
