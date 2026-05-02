@@ -26,7 +26,11 @@ class Controller(pb2_grpc.ControllerServicer):
         with self.lock:
             if not self.primary_address:
                 return pb2.GetPrimaryResponse(success=False, message="No primary available")
-            return pb2.GetPrimaryResponse(success=True, primary_address=self.primary_address)
+            return pb2.GetPrimaryResponse(
+                success=True, 
+                primary_address=self.primary_address,
+                message="Primary retrieved" # Added to match GetPrimaryResponse proto
+            )
 
     def HeartbeatMonitor(self):
         """Background thread to actively check Storage Node health."""
