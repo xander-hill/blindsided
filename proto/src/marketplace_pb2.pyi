@@ -7,16 +7,16 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 DESCRIPTOR: _descriptor.FileDescriptor
 
 class Item(_message.Message):
-    __slots__ = ("item_id", "seller_id", "title", "category", "description", "starting_price", "current_price", "quantity", "status", "version")
+    __slots__ = ("item_id", "seller_id", "title", "category", "description", "starting_price", "highest_bid", "highest_bidder_id", "is_closed", "version")
     ITEM_ID_FIELD_NUMBER: _ClassVar[int]
     SELLER_ID_FIELD_NUMBER: _ClassVar[int]
     TITLE_FIELD_NUMBER: _ClassVar[int]
     CATEGORY_FIELD_NUMBER: _ClassVar[int]
     DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
     STARTING_PRICE_FIELD_NUMBER: _ClassVar[int]
-    CURRENT_PRICE_FIELD_NUMBER: _ClassVar[int]
-    QUANTITY_FIELD_NUMBER: _ClassVar[int]
-    STATUS_FIELD_NUMBER: _ClassVar[int]
+    HIGHEST_BID_FIELD_NUMBER: _ClassVar[int]
+    HIGHEST_BIDDER_ID_FIELD_NUMBER: _ClassVar[int]
+    IS_CLOSED_FIELD_NUMBER: _ClassVar[int]
     VERSION_FIELD_NUMBER: _ClassVar[int]
     item_id: str
     seller_id: str
@@ -24,11 +24,11 @@ class Item(_message.Message):
     category: str
     description: str
     starting_price: float
-    current_price: float
-    quantity: int
-    status: str
+    highest_bid: float
+    highest_bidder_id: str
+    is_closed: bool
     version: int
-    def __init__(self, item_id: _Optional[str] = ..., seller_id: _Optional[str] = ..., title: _Optional[str] = ..., category: _Optional[str] = ..., description: _Optional[str] = ..., starting_price: _Optional[float] = ..., current_price: _Optional[float] = ..., quantity: _Optional[int] = ..., status: _Optional[str] = ..., version: _Optional[int] = ...) -> None: ...
+    def __init__(self, item_id: _Optional[str] = ..., seller_id: _Optional[str] = ..., title: _Optional[str] = ..., category: _Optional[str] = ..., description: _Optional[str] = ..., starting_price: _Optional[float] = ..., highest_bid: _Optional[float] = ..., highest_bidder_id: _Optional[str] = ..., is_closed: bool = ..., version: _Optional[int] = ...) -> None: ...
 
 class ClusterInfoRequest(_message.Message):
     __slots__ = ()
@@ -151,16 +151,18 @@ class AuctionRequest(_message.Message):
     def __init__(self, item_id: _Optional[str] = ..., user_id: _Optional[str] = ...) -> None: ...
 
 class AuctionUpdate(_message.Message):
-    __slots__ = ("current_price", "highest_bidder_id", "version", "message")
+    __slots__ = ("current_price", "highest_bidder_id", "version", "is_closed", "message")
     CURRENT_PRICE_FIELD_NUMBER: _ClassVar[int]
     HIGHEST_BIDDER_ID_FIELD_NUMBER: _ClassVar[int]
     VERSION_FIELD_NUMBER: _ClassVar[int]
+    IS_CLOSED_FIELD_NUMBER: _ClassVar[int]
     MESSAGE_FIELD_NUMBER: _ClassVar[int]
     current_price: float
     highest_bidder_id: str
     version: int
+    is_closed: bool
     message: str
-    def __init__(self, current_price: _Optional[float] = ..., highest_bidder_id: _Optional[str] = ..., version: _Optional[int] = ..., message: _Optional[str] = ...) -> None: ...
+    def __init__(self, current_price: _Optional[float] = ..., highest_bidder_id: _Optional[str] = ..., version: _Optional[int] = ..., is_closed: bool = ..., message: _Optional[str] = ...) -> None: ...
 
 class PutRequest(_message.Message):
     __slots__ = ("item", "is_update", "skip_consistency_check")

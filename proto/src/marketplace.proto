@@ -9,9 +9,9 @@ message Item {
     string category = 4;
     string description = 5;
     float starting_price = 6;
-    float current_price = 7;
-    int32 quantity = 8;
-    string status = 9;
+    float highest_bid = 7;
+    string highest_bidder_id = 8;
+    bool is_closed = 9;
     int32 version = 10;
 }
 
@@ -117,7 +117,8 @@ message AuctionUpdate {
     float current_price = 1;
     string highest_bidder_id = 2;
     int32 version = 3;
-    string message = 4;
+    bool is_closed = 4;
+    string message = 5;
 }
 
 message PutRequest {
