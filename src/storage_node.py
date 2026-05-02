@@ -84,16 +84,33 @@ class JudgeNode(pb2_grpc.JudgeNodeServicer):
             return pb2.QueryResponse(ok=True, auctions=matches, count=len(matches), message="Query successful")
 
     def _replicate_to_peers(self, auction: pb2.Auction) -> bool:
-        success = True
-        for addr in self.peer_addresses:
-            if addr == self.my_full_address: continue
-            try:
-                with grpc.insecure_channel(addr) as ch:
-                    stub = pb2_grpc.JudgeNodeStub(ch)
-                    resp = stub.ReplicateSecret(pb2.ReplicationRequest(auction=auction), timeout=2.0)
-                    if not resp.success: success = False
-            except: success = False
-        return success
+            """
+            Modified Replication: Only fail if a reachable peer rejects the data.
+            If all peers are down, we proceed (degraded mode).
+            """
+            targets = [addr for addr in self.peer_addresses if addr != self.my_full_address]
+            if not targets:
+                return True # No one to replicate to
+
+            success = True
+            reachable_peers = 0
+            
+            for addr in targets:
+                try:
+                    with grpc.insecure_channel(addr) as ch:
+                        stub = pb2_grpc.JudgeNodeStub(ch)
+                        resp = stub.ReplicateSecret(pb2.ReplicationRequest(auction=auction), timeout=1.0)
+                        if not resp.success: 
+                            success = False
+                        else:
+                            reachable_peers += 1
+                except Exception:
+                    # Peer is down. In a high-integrity vault, we might want to 
+                    # block, but for an auction, we'll allow degraded operation.
+                    print(f"[Judge] Peer {addr} unreachable. Proceeding in degraded mode.")
+                    continue 
+            
+            return success
 
     def ReplicateSecret(self, request, context):
         with self.cv:

@@ -22,12 +22,14 @@ class BlindSidedService(pb2_grpc.BlindSidedServicer):
     before it reaches the client.
     """
 
-    def _get_primary_address(self) -> str | None:
-        """Consult the Controller to find the current Judge (Primary)."""
+    def _get_primary_address(self, force_refresh=False) -> str | None:
+        """Consult the Controller. If force_refresh is True, we don't use cache."""
+        # You could implement a local self._cached_primary here 
+        # for performance, but for now, let's just ensure it's reliable.
         try:
             with grpc.insecure_channel(CONTROLLER_ADDRESS) as ch:
                 stub = pb2_grpc.ControllerStub(ch)
-                resp = stub.GetPrimary(pb2.GetPrimaryRequest(), timeout=3.0)
+                resp = stub.GetPrimary(pb2.GetPrimaryRequest(), timeout=2.0)
                 if resp.success:
                     return resp.primary_address
         except Exception as e:
@@ -77,38 +79,54 @@ class BlindSidedService(pb2_grpc.BlindSidedServicer):
             return pb2.OpenResponse(ok=False, message=f"Judge error: {e.details()}")
 
     def PlaceSecretBid(self, request: pb2.BidRequest, context) -> pb2.BidResponse:
-        """Submits a bid into the 'Fog'. Only the Judge knows if it won."""
-        primary = self._get_primary_address()
-        if not primary:
-            return pb2.BidResponse(success=False, message="The Judge is out of session")
+        """
+        Submits a bid into the 'Fog'. 
+        Includes a retry loop to handle Judge failover/election periods.
+        """
+        max_retries = 3
+        last_error = "Unknown error"
 
-        # Package the bid for the Judge
-        bid_state = pb2.Auction(
-            auction_id=request.auction_id,
-            lead_bidder_id=request.buyer_id,
-            sealed_bid=request.amount,
-            version=request.expected_version
-        )
+        for attempt in range(max_retries):
+            primary = self._get_primary_address()
+            if not primary:
+                last_error = "No Primary Judge available from Controller"
+                time.sleep(1.5) # Wait for election
+                continue
 
-        try:
-            stub, channel = self._judge_stub(primary)
-            with channel:
-                res = stub.CommitToVault(pb2.CommitRequest(
-                    auction=bid_state,
-                    is_reveal_event=False,
-                    skip_consistency_check=False
-                ), timeout=5.0)
+            # Package the bid for the Judge
+            bid_state = pb2.Auction(
+                auction_id=request.auction_id,
+                lead_bidder_id=request.buyer_id,
+                sealed_bid=request.amount,
+                version=request.expected_version
+            )
 
-                if res.success:
-                    return pb2.BidResponse(
-                        success=True, 
-                        revealed_price=0.0, # The Fog remains
-                        message="Accepted into the fog."
-                    )
-                return pb2.BidResponse(success=False, message=res.message)
+            try:
+                stub, channel = self._judge_stub(primary)
+                with channel:
+                    res = stub.CommitToVault(pb2.CommitRequest(
+                        auction=bid_state,
+                        is_reveal_event=False,
+                        skip_consistency_check=False
+                    ), timeout=3.0)
 
-        except grpc.RpcError as e:
-            return pb2.BidResponse(success=False, message=f"Judge error: {e.details()}")
+                    if res.success:
+                        return pb2.BidResponse(
+                            success=True, 
+                            revealed_price=0.0,
+                            message="Accepted into the fog."
+                        )
+                    
+                    # If the Judge specifically rejected the bid (e.g. too low), 
+                    # don't retry, just return the failure message.
+                    return pb2.BidResponse(success=False, message=res.message)
+
+            except grpc.RpcError as e:
+                last_error = f"Judge connection failed: {e.details()}"
+                print(f"[ServiceNode] Attempt {attempt+1} failed talking to {primary}. Retrying...")
+                time.sleep(1.0) # Backoff before asking the Controller again
+
+        return pb2.BidResponse(success=False, message=f"Vault unreachable: {last_error}")
 
     def DropTheGavel(self, request: pb2.GavelRequest, context) -> pb2.GavelResponse:
         """The Reveal: Lifts the Fog of War for a specific auction."""
@@ -188,6 +206,60 @@ class BlindSidedService(pb2_grpc.BlindSidedServicer):
             masked.lead_bidder_id = "REDACTED"
             return masked
         return auction
+    
+    def JoinLiveAuction(self, request: pb2.AuctionRequest, context):
+        """
+        The 'Live Watcher': Keeps a connection open. 
+        When the Gavel falls in the Vault, the client gets the reveal instantly.
+        """
+        auction_id = request.auction_id
+        last_version = -1
+        
+        print(f"[Fog] Watcher joined for {auction_id}")
+
+        while context.is_active():
+            primary = self._get_primary_address()
+            if not primary:
+                time.sleep(1)
+                continue
+
+            try:
+                stub, channel = self._judge_stub(primary)
+                with channel:
+                    # Look up the auction
+                    res = stub.QueryVault(pb2.QueryRequest(filter=auction_id))
+                    
+                    if res.auctions:
+                        auction = res.auctions[0]
+                        
+                        # Only send data if something actually changed
+                        if auction.version > last_version:
+                            last_version = auction.version
+                            
+                            # Apply the Fog of War masking
+                            update = pb2.AuctionUpdate(
+                                is_revealed=auction.is_revealed,
+                                message="Vault update detected."
+                            )
+                            
+                            if auction.is_revealed:
+                                update.revealed_price = auction.sealed_bid
+                                update.lead_bidder_id = auction.lead_bidder_id
+                                update.message = "🔨 GAVEL FELL: The truth is revealed!"
+                                yield update
+                                return # Close the stream after the reveal
+                            else:
+                                update.revealed_price = 0.0
+                                update.lead_bidder_id = "REDACTED"
+                                yield update
+                
+                # Poll the judge every second to check for changes
+                time.sleep(1)
+                
+            except grpc.RpcError:
+                # If the Primary Judge dies, don't kill the stream! 
+                # Just wait for the Controller to elect a new one.
+                time.sleep(2)
 
 
 def serve() -> None:
