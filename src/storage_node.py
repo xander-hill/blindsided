@@ -82,7 +82,7 @@ class StorageNode(marketplace_pb2_grpc.StorageReplicaServicer):
                         message=f"Fog of War conflict. Version mismatch (Storage: {existing.version})",
                     )
 
-                # 2. Status Check (Is the auction over?)
+                # 2. Status Check (Is the auction already over?)
                 if existing.is_closed:
                     return marketplace_pb2.PutResponse(
                         success=False,
@@ -90,14 +90,21 @@ class StorageNode(marketplace_pb2_grpc.StorageReplicaServicer):
                         message="The Gavel has fallen. Auction is closed.",
                     )
 
-                # 3. The Secret Comparison
-                # If this is a bid (not just a metadata update like description)
-                if incoming_item.highest_bid <= existing.highest_bid:
-                    return marketplace_pb2.PutResponse(
-                        success=False,
-                        current_version=existing.version,
-                        message="Blindsided! Your bid was too low.",
-                    )
+                # 3. The Judge Logic: Distinguish between a Bid and a Close
+                if incoming_item.is_closed:
+                    # HEAL THE DATA: When closing, we must preserve the winning bid/bidder
+                    # otherwise they get overwritten by the empty fields in the UpdateRequest
+                    incoming_item.highest_bid = existing.highest_bid
+                    incoming_item.highest_bidder_id = existing.highest_bidder_id
+                    print(f"[{self.role.upper()}] Gavel falling on {item_id}. Winner: {incoming_item.highest_bidder_id}")
+                else:
+                    # This is a Bid. Perform the Secret Comparison.
+                    if incoming_item.highest_bid <= existing.highest_bid:
+                        return marketplace_pb2.PutResponse(
+                            success=False,
+                            current_version=existing.version,
+                            message="Blindsided! Your bid was too low.",
+                        )
                 
                 # 4. Success: Increment version
                 incoming_item.version = existing.version + 1
@@ -149,7 +156,8 @@ class StorageNode(marketplace_pb2_grpc.StorageReplicaServicer):
                 matches = [
                     item
                     for item in all_items
-                    if filter_text in item.title.lower()
+                    if filter_text in item.item_id.lower()
+                    or filter_text in item.title.lower()
                     or filter_text in item.category.lower()
                     or filter_text in item.description.lower()
                 ]

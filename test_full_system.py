@@ -38,7 +38,7 @@ def run_test():
         print(f"Masked Price returned: {bid_res.current_price}\n")
 
         print("--- STEP 3: Verifying the 'Fog of War' (Query) ---")
-        query_res = stub.QueryItems(pb2.QueryRequest(filter=item_id))
+        query_res = stub.SearchItems(pb2.SearchRequest(query=item_id))
         if query_res.items:
             item = query_res.items[0]
             print(f"Item Status: {'CLOSED' if item.is_closed else 'OPEN'}")
@@ -66,11 +66,32 @@ def run_test():
         print(f"Close Result: {close_res.message}\n")
 
         print("--- STEP 6: Final Verification (The Reveal) ---")
-        final_query = stub.QueryItems(pb2.QueryRequest(filter=item_id))
+        # Step 6 update:
+        # Give the system a moment to settle
+        time.sleep(1)
+
+        # Try to get the specific item
+        final_query = stub.SearchItems(pb2.SearchRequest(query=item_id))
+
+        if not final_query.items:
+            print(f"⚠️ Item {item_id} not found by specific ID. Fetching ALL items...")
+            # Sending an empty query should return everything if your StorageNode logic allows it
+            final_query = stub.SearchItems(pb2.SearchRequest(query=""))
+
         if final_query.items:
-            item = final_query.items[0]
-            print(f"Winning Bid: {item.highest_bid} (Should be 150.0)")
-            print(f"Winner ID: {item.highest_bidder_id} (Should be 'buyer_A')")
+            # Look for our specific item in the list
+            found_item = next((i for i in final_query.items if i.item_id == item_id), None)
+            
+            if found_item:
+                print(f"Success! Item Found.")
+                print(f"Auction Status: {'CLOSED' if found_item.is_closed else 'OPEN'}")
+                print(f"Winning Bid: ${found_item.highest_bid}")
+                print(f"Winner ID: {found_item.highest_bidder_id}")
+            else:
+                print(f"Total items in storage: {len(final_query.items)}")
+                print("Our item_id is missing from the full list. This suggests a save/persistence error.")
+        else:
+            print("Storage is completely empty. The item was lost or never saved.")
 
 if __name__ == "__main__":
     run_test()

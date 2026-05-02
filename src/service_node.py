@@ -126,47 +126,44 @@ class ServiceNode(pb2_grpc.MarketplaceServicer):
             print(f"[ServiceNode] UpdateItem failed on primary {primary}: {e}")
             return pb2.UpdateItemResponse(ok=False, message=f"Storage error: {e.details()}")
 
-    def QueryItems(self, request: pb2.QueryRequest, context) -> pb2.QueryResponse:
+    def SearchItems(self, request: pb2.SearchRequest, context) -> pb2.SearchResponse:
         """
-        Forward a read to any available storage replica.
-        Selecting a random replica distributes read load across the storage
-        layer (matching the multi-arrow fan-out shown in the diagram).
-        Falls back to the primary if no replica list is available.
+        Public API: Maps SearchRequest to internal Storage Query logic.
+        Intercepts the storage response to apply the Fog of War.
         """
         candidates = self._get_all_storage_addresses()
 
-        # spread the work load
         if candidates:
             random.shuffle(candidates)
         else:
             primary = self._get_primary_address()
             if not primary:
-                context.set_code(grpc.StatusCode.UNAVAILABLE)
-                context.set_details("No storage nodes available")
-                return pb2.QueryResponse(ok=False, items=[], items_found=0)
+                return pb2.SearchResponse(ok=False, message="No storage nodes available")
             candidates = [primary]
 
-        last_error = None
+        # Convert the Marketplace SearchRequest to a Storage QueryRequest
+        storage_req = pb2.QueryRequest(filter=request.query)
+
         for addr in candidates:
             try:
                 stub, channel = self._storage_stub(addr)
                 with channel:
-                    response = stub.QueryItems(request, timeout=5.0)
+                    # We still call QueryItems on the STORAGE nodes
+                    response = stub.QueryItems(storage_req, timeout=5.0)
+                    
+                    # Apply the Fog of War masking
                     masked_items = [self._mask_item_for_client(it) for it in response.items]
 
-                    return pb2.QueryResponse(
+                    return pb2.SearchResponse(
                         ok=response.ok,
                         items=masked_items,
-                        items_found=len(masked_items)
+                        message="Results filtered by Fog of War"
                     )
             except grpc.RpcError as e:
-                print(f"[ServiceNode] QueryItems failed on {addr}: {e}")
-                last_error = e
-                continue  # try next replica
+                print(f"[ServiceNode] Search failed on {addr}: {e}")
+                continue 
 
-        context.set_code(grpc.StatusCode.UNAVAILABLE)
-        context.set_details(f"All replicas unreachable. Last error: {last_error}")
-        return pb2.QueryResponse(ok=False, items=[], items_found=0)
+        return pb2.SearchResponse(ok=False, message="All storage replicas unreachable")
     
     def _mask_item_for_client(self, item: pb2.Item) -> pb2.Item:
         """If the auction is still open, hide the sensitive bid data."""
@@ -178,6 +175,51 @@ class ServiceNode(pb2_grpc.MarketplaceServicer):
             masked_item.highest_bidder_id = "HIDDEN"
             return masked_item
         return item
+    
+    def PlaceBid(self, request: pb2.BidRequest, context) -> pb2.BidResponse:
+        """
+        Public API: Entry point for a client to place a hidden bid.
+        Logic: Get Primary -> Convert BidRequest to PutRequest -> Return masked result.
+        """
+        primary = self._get_primary_address()
+        if not primary:
+            return pb2.BidResponse(success=False, message="No primary storage available")
+
+        # Wrap the bid into an Item object for the storage layer
+        # Note: We use highest_bid to store the bid amount
+        bid_item = pb2.Item(
+            item_id=request.item_id,
+            highest_bidder_id=request.buyer_id,
+            highest_bid=request.amount,
+            version=request.expected_version
+        )
+
+        try:
+            stub, channel = self._storage_stub(primary)
+            with channel:
+                # We tell storage this IS an update and to check consistency (price/version)
+                storage_res = stub.PutItem(pb2.PutRequest(
+                    item=bid_item,
+                    is_update=True,
+                    skip_consistency_check=False
+                ), timeout=5.0)
+
+                if storage_res.success:
+                    return pb2.BidResponse(
+                        success=True, 
+                        current_price=0.0, # MASKED: Don't reveal the bid in the response!
+                        new_version=storage_res.current_version,
+                        message="Accepted into the fog"
+                    )
+                else:
+                    return pb2.BidResponse(
+                        success=False, 
+                        message=storage_res.message # Will say "Blindsided!" or "Stale version"
+                    )
+
+        except grpc.RpcError as e:
+            print(f"[ServiceNode] PlaceBid failed on primary {primary}: {e}")
+            return pb2.BidResponse(success=False, message=f"Storage error: {e.details()}")
 
 
 
