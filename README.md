@@ -1,96 +1,77 @@
-# 🌑 BlindSided: The Opaque Auction Vault
+🌑 BlindSided: The Opaque Auction Vault
+BlindSided is a high-integrity, distributed auction system built on the "Fog of War" principle. It enables real-time competitive bidding while keeping individual bid amounts and bidder identities cryptographically isolated until the point of revelation.
 
-**BlindSided** is a high-integrity, distributed auction system built on the "Fog of War" principle. It enables real-time competitive bidding while keeping individual bid amounts and bidder identities cryptographically isolated until the point of revelation.
-
----
-
-## 🏗️ Architecture: The Triple-Threat
-
+🏗️ Architecture: The Triple-Threat
 The system is composed of three primary distributed layers:
 
-- **The Judge (Storage Cluster):** A replicated, stateful vault. It uses **Optimistic Concurrency Control (OCC)** to ensure atomic writes and maintains a sequential version history for every auction.
-- **The Controller (Orchestrator):** The brain of the cluster. It manages health checks, handles leader election, and directs traffic to the current Primary Judge.
-- **The Service Node (API Gateway):** The "Fog" generator. It masks incoming bid data, manages transparent retries for concurrency conflicts, and provides a gRPC interface for clients.
+The Judge (Storage Cluster): A replicated, stateful vault using Optimistic Concurrency Control (OCC) to ensure atomic writes.
 
----
+The Controller (Orchestrator): The cluster brain that manages health checks and handles leader election.
 
-## 🛡️ Proven Resilience
+The Service Node (API Gateway): The "Fog" generator. It masks bid data and provides a gRPC-Web interface via an Envoy Proxy for browser compatibility.
 
-The system has been verified through rigorous **Chaos Monkey** testing:
+🛡️ Recent Progress
+[x] Envoy Proxy Integration: Established a gRPC-Web bridge for React frontend compatibility.
 
-- **Atomic Integrity:** Handled **500 concurrent bids** from 50 unique users with **0% data loss**.
-- **Failover Recovery:** Survived the "assassination" of the Primary Judge mid-traffic.
-- **Self-Healing:** Service Nodes successfully pivoted to a new Leader during a 1.5s election window without dropping client requests or corrupting state.
+[x] K8s Orchestration: Migrated all components into a dedicated Kubernetes namespace with internal discovery.
 
----
+[x] Real-time Opaque Streaming: Implemented JoinLiveAuction streams that push "Fog" updates (high/low ranges) to the UI.
 
-## 🚀 Getting Started
+[x] The Gavel Logic: Added reveal mechanics to transition from masked ranges to the final winning state.
 
-### 1. Prerequisites
+🚀 Essential Commands
 
-- Python 3.10+
-- Docker & Kubernetes (`kubectl` context set)
-- `grpcio-tools`
+1. Deployment & Network
+   Bash
 
-### 2. Spin up the Cluster
+# Deploy/Update the full cluster
 
-# 1. Start the Storage Cluster (Judges) via Kubernetes
+kubectl apply -f k8s/ -n blindsided
 
-kubectl apply -f k8s/storage-deployment.yaml
+# Port-forward the Gateway (Run this in a dedicated terminal)
 
-# 2. Start the Controller (Election Logic)
+kubectl port-forward svc/envoy-svc 8080:8080 -n blindsided
 
-python controller.py
+# Monitor the Service Node logs (The "Fog" logic)
 
-# 3. Start the Service Node (API)
+kubectl logs -l app=service-node -n blindsided -f 2. Vault Interaction Scripts
+Bash
 
-python service_node.py
+# Seed the initial auction (The Rolex)
 
-## 🛰️ API Reference (gRPC)
+python3 scripts/seed_auction.py
 
-| Method                | Role    | Logic                                                 |
-| :-------------------- | :------ | :---------------------------------------------------- |
-| **`OpenAuction`**     | Host    | Initializes a new Vault with a reserve price.         |
-| **`PlaceSecretBid`**  | Buyer   | Submits an opaque bid with transparent OCC retries.   |
-| **`JoinLiveAuction`** | Watcher | A server-side stream providing a "Live Opaque Range." |
-| **`GetStatus`**       | System  | Retrieves current vault version and auction metadata. |
+# Inject a new secret bid
 
----
+python3 scripts/bid.py
 
-## 🧬 Core Technical Concepts
+# End the auction and reveal results
 
-### **The Fog of War (Opaque Range)**
+python3 scripts/gavel.py
+🧬 Core Technical Concepts
+The Fog of War (Opaque Range)
+Instead of broadcasting individual bids, the system broadcasts a Dynamic Range and Bidder Count. This prevents "bid-sniping" and keeps the true price hidden until the Gavel falls.
 
-Unlike traditional auctions, **BlindSided** does not broadcast individual bids. It broadcasts a dynamic **Range** and a **Bidder Count**.
+Optimistic Concurrency (OCC)
+Bids must target a specific version. If the vault state moves while a bid is in flight, the Service Node handles a transparent retry to ensure atomic integrity.
 
-- **Goal:** Maintain competitive pressure.
-- **Result:** No "Winning Margin" leaks to snipers or bots.
+🛣️ Roadmap: What's Next?
+[ ] React UI Enhancements:
 
-### **Optimistic Concurrency (OCC)**
+Thermal Gauge: A visual representation of the bid range (blurrier when wide, sharper when narrow).
 
-Every bid must target a specific `version` of the auction state to prevent the "Lost Update" problem:
+Auction Creator: Move from terminal scripts to a browser-based creation form.
 
-1. **Fetch:** Client retrieves version $N$.
-2. **Submit:** Client submits bid for version $N$.
-3. **Validate:** If the Judge has moved to $N+1$, the Service Node auto-fetches the update and retries.
+[ ] Persistence Layer:
 
-### **Strong Consistency Replication**
+Replace Python dictionaries with PostgreSQL or MongoDB to ensure data survives pod restarts.
 
-Judges operate in a **Leader/Follower** model.
+[ ] Identity & Auth:
 
-> **Note:** A bid is only considered "Vaulted" once the Primary successfully replicates the state change to available Followers, ensuring data survival even during a Primary node failure.
+Implement JWT-based authentication to verify bidder identities and wallet balances.
 
----
+[ ] Settlement Service:
 
-## 🛣️ Roadmap
+A dedicated microservice to trigger mock payments once an auction is revealed.
 
-- [x] **Distributed Replicated Storage**
-- [x] **Controller-led Leader Election**
-- [x] **Chaos/Stress Test Validation**
-- [ ] **Envoy Proxy Integration** (Current Phase)
-- [ ] **React Dashboard** (gRPC-Web)
-- [ ] **Multi-Auction Sharding**
-
----
-
-**BlindSided** — _Bid in the dark. Win in the light._
+BlindSided — Bid in the dark. Win in the light.
