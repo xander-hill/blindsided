@@ -48,28 +48,52 @@ class JudgeNode(pb2_grpc.JudgeNodeServicer):
         with self.cv:
             auction_id = request.auction.auction_id
             existing = self.vault.get(auction_id)
-            incoming = request.auction
+            incoming = request.auction # This contains the new map entry {user: amount}
 
             if not existing:
+                # First time initialization
                 if incoming.version == 0: incoming.version = 1
+                # Initialize reserve_met based on the starting bids (if any)
+                if incoming.bids:
+                    max_bid = max(incoming.bids.values())
+                    incoming.reserve_met = max_bid >= incoming.reserve_price
+            
             elif not request.skip_consistency_check:
+                # --- OCC CHECK ---
                 if incoming.version != existing.version:
                     return pb2.CommitResponse(success=False, message="Fog conflict: Stale version.")
+                
                 if existing.is_revealed:
                     return pb2.CommitResponse(success=False, message="The Gavel has already fallen.")
-                if request.is_reveal_event:
-                    incoming.sealed_bid = existing.sealed_bid
-                    incoming.lead_bidder_id = existing.lead_bidder_id
-                else:
-                    if incoming.sealed_bid <= existing.sealed_bid:
-                        return pb2.CommitResponse(success=False, message="Blindsided! Bid too low.")
-                incoming.version = existing.version + 1
 
+                # --- MERGE LOGIC ---
+                # We start with the existing state and layer the update on top
+                updated_auction = pb2.Auction()
+                updated_auction.CopyFrom(existing)
+                
+                if request.is_reveal_event:
+                    # Logic for Gavel: Lock the state
+                    updated_auction.is_revealed = True
+                else:
+                    # Logic for Bidding: Pillar #3 (Map Overwrite)
+                    # incoming.bids contains the single new bid from ServiceNode
+                    for buyer_id, amount in incoming.bids.items():
+                        updated_auction.bids[buyer_id] = amount
+                    
+                    # Pillar #1: Silent Minimum Check
+                    max_bid = max(updated_auction.bids.values())
+                    updated_auction.reserve_met = max_bid >= updated_auction.reserve_price
+                
+                updated_auction.version = existing.version + 1
+                incoming = updated_auction # This is what we will save and replicate
+
+            # Save to memory
             self.vault[auction_id] = incoming
             
+            # Replicate to Peers
             if self.role == "primary":
                 if not self._replicate_to_peers(incoming):
-                    if existing: self.vault[auction_id] = existing
+                    if existing: self.vault[auction_id] = existing # Rollback
                     return pb2.CommitResponse(success=False, message="Vault replication failed.")
 
             return pb2.CommitResponse(success=True, current_version=incoming.version, message="Vault updated.")

@@ -80,53 +80,56 @@ class BlindSidedService(pb2_grpc.BlindSidedServicer):
 
     def PlaceSecretBid(self, request: pb2.BidRequest, context) -> pb2.BidResponse:
         """
-        Submits a bid into the 'Fog'. 
-        Includes a retry loop to handle Judge failover/election periods.
+        Submits a bid with an internal retry loop for Concurrency Conflicts.
         """
-        max_retries = 3
+        max_retries = 5 # Increased for high-traffic scenarios
         last_error = "Unknown error"
+        
+        # We start with the user's provided version, but we'll update it on retries
+        current_attempt_version = request.expected_version
 
         for attempt in range(max_retries):
             primary = self._get_primary_address()
             if not primary:
-                last_error = "No Primary Judge available from Controller"
-                time.sleep(1.5) # Wait for election
+                time.sleep(1.0)
                 continue
-
-            # Package the bid for the Judge
-            bid_state = pb2.Auction(
-                auction_id=request.auction_id,
-                lead_bidder_id=request.buyer_id,
-                sealed_bid=request.amount,
-                version=request.expected_version
-            )
 
             try:
                 stub, channel = self._judge_stub(primary)
                 with channel:
+                    bid_state = pb2.Auction(
+                        auction_id=request.auction_id,
+                        bids={request.buyer_id: request.amount},
+                        version=current_attempt_version
+                    )
+
                     res = stub.CommitToVault(pb2.CommitRequest(
                         auction=bid_state,
-                        is_reveal_event=False,
-                        skip_consistency_check=False
+                        is_reveal_event=False
                     ), timeout=3.0)
 
                     if res.success:
-                        return pb2.BidResponse(
-                            success=True, 
-                            revealed_price=0.0,
-                            message="Accepted into the fog."
-                        )
-                    
-                    # If the Judge specifically rejected the bid (e.g. too low), 
-                    # don't retry, just return the failure message.
+                        return pb2.BidResponse(success=True, message="Vault Updated.")
+
+                    # --- CONCURRENCY HANDLING ---
+                    if "Stale version" in res.message:
+                        # Logic: The vault moved. Let's peek at the new version and try again.
+                        # We use QueryVault to get the latest version number
+                        q_res = stub.QueryVault(pb2.QueryRequest(filter=request.auction_id))
+                        if q_res.auctions:
+                            current_attempt_version = q_res.auctions[0].version
+                            print(f"[ServiceNode] Version conflict. Retrying with v{current_attempt_version}")
+                            time.sleep(0.05 * (attempt + 1)) # Incremental backoff
+                            continue # Jump to the next iteration of the for-loop
+
+                    # If it's a different error (e.g., Gavel already fell), stop and return.
                     return pb2.BidResponse(success=False, message=res.message)
 
             except grpc.RpcError as e:
                 last_error = f"Judge connection failed: {e.details()}"
-                print(f"[ServiceNode] Attempt {attempt+1} failed talking to {primary}. Retrying...")
-                time.sleep(1.0) # Backoff before asking the Controller again
+                time.sleep(1.0)
 
-        return pb2.BidResponse(success=False, message=f"Vault unreachable: {last_error}")
+        return pb2.BidResponse(success=False, message=f"Vault write contention too high: {last_error}")
 
     def DropTheGavel(self, request: pb2.GavelRequest, context):
         primary = self._get_primary_address()
@@ -189,24 +192,52 @@ class BlindSidedService(pb2_grpc.BlindSidedServicer):
             return pb2.StatusResponse(ok=False, message=str(e))
 
     def _mask_for_fog(self, auction: pb2.Auction) -> pb2.Auction:
-        """The Secrecy Engine."""
+        masked = pb2.Auction()
+        masked.CopyFrom(auction)
+        
         if not auction.is_revealed:
-            masked = pb2.Auction()
-            masked.CopyFrom(auction)
-            masked.sealed_bid = 0.0 
-            masked.lead_bidder_id = "REDACTED"
-            return masked
-        return auction
+            # We delete the map entirely. 
+            # If we don't, the user's computer gets the whole dictionary!
+            masked.bids.clear() 
+            
+        return masked
+
+    def _mask_for_opaque_fog(self, auction: pb2.Auction) -> pb2.AuctionUpdate:
+        """Transforms raw vault data into Opaque Thermal Readings."""
+        
+        if not auction.is_revealed:
+            # Pillar #2: Calculate Opaque Statistics
+            prices = list(auction.bids.values())
+            
+            return pb2.AuctionUpdate(
+                is_revealed=False,
+                message="The Fog is active.",
+                low_range=min(prices) if prices else 0.0,
+                high_range=max(prices) if prices else 0.0,
+                bidder_count=len(prices),
+                reserve_status=auction.reserve_met # Pillar #1
+            )
+        
+        # After Gavel Falls: Reveal the Truth
+        winning_price = max(auction.bids.values()) if auction.bids else 0.0
+        winner_id = max(auction.bids, key=auction.bids.get) if auction.bids else "N/A"
+        
+        return pb2.AuctionUpdate(
+            is_revealed=True,
+            message="🔨 GAVEL FELL!",
+            revealed_price=winning_price,
+            lead_bidder_id=winner_id
+        )
     
     def JoinLiveAuction(self, request: pb2.AuctionRequest, context):
         """
-        The 'Live Watcher': Keeps a connection open. 
-        When the Gavel falls in the Vault, the client gets the reveal instantly.
+        The 'Opaque Watcher': Streams thermal readings of the vault.
+        Reveals the specific winner and price ONLY when the Gavel falls.
         """
         auction_id = request.auction_id
         last_version = -1
         
-        print(f"[Fog] Watcher joined for {auction_id}")
+        print(f"[Opaque Fog] Watcher joined for {auction_id}")
 
         while context.is_active():
             primary = self._get_primary_address()
@@ -217,39 +248,52 @@ class BlindSidedService(pb2_grpc.BlindSidedServicer):
             try:
                 stub, channel = self._judge_stub(primary)
                 with channel:
-                    # Look up the auction
                     res = stub.QueryVault(pb2.QueryRequest(filter=auction_id))
                     
                     if res.auctions:
                         auction = res.auctions[0]
                         
-                        # Only send data if something actually changed
                         if auction.version > last_version:
                             last_version = auction.version
                             
-                            # Apply the Fog of War masking
-                            update = pb2.AuctionUpdate(
-                                is_revealed=auction.is_revealed,
-                                message="Vault update detected."
-                            )
-                            
-                            if auction.is_revealed:
-                                update.revealed_price = auction.sealed_bid
-                                update.lead_bidder_id = auction.lead_bidder_id
-                                update.message = "🔨 GAVEL FELL: The truth is revealed!"
+                            # Prepare the update based on the state (Opaque vs Revealed)
+                            if not auction.is_revealed:
+                                # PILLAR 2: Calculate Opaque Statistics from the Map
+                                prices = list(auction.bids.values())
+                                
+                                update = pb2.AuctionUpdate(
+                                    is_revealed=False,
+                                    message="Vault update detected.",
+                                    low_range=min(prices) if prices else 0.0,
+                                    high_range=max(prices) if prices else 0.0,
+                                    bidder_count=len(prices),
+                                    reserve_status=auction.reserve_met # PILLAR 1
+                                )
                                 yield update
-                                return # Close the stream after the reveal
                             else:
-                                update.revealed_price = 0.0
-                                update.lead_bidder_id = "REDACTED"
+                                # FINAL REVEAL: Calculate winner from the map
+                                if auction.bids:
+                                    winning_price = max(auction.bids.values())
+                                    winner_id = max(auction.bids, key=auction.bids.get)
+                                else:
+                                    winning_price = 0.0
+                                    winner_id = "No Bids Received"
+                                
+                                update = pb2.AuctionUpdate(
+                                    is_revealed=True,
+                                    message="🔨 GAVEL FELL: The truth is revealed!",
+                                    final_price=winning_price,
+                                    winner_id=winner_id,
+                                    # Still include stats for the final UI state
+                                    bidder_count=len(auction.bids),
+                                    reserve_status=auction.reserve_met
+                                )
                                 yield update
+                                return # Close stream after reveal
                 
-                # Poll the judge every second to check for changes
                 time.sleep(1)
                 
             except grpc.RpcError:
-                # If the Primary Judge dies, don't kill the stream! 
-                # Just wait for the Controller to elect a new one.
                 time.sleep(2)
 
 
@@ -264,7 +308,7 @@ def serve() -> None:
         time.sleep(2)
 
     # 3. Start Server
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=100))
     pb2_grpc.add_BlindSidedServicer_to_server(service_instance, server)
     server.add_insecure_port(f"[::]:{SERVICE_PORT}")
     
