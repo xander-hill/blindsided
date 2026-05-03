@@ -1,24 +1,57 @@
-# Python
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
-.venv/
-env/
-venv/
+
+# Environments
 .env
+.venv
+venv/
+ENV/
+env/
 
-# Protobuf
-*_pb2.py
-*_pb2_grpc.py
-*_pb2.pyi
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
 
-# IDEs
-.vscode/
-.idea/
+# Local kubeconfigs or credentials
+.kube/
+kubeconfig
+*.pem
+*.key
+*.crt
 
-# OS
-.DS_Store
-Thumbs.db
+# Terraform (if you use it for the cluster)
+.terraform/
+*.tfstate
+*.tfstate.backup
 
-# Docker/K8s local logs
+# Local Envoy or Proxy logs
 *.log
+envoy-bin/
+
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Production
+build/
+dist/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Local env files
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+.DS_Store
+.idea/
+.vscode/
+*.swp

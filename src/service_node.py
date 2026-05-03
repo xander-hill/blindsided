@@ -6,8 +6,8 @@ import time
 import grpc
 
 # Updated imports for the renamed proto
-from proto.src import blindsided_pb2 as pb2
-from proto.src import blindsided_pb2_grpc as pb2_grpc
+from proto import blindsided_pb2 as pb2
+from proto import blindsided_pb2_grpc as pb2_grpc
 from src.utils.config import NODE_PORT
 
 controller_host = os.getenv("CONTROLLER_HOST", "localhost")
@@ -298,22 +298,20 @@ class BlindSidedService(pb2_grpc.BlindSidedServicer):
 
 
 def serve() -> None:
-    # 1. Instantiate once
+    # 1. Instantiate the service
     service_instance = BlindSidedService()
     
-    # 2. (Optional but recommended) Wait for cluster readiness
-    print("Checking Controller connectivity...")
-    while not service_instance._get_primary_address():
-        print("Waiting for Primary Judge to be elected... retrying in 2s")
-        time.sleep(2)
-
-    # 3. Start Server
+    # 2. START the server first (don't block with a while loop!)
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=100))
     pb2_grpc.add_BlindSidedServicer_to_server(service_instance, server)
     server.add_insecure_port(f"[::]:{SERVICE_PORT}")
     
-    print(f"BlindSided API Gateway active on port {SERVICE_PORT}")
+    print(f"✅ BlindSided API Gateway is now ONLINE on port {SERVICE_PORT}")
     server.start()
+    
+    # 3. Now that we are online, we can just let it run. 
+    # If a user joins an auction before the Judge is ready, 
+    # the JoinLiveAuction method already has a loop to wait.
     server.wait_for_termination()
 
 

@@ -17,7 +17,7 @@ COPY . .
 
 # 6. Generate gRPC code
 # We use -I. so the imports in the generated files match our folder structure
-RUN python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. proto/src/blindsided.proto
+RUN python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. proto/blindsided.proto
 
 # 7. Set PYTHONPATH so Python can find 'src' and 'proto'
 ENV PYTHONPATH=/app

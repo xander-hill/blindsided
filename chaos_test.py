@@ -2,8 +2,8 @@ import grpc
 import threading
 import random
 import time
-from proto.src import blindsided_pb2 as pb2
-from proto.src import blindsided_pb2_grpc as pb2_grpc
+from proto import blindsided_pb2 as pb2
+from proto import blindsided_pb2_grpc as pb2_grpc
 
 # CONFIG
 AUCTION_ID = f"chaos_test_{int(time.time())}"

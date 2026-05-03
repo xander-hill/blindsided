@@ -3,8 +3,8 @@ from concurrent import futures
 import threading
 import time
 
-from proto.src import blindsided_pb2 as pb2
-from proto.src import blindsided_pb2_grpc as pb2_grpc
+from proto import blindsided_pb2 as pb2
+from proto import blindsided_pb2_grpc as pb2_grpc
 from src.utils.config import CONTROLLER_PORT
 
 class Controller(pb2_grpc.ControllerServicer):
