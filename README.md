@@ -26,7 +26,8 @@ The Service Node (API Gateway): The "Fog" generator. It masks bid data and provi
 
 # Deploy/Update the full cluster
 
-kubectl apply -f k8s/ -n blindsided
+kubectl apply -f deploy/kubernetes/
+kubectl apply -f deploy/envoy/kubernetes.yaml
 
 # Port-forward the Gateway (Run this in a dedicated terminal)
 
@@ -48,6 +49,30 @@ python3 scripts/bid.py
 # End the auction and reveal results
 
 python3 scripts/gavel.py
+
+🧪 Testing
+
+Run the fast backend layer and Kubernetes manifest tests without local network access:
+
+```bash
+PYTHONPATH=backend venv/bin/python -m unittest discover -s backend/tests/layers -v
+PYTHONPATH=backend venv/bin/python -m unittest discover -s backend/tests/deployment -v
+```
+
+Run the full backend suite, including in-process gRPC integration and distributed stress tests:
+
+```bash
+PYTHONPATH=backend venv/bin/python -m unittest discover -s backend/tests -v
+```
+
+The full suite starts local gRPC servers on `127.0.0.1`, so sandboxed environments may need permission for local port binding.
+
+Run the frontend build check:
+
+```bash
+npm run build --prefix frontend
+```
+
 🧬 Core Technical Concepts
 The Fog of War (Opaque Range)
 Instead of broadcasting individual bids, the system broadcasts a Dynamic Range and Bidder Count. This prevents "bid-sniping" and keeps the true price hidden until the Gavel falls.

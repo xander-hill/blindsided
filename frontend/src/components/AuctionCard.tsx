@@ -1,4 +1,3 @@
-import React from 'react';
 import { useLiveAuction } from '../hooks/useLiveAuction';
 
 export const AuctionCard = ({ id }: { id: string }) => {

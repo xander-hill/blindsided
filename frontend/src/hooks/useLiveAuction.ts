@@ -4,12 +4,17 @@ import { auctionClient } from '../services/AuctionClient';
 
 export function useLiveAuction(auctionId: string) {
   const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!auctionId) return;
+    if (!auctionId) {
+      setLoading(false);
+      return;
+    }
 
     const abortController = new AbortController();
     let isMounted = true; // Track if the component is still alive
+    setLoading(true);
 
     async function runStream() {
         console.log("📡 Attempting to open gRPC Stream...");
@@ -23,11 +28,15 @@ export function useLiveAuction(auctionId: string) {
             if (!isMounted) break; 
             console.log("✅ Update received:", response);
             setData(response);
+            setLoading(false);
         }
         } catch (err: any) {
         // Only log the error if we didn't intentionally abort it
         if (err.name !== 'AbortError' && isMounted) {
             console.error("❌ Stream crashed:", err);
+        }
+        if (isMounted) {
+            setLoading(false);
         }
         }
     }
@@ -40,5 +49,5 @@ export function useLiveAuction(auctionId: string) {
     };
     }, [auctionId]);
 
-  return { data };
+  return { data, loading };
 }
