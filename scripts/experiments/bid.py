@@ -1,12 +1,6 @@
-import sys
-from pathlib import Path
-
 import grpc
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "backend"))
-
-from blindsided.generated import blindsided_pb2 as pb2
-from blindsided.generated import blindsided_pb2_grpc as pb2_grpc
+from backend.blindsided.generated import blindsided_pb2 as pb2
+from backend.blindsided.generated import blindsided_pb2_grpc as pb2_grpc
 
 def place_bid(amount, buyer_id):
     # Connect through Envoy port-forward

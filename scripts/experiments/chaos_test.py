@@ -1,14 +1,9 @@
 import grpc
 import threading
 import random
-import sys
 import time
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "backend"))
-
-from blindsided.generated import blindsided_pb2 as pb2
-from blindsided.generated import blindsided_pb2_grpc as pb2_grpc
+from backend.blindsided.generated import blindsided_pb2 as pb2
+from backend.blindsided.generated import blindsided_pb2_grpc as pb2_grpc
 
 # CONFIG
 AUCTION_ID = f"chaos_test_{int(time.time())}"
