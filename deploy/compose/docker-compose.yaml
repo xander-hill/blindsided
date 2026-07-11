@@ -1,0 +1,58 @@
+services:
+  controller:
+    build:
+      context: ../..
+      dockerfile: backend/Dockerfile
+    command: python -m blindsided.controller.server
+    ports:
+      - "50050:50050"
+    environment:
+      - CONTROLLER_PORT=50050
+
+  storage-primary:
+    build:
+      context: ../..
+      dockerfile: backend/Dockerfile
+    command: python -m blindsided.storage.server
+    environment:
+      - CONTROLLER_HOST=controller
+      - NODE_PORT=50051
+      - POD_IP=storage-primary
+      - PEER_ADDRESSES=storage-backup:50051
+    depends_on:
+      - controller
+
+  storage-backup:
+    build:
+      context: ../..
+      dockerfile: backend/Dockerfile
+    command: python -m blindsided.storage.server
+    environment:
+      - CONTROLLER_HOST=controller
+      - NODE_PORT=50051
+      - POD_IP=storage-backup
+      - PEER_ADDRESSES=storage-primary:50051
+    depends_on:
+      - controller
+
+  service-node:
+    build:
+      context: ../..
+      dockerfile: backend/Dockerfile
+    command: python -m blindsided.auction_service.server
+    ports:
+      - "50052:50052"
+    environment:
+      - CONTROLLER_HOST=controller
+      - NODE_PORT=50052
+    depends_on:
+      - controller
+
+  envoy:
+    image: envoyproxy/envoy:v1.28-latest
+    volumes:
+      - ../envoy/envoy.yaml:/etc/envoy/envoy.yaml
+    ports:
+      - "8080:8080" # This is the port your React app will talk to
+    depends_on:
+      - service-node

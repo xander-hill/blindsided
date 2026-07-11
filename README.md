@@ -1,56 +1,102 @@
-# 🔨 BlindSided
+🌑 BlindSided: The Opaque Auction Vault
+BlindSided is a high-integrity, distributed auction system built on the "Fog of War" principle. It enables real-time competitive bidding while keeping individual bid amounts and bidder identities cryptographically isolated until the point of revelation.
 
----
+🏗️ Architecture: The Triple-Threat
+The system is composed of three primary distributed layers:
 
-### 🚩 Project Status: Migration & Refactor
+The Judge (Storage Cluster): A replicated, stateful vault using Optimistic Concurrency Control (OCC) to ensure atomic writes.
 
-**Note:** This project is a specialized fork/transfer from a previous Distributed Systems repository.
+The Controller (Orchestrator): The cluster brain that manages health checks and handles leader election.
 
-- **Current Objective:** Transitioning from a standard Marketplace model to a "Blind Bid" Auction architecture.
-- **Immediate Task:** Infrastructure validation (Scaffolding, Dockerization, and gRPC pathing).
-- **Primary Focus:** Ensuring the baseline distributed state (Replication & Sync) is stable before implementing the Auction "Judge" logic.
+The Service Node (API Gateway): The "Fog" generator. It masks bid data and provides a gRPC-Web interface via an Envoy Proxy for browser compatibility.
 
----
+🛡️ Recent Progress
+[x] Envoy Proxy Integration: Established a gRPC-Web bridge for React frontend compatibility.
 
-**"The price is hidden. The stakes are distributed. Don't get blindsided."**
+[x] K8s Orchestration: Migrated all components into a dedicated Kubernetes namespace with internal discovery.
 
-## 🕹️ The Game
+[x] Real-time Opaque Streaming: Implemented JoinLiveAuction streams that push "Fog" updates (high/low ranges) to the UI.
 
-BlindSided is a distributed, high-concurrency auction engine where users bid against the "Fog of War." Unlike a traditional marketplace, prices are strictly confidential. You have one shot to outmaneuver your rivals using nothing but your gut and the current state version.
+[x] The Gavel Logic: Added reveal mechanics to transition from masked ranges to the final winning state.
 
-### ⚔️ Game Mechanics
+🚀 Essential Commands
 
-- **Shadow Bidding:** The `highest_bid` is never revealed until the Gavel falls (Auction Close).
-- **The Judge (Storage Nodes):** Our distributed nodes act as impartial judges, using **Optimistic Locking** to resolve tie-breaks in the dark.
-- **State Transfer:** Even if a node "dies" mid-battle, it can sync the current auction history from the Primary upon rebirth.
-- **The Reveal:** Only when the `is_closed` flag is flipped do the secrets come to light.
+1. Deployment & Network
+   Bash
 
-## 🏗️ Architecture
+# Deploy/Update the full cluster
 
-- **API Gateway (Service Nodes):** The frontline where bids are accepted and masked.
-- **The Vault (Storage Nodes):** A StatefulSet holding the hidden bids in memory with gRPC replication.
-- **The Overseer (Controller):** Manages leader election and keeps the nodes healthy.
+kubectl apply -f deploy/kubernetes/
+kubectl apply -f deploy/envoy/kubernetes.yaml
 
-## 🛠️ Tech Stack
+# Port-forward the Gateway (Run this in a dedicated terminal)
 
-- **Engine:** Python 3.12
-- **Comms:** gRPC & Protobuf
-- **Orchestration:** Kubernetes (Kind)
-- **Consistency:** Multi-node replication with Snapshot Sync
+kubectl port-forward svc/envoy-svc 8080:8080 -n blindsided
 
-## 🛠️ Developer Setup (Task #1)
+# Monitor the Service Node logs (The "Fog" logic)
 
-To ensure the transferred logic is running in the new environment:
+kubectl logs -l app=service-node -n blindsided -f 2. Vault Interaction Scripts
+Bash
 
-1. **Environment:**
-   - [ ] Create and activate `.venv`
-   - [ ] Install dependencies: `pip install -r requirements.txt`
-2. **Protobuf Compilation:**
-   - [ ] Run the compiler:
-         `python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. ./proto/auction.proto`
+# Seed the initial auction (The Rolex)
 
-3. **Local Validation:**
-   - [ ] Build Docker image: `docker build -t blindsided:latest .`
-   - [ ] Deploy to Kind/K8s: `kubectl apply -f k8s/`
-4. **Smoke Test:**
-   - [ ] Verify `storage-0` and `storage-1` can perform a state-sync handshake.
+python3 scripts/seed_auction.py
+
+# Inject a new secret bid
+
+python3 scripts/bid.py
+
+# End the auction and reveal results
+
+python3 scripts/gavel.py
+
+🧪 Testing
+
+Run the fast backend layer and Kubernetes manifest tests without local network access:
+
+```bash
+PYTHONPATH=backend venv/bin/python -m unittest discover -s backend/tests/layers -v
+PYTHONPATH=backend venv/bin/python -m unittest discover -s backend/tests/deployment -v
+```
+
+Run the full backend suite, including in-process gRPC integration and distributed stress tests:
+
+```bash
+PYTHONPATH=backend venv/bin/python -m unittest discover -s backend/tests -v
+```
+
+The full suite starts local gRPC servers on `127.0.0.1`, so sandboxed environments may need permission for local port binding.
+
+Run the frontend build check:
+
+```bash
+npm run build --prefix frontend
+```
+
+🧬 Core Technical Concepts
+The Fog of War (Opaque Range)
+Instead of broadcasting individual bids, the system broadcasts a Dynamic Range and Bidder Count. This prevents "bid-sniping" and keeps the true price hidden until the Gavel falls.
+
+Optimistic Concurrency (OCC)
+Bids must target a specific version. If the vault state moves while a bid is in flight, the Service Node handles a transparent retry to ensure atomic integrity.
+
+🛣️ Roadmap: What's Next?
+[ ] React UI Enhancements:
+
+Thermal Gauge: A visual representation of the bid range (blurrier when wide, sharper when narrow).
+
+Auction Creator: Move from terminal scripts to a browser-based creation form.
+
+[ ] Persistence Layer:
+
+Replace Python dictionaries with PostgreSQL or MongoDB to ensure data survives pod restarts.
+
+[ ] Identity & Auth:
+
+Implement JWT-based authentication to verify bidder identities and wallet balances.
+
+[ ] Settlement Service:
+
+A dedicated microservice to trigger mock payments once an auction is revealed.
+
+BlindSided — Bid in the dark. Win in the light.
