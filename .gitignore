@@ -1,57 +1,78 @@
-# Byte-compiled / optimized / DLL files
+# ==========================
+# Operating System
+# ==========================
+.DS_Store
+Thumbs.db
+
+# ==========================
+# Python
+# ==========================
 __pycache__/
 *.py[cod]
-*$py.class
+*.pyo
+*.pyd
+*.so
 
-# Environments
-.env
-.venv
+.venv/
 venv/
-ENV/
 env/
+ENV/
 
-# Distribution / packaging
-dist/
-build/
-*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
 
-# Local kubeconfigs or credentials
-.kube/
-kubeconfig
-*.pem
-*.key
-*.crt
-
-# Terraform (if you use it for the cluster)
-.terraform/
-*.tfstate
-*.tfstate.backup
-
-# Local Envoy or Proxy logs
-*.log
-envoy-bin/
-
-# Dependencies
+# ==========================
+# Node
+# ==========================
 node_modules/
-.pnp
-.pnp.js
-
-# Production
-build/
-dist/
-
-# Logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Local env files
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+# Build
+dist/
+build/
 
-.DS_Store
-.idea/
+# ==========================
+# IDEs
+# ==========================
 .vscode/
+.idea/
+*.iml
+
+# ==========================
+# Environment
+# ==========================
+.env
+.env.*
+
+# Keep templates
+!.env.example
+
+# ==========================
+# Logs
+# ==========================
+logs/
+*.log
+
+# ==========================
+# Kubernetes
+# ==========================
 *.swp
+
+# ==========================
+# Docker
+# ==========================
+docker-compose.override.yml
+
+# ==========================
+# Testing
+# ==========================
+.pytest_cache/
+
+# ==========================
+# Misc
+# ==========================
+coverage.xml
