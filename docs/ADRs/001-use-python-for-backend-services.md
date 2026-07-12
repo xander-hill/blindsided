@@ -10,20 +10,15 @@
 
 ## Context
 
-The project specification required the backend services to be implemented in
-Python. While this was an external constraint rather than a freely selected
-technology, the implementation language significantly influences development,
-tooling, maintainability, and ecosystem support.
+The project specification required the backend services to be implemented in Python. While this was an external constraint rather than a freely selected technology, the implementation language significantly influences development, tooling, maintainability, and ecosystem support.
 
-This ADR documents why Python was an appropriate fit for the architecture and
-the consequences of adopting it.
+This ADR documents why Python was an appropriate fit for the architecture and the consequences of adopting it.
 
 ## Decision
 
 Implement all backend services in Python.
 
-The backend consists of multiple cooperating services communicating through
-Protocol Buffers and gRPC, with deployment in a containerized environment.
+The backend consists of multiple cooperating services communicating through Protocol Buffers and gRPC, with deployment in a containerized environment.
 
 ## Alternatives Considered
 
@@ -74,14 +69,9 @@ Protocol Buffers and gRPC, with deployment in a containerized environment.
 
 ## Rationale
 
-Although Python was required by the project specification, it aligns well with
-the project's primary objectives.
+Although Python was required by the project specification, it aligns well with the project's primary objectives.
 
-Blindsided emphasizes distributed systems concepts—including replication,
-fault tolerance, synchronization, and service communication—rather than
-maximizing raw computational performance. Python's simplicity and mature gRPC
-ecosystem allowed development effort to focus on architectural behavior rather
-than language complexity.
+Blindsided emphasizes distributed systems concepts—including replication, fault tolerance, synchronization, and service communication—rather than maximizing raw computational performance. Python's simplicity and mature gRPC ecosystem allowed development effort to focus on architectural behavior rather than language complexity.
 
 ## Consequences
 
