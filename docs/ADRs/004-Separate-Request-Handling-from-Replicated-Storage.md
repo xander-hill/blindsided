@@ -66,8 +66,7 @@ Clients would communicate directly with storage nodes.
 
 ## Rationale
 
-Separating the service and storage tiers follows separation of concerns and
-keeps each component focused on a cohesive responsibility.
+Separating the service and storage tiers follows separation of concerns and keeps each component focused on a cohesive responsibility.
 
 The service tier handles client-facing workflows without owning authoritative state. The storage tier concentrates replication and consistency logic in one place. The controller maintains cluster metadata without becoming responsible for auction business rules.
 
@@ -80,8 +79,7 @@ This structure also allows service capacity to scale independently from the fixe
 - Service instances can remain stateless and horizontally scalable.
 - Replication logic is isolated within the storage tier.
 - Storage membership does not change when service capacity changes.
-- Client-facing validation and response shaping are separated from storage
-  representation.
+- Client-facing validation and response shaping are separated from storage representation.
 - Components can be tested and evolved independently.
 - Failure domains and responsibilities are easier to reason about.
 

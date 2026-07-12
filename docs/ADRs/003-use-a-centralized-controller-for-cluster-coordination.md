@@ -12,8 +12,7 @@
 The distributed auction system consists of multiple backend components that must cooperate to process requests, monitor storage replicas, and recover from
 node failures.
 
-The project specification required a centralized controller responsible for request routing, replica membership, health monitoring, and failure detection.
-Within that constraint, the implementation needed to define the controller's responsibilities and interactions with the remaining system components.
+The project specification required a centralized controller responsible for request routing, replica membership, health monitoring, and failure detection. Within that constraint, the implementation needed to define the controller's responsibilities and interactions with the remaining system components.
 
 ## Decision
 
@@ -27,8 +26,7 @@ The controller is responsible for:
 - Coordinating replica registration and replacement.
 - Providing cluster metadata to participating services.
 
-Business logic, auction processing, and replicated state remain outside of the
-controller and are delegated to the service and storage layers.
+Business logic, auction processing, and replicated state remain outside of the controller and are delegated to the service and storage layers.
 
 ## Alternatives Considered
 

@@ -9,8 +9,7 @@
 
 ## Context
 
-The project specification permitted either a Docker-only deployment or a Kubernetes-based deployment. While a container-only architecture would satisfy the functional requirements, Kubernetes offered an opportunity to model
-deployment, networking, service discovery, restart behavior, and service scaling in a manner more representative of modern distributed systems.
+The project specification permitted either a Docker-only deployment or a Kubernetes-based deployment. While a container-only architecture would satisfy the functional requirements, Kubernetes offered an opportunity to model deployment, networking, service discovery, restart behavior, and service scaling in a manner more representative of modern distributed systems.
 
 ## Decision
 

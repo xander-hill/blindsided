@@ -23,8 +23,7 @@ The project specification required the system to:
 - use Protocol Buffers and gRPC for system-to-system communication
 - run in a containerized environment
 - separate request handling from replicated storage
-- include a centralized controller responsible for coordination and replica
-  management
+- include a centralized controller responsible for coordination and replica management
 - support replicated storage
 - tolerate storage replica failures
 - support dynamic scaling of the service tier
