@@ -1,4 +1,5 @@
 import { useLiveAuction } from '../hooks/useLiveAuction';
+import { AuctionState } from '../proto/blindsided';
 
 export const AuctionCard = ({ id }: { id: string }) => {
   const { data, loading } = useLiveAuction(id);
@@ -10,7 +11,7 @@ export const AuctionCard = ({ id }: { id: string }) => {
     <div style={{ border: '1px solid #444', padding: '20px', borderRadius: '8px' }}>
       <h3>Auction ID: {id}</h3>
       
-      {data.isRevealed ? (
+      {data.state === AuctionState.REVEALED ? (
         <div style={{ color: '#00ff00' }}>
           <h4>🔨 GAVEL FELL</h4>
           <p>Winner: {data.winnerId}</p>

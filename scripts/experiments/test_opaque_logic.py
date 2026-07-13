@@ -62,7 +62,7 @@ def run_test():
         break # The next update in the stream will be the reveal
 
     for reveal in stub.JoinLiveAuction(pb2.AuctionRequest(auction_id=auc_id)):
-        if reveal.is_revealed:
+        if reveal.state == pb2.AUCTION_STATE_REVEALED:
             print(f"  [Reveal] Winner: {reveal.winner_id}")
             print(f"  [Reveal] Final Price: ${reveal.final_price}")
             

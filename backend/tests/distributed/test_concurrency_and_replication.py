@@ -51,7 +51,7 @@ class DistributedBehaviorTests(BackendTestCase):
         self.assertTrue(all(result.success for result in results))
         self.assertTrue(gavel.ok)
         self.assertEqual(len(final_status.auction.bids), bidder_count)
-        self.assertTrue(final_status.auction.is_revealed)
+        self.assertEqual(final_status.auction.state, pb2.AUCTION_STATE_REVEALED)
         self.assertEqual(final_status.auction.bids["buyer-11"], 111.0)
 
     def test_primary_storage_allows_degraded_commit_when_peer_is_unreachable(self):

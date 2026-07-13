@@ -26,16 +26,16 @@ An auction has exactly two lifecycle states:
 
 Required behavior:
 
-- An auction MUST begin in the `OPEN` state.
-- An auction MUST transition from `OPEN` to `REVEALED` no more than
+- ✅ An auction MUST begin in the `OPEN` state.
+- ✅ An auction MUST transition from `OPEN` to `REVEALED` no more than
   once.
-- `REVEALED` MUST be a terminal state.
-- A `REVEALED` auction MUST reject all subsequent state mutations.
-- The system MUST perform the reveal transition.
-- The reveal transition MAY be initiated by an authorized request.
+- ✅ `REVEALED` MUST be a terminal state.
+- ✅ A `REVEALED` auction MUST reject all subsequent state mutations.
+- ✅ The system MUST perform the reveal transition.
+- ✅ The reveal transition MAY be initiated by an authorized request.
 - The reveal transition MAY be initiated automatically when the auction
   deadline is reached.
-- The system MUST NOT transition an auction from `REVEALED` back to
+- ✅ The system MUST NOT transition an auction from `REVEALED` back to
   `OPEN`.
 
 ### 2.2 Auction Creation

@@ -57,11 +57,37 @@ class JudgeNode(pb2_grpc.JudgeNodeServicer):
             incoming = request.auction
 
             if not existing:
+                if request.is_reveal_event:
+                    return pb2.CommitResponse(
+                        success=False,
+                        message="Cannot reveal an auction that does not exist.",
+                    )
+                if incoming.state == pb2.AUCTION_STATE_REVEALED:
+                    return pb2.CommitResponse(
+                        success=False,
+                        message="Auction creation must begin open.",
+                    )
+                incoming.state = pb2.AUCTION_STATE_OPEN
                 if incoming.version == 0:
                     incoming.version = 1
                 if incoming.bids:
                     max_bid = max(incoming.bids.values())
                     incoming.reserve_met = max_bid >= incoming.reserve_price
+
+            elif existing.state == pb2.AUCTION_STATE_REVEALED:
+                return pb2.CommitResponse(
+                    success=False,
+                    message="The Gavel has already fallen.",
+                )
+
+            elif (
+                incoming.state == pb2.AUCTION_STATE_REVEALED
+                and not request.is_reveal_event
+            ):
+                return pb2.CommitResponse(
+                    success=False,
+                    message="Reveal requires a reveal event.",
+                )
 
             elif not request.skip_consistency_check:
                 if incoming.version != existing.version:
@@ -70,17 +96,11 @@ class JudgeNode(pb2_grpc.JudgeNodeServicer):
                         message="Fog conflict: Stale version.",
                     )
 
-                if existing.is_revealed:
-                    return pb2.CommitResponse(
-                        success=False,
-                        message="The Gavel has already fallen.",
-                    )
-
                 updated_auction = pb2.Auction()
                 updated_auction.CopyFrom(existing)
 
                 if request.is_reveal_event:
-                    updated_auction.is_revealed = True
+                    updated_auction.state = pb2.AUCTION_STATE_REVEALED
                 else:
                     for buyer_id, amount in incoming.bids.items():
                         updated_auction.bids[buyer_id] = amount

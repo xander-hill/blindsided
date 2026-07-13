@@ -1,4 +1,5 @@
 from google.protobuf.internal import containers as _containers
+from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
 from collections.abc import Iterable as _Iterable, Mapping as _Mapping
@@ -6,8 +7,17 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
+class AuctionState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    AUCTION_STATE_UNSPECIFIED: _ClassVar[AuctionState]
+    AUCTION_STATE_OPEN: _ClassVar[AuctionState]
+    AUCTION_STATE_REVEALED: _ClassVar[AuctionState]
+AUCTION_STATE_UNSPECIFIED: AuctionState
+AUCTION_STATE_OPEN: AuctionState
+AUCTION_STATE_REVEALED: AuctionState
+
 class Auction(_message.Message):
-    __slots__ = ("auction_id", "seller_id", "title", "category", "description", "reserve_price", "bids", "is_revealed", "version", "reserve_met")
+    __slots__ = ("auction_id", "seller_id", "title", "category", "description", "reserve_price", "bids", "state", "version", "reserve_met")
     class BidsEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -22,7 +32,7 @@ class Auction(_message.Message):
     DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
     RESERVE_PRICE_FIELD_NUMBER: _ClassVar[int]
     BIDS_FIELD_NUMBER: _ClassVar[int]
-    IS_REVEALED_FIELD_NUMBER: _ClassVar[int]
+    STATE_FIELD_NUMBER: _ClassVar[int]
     VERSION_FIELD_NUMBER: _ClassVar[int]
     RESERVE_MET_FIELD_NUMBER: _ClassVar[int]
     auction_id: str
@@ -32,10 +42,10 @@ class Auction(_message.Message):
     description: str
     reserve_price: float
     bids: _containers.ScalarMap[str, float]
-    is_revealed: bool
+    state: AuctionState
     version: int
     reserve_met: bool
-    def __init__(self, auction_id: _Optional[str] = ..., seller_id: _Optional[str] = ..., title: _Optional[str] = ..., category: _Optional[str] = ..., description: _Optional[str] = ..., reserve_price: _Optional[float] = ..., bids: _Optional[_Mapping[str, float]] = ..., is_revealed: bool = ..., version: _Optional[int] = ..., reserve_met: bool = ...) -> None: ...
+    def __init__(self, auction_id: _Optional[str] = ..., seller_id: _Optional[str] = ..., title: _Optional[str] = ..., category: _Optional[str] = ..., description: _Optional[str] = ..., reserve_price: _Optional[float] = ..., bids: _Optional[_Mapping[str, float]] = ..., state: _Optional[_Union[AuctionState, str]] = ..., version: _Optional[int] = ..., reserve_met: bool = ...) -> None: ...
 
 class OpenRequest(_message.Message):
     __slots__ = ("auction",)
@@ -136,8 +146,8 @@ class AuctionRequest(_message.Message):
     def __init__(self, auction_id: _Optional[str] = ..., user_id: _Optional[str] = ...) -> None: ...
 
 class AuctionUpdate(_message.Message):
-    __slots__ = ("is_revealed", "message", "high_range", "low_range", "bidder_count", "reserve_status", "final_price", "winner_id")
-    IS_REVEALED_FIELD_NUMBER: _ClassVar[int]
+    __slots__ = ("state", "message", "high_range", "low_range", "bidder_count", "reserve_status", "final_price", "winner_id")
+    STATE_FIELD_NUMBER: _ClassVar[int]
     MESSAGE_FIELD_NUMBER: _ClassVar[int]
     HIGH_RANGE_FIELD_NUMBER: _ClassVar[int]
     LOW_RANGE_FIELD_NUMBER: _ClassVar[int]
@@ -145,7 +155,7 @@ class AuctionUpdate(_message.Message):
     RESERVE_STATUS_FIELD_NUMBER: _ClassVar[int]
     FINAL_PRICE_FIELD_NUMBER: _ClassVar[int]
     WINNER_ID_FIELD_NUMBER: _ClassVar[int]
-    is_revealed: bool
+    state: AuctionState
     message: str
     high_range: float
     low_range: float
@@ -153,7 +163,7 @@ class AuctionUpdate(_message.Message):
     reserve_status: bool
     final_price: float
     winner_id: str
-    def __init__(self, is_revealed: bool = ..., message: _Optional[str] = ..., high_range: _Optional[float] = ..., low_range: _Optional[float] = ..., bidder_count: _Optional[int] = ..., reserve_status: bool = ..., final_price: _Optional[float] = ..., winner_id: _Optional[str] = ...) -> None: ...
+    def __init__(self, state: _Optional[_Union[AuctionState, str]] = ..., message: _Optional[str] = ..., high_range: _Optional[float] = ..., low_range: _Optional[float] = ..., bidder_count: _Optional[int] = ..., reserve_status: bool = ..., final_price: _Optional[float] = ..., winner_id: _Optional[str] = ...) -> None: ...
 
 class CommitRequest(_message.Message):
     __slots__ = ("auction", "is_reveal_event", "skip_consistency_check")

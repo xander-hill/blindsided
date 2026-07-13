@@ -61,7 +61,7 @@ class AuctionServiceTests(BackendTestCase):
                 pb2.Auction(
                     auction_id="auction-1",
                     bids={"buyer-a": 100.0},
-                    is_revealed=False,
+                    state=pb2.AUCTION_STATE_OPEN,
                 )
             ],
         ))
@@ -84,7 +84,7 @@ class AuctionServiceTests(BackendTestCase):
                 pb2.Auction(
                     auction_id="auction-1",
                     bids={"buyer-a": 100.0},
-                    is_revealed=True,
+                    state=pb2.AUCTION_STATE_REVEALED,
                 )
             ],
         ))
@@ -156,13 +156,13 @@ class AuctionServiceTests(BackendTestCase):
         ))
         revealed = service._mask_for_opaque_fog(pb2.Auction(
             bids={"a": 100.0, "b": 250.0},
-            is_revealed=True,
+            state=pb2.AUCTION_STATE_REVEALED,
         ))
 
         self.assertEqual(hidden.low_range, 100.0)
         self.assertEqual(hidden.high_range, 250.0)
         self.assertEqual(hidden.bidder_count, 2)
         self.assertTrue(hidden.reserve_status)
-        self.assertTrue(revealed.is_revealed)
+        self.assertEqual(revealed.state, pb2.AUCTION_STATE_REVEALED)
         self.assertEqual(revealed.final_price, 250.0)
         self.assertEqual(revealed.winner_id, "b")

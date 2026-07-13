@@ -44,7 +44,10 @@ class BackendLifecycleTests(BackendTestCase):
         self.assertEqual(dict(post_bid_status.auction.bids), {})
         self.assertTrue(gavel.ok)
         self.assertTrue(revealed_status.ok)
-        self.assertTrue(revealed_status.auction.is_revealed)
+        self.assertEqual(
+            revealed_status.auction.state,
+            pb2.AUCTION_STATE_REVEALED,
+        )
         self.assertEqual(revealed_status.auction.bids["opening"], 250.0)
         self.assertEqual(revealed_status.auction.bids["buyer-a"], 750.0)
         self.assertTrue(revealed_status.auction.reserve_met)
@@ -76,10 +79,10 @@ class BackendLifecycleTests(BackendTestCase):
                 ), timeout=5)
                 reveal_update = next(reveal_stream)
 
-        self.assertFalse(opaque_update.is_revealed)
+        self.assertEqual(opaque_update.state, pb2.AUCTION_STATE_OPEN)
         self.assertEqual(opaque_update.bidder_count, 1)
         self.assertEqual(opaque_update.low_range, 125.0)
         self.assertEqual(opaque_update.high_range, 125.0)
-        self.assertTrue(reveal_update.is_revealed)
+        self.assertEqual(reveal_update.state, pb2.AUCTION_STATE_REVEALED)
         self.assertEqual(reveal_update.final_price, 125.0)
         self.assertEqual(reveal_update.winner_id, "opening")

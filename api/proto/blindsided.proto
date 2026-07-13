@@ -2,6 +2,12 @@ syntax = "proto3";
 
 package blindsided;
 
+enum AuctionState {
+    AUCTION_STATE_UNSPECIFIED = 0;
+    AUCTION_STATE_OPEN = 1;
+    AUCTION_STATE_REVEALED = 2;
+}
+
 message Auction {
     string auction_id = 1;
     string seller_id = 2;
@@ -10,7 +16,7 @@ message Auction {
     string description = 5;
     float reserve_price = 6;
     map<string, float> bids = 7;
-    bool is_revealed = 8;
+    AuctionState state = 8;
     int32 version = 9;
     bool reserve_met = 10;
 }
@@ -67,7 +73,7 @@ message BidResponse { bool success = 1; string message = 2; }
 
 message AuctionRequest { string auction_id = 1; string user_id = 2; }
 message AuctionUpdate {
-    bool is_revealed = 1;
+    AuctionState state = 1;
     string message = 2;
     float high_range = 3;
     float low_range = 4;
