@@ -140,7 +140,7 @@ class BlindSidedService(pb2_grpc.BlindSidedServicer):
 
             reveal_state = pb2.Auction(
                 auction_id=request.auction_id,
-                is_revealed=True,
+                state=pb2.AUCTION_STATE_REVEALED,
                 version=current_v
             )
 
@@ -205,18 +205,18 @@ class BlindSidedService(pb2_grpc.BlindSidedServicer):
         masked = pb2.Auction()
         masked.CopyFrom(auction)
 
-        if not auction.is_revealed:
+        if auction.state != pb2.AUCTION_STATE_REVEALED:
             masked.bids.clear()
 
         return masked
 
     def _mask_for_opaque_fog(self, auction: pb2.Auction) -> pb2.AuctionUpdate:
         """Transforms raw vault data into Opaque Thermal Readings."""
-        if not auction.is_revealed:
+        if auction.state != pb2.AUCTION_STATE_REVEALED:
             prices = list(auction.bids.values())
 
             return pb2.AuctionUpdate(
-                is_revealed=False,
+                state=pb2.AUCTION_STATE_OPEN,
                 message="The Fog is active.",
                 low_range=min(prices) if prices else 0.0,
                 high_range=max(prices) if prices else 0.0,
@@ -228,7 +228,7 @@ class BlindSidedService(pb2_grpc.BlindSidedServicer):
         winner_id = max(auction.bids, key=auction.bids.get) if auction.bids else "N/A"
 
         return pb2.AuctionUpdate(
-            is_revealed=True,
+            state=pb2.AUCTION_STATE_REVEALED,
             message="GAVEL FELL!",
             final_price=winning_price,
             winner_id=winner_id
@@ -261,11 +261,11 @@ class BlindSidedService(pb2_grpc.BlindSidedServicer):
                         if auction.version > last_version:
                             last_version = auction.version
 
-                            if not auction.is_revealed:
+                            if auction.state != pb2.AUCTION_STATE_REVEALED:
                                 prices = list(auction.bids.values())
 
                                 yield pb2.AuctionUpdate(
-                                    is_revealed=False,
+                                    state=pb2.AUCTION_STATE_OPEN,
                                     message="Vault update detected.",
                                     low_range=min(prices) if prices else 0.0,
                                     high_range=max(prices) if prices else 0.0,
@@ -281,7 +281,7 @@ class BlindSidedService(pb2_grpc.BlindSidedServicer):
                                     winner_id = "No Bids Received"
 
                                 yield pb2.AuctionUpdate(
-                                    is_revealed=True,
+                                    state=pb2.AUCTION_STATE_REVEALED,
                                     message="GAVEL FELL: The truth is revealed!",
                                     final_price=winning_price,
                                     winner_id=winner_id,

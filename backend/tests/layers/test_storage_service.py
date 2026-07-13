@@ -114,7 +114,7 @@ class StorageServiceTests(BackendTestCase):
         )
 
         self.assertTrue(reveal.success)
-        self.assertTrue(judge.vault["auction-1"].is_revealed)
+        self.assertEqual(judge.vault["auction-1"].state, pb2.AUCTION_STATE_REVEALED)
         self.assertFalse(bid_after_reveal.success)
         self.assertNotIn("buyer-b", judge.vault["auction-1"].bids)
 

@@ -46,9 +46,9 @@ export interface Auction {
         [key: string]: number;
     };
     /**
-     * @generated from protobuf field: bool is_revealed = 8
+     * @generated from protobuf field: blindsided.AuctionState state = 8
      */
-    isRevealed: boolean;
+    state: AuctionState;
     /**
      * @generated from protobuf field: int32 version = 9
      */
@@ -228,9 +228,9 @@ export interface AuctionRequest {
  */
 export interface AuctionUpdate {
     /**
-     * @generated from protobuf field: bool is_revealed = 1
+     * @generated from protobuf field: blindsided.AuctionState state = 1
      */
-    isRevealed: boolean;
+    state: AuctionState;
     /**
      * @generated from protobuf field: string message = 2
      */
@@ -502,6 +502,23 @@ export interface ClusterInfoResponse {
      */
     message: string;
 }
+/**
+ * @generated from protobuf enum blindsided.AuctionState
+ */
+export enum AuctionState {
+    /**
+     * @generated from protobuf enum value: AUCTION_STATE_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: AUCTION_STATE_OPEN = 1;
+     */
+    OPEN = 1,
+    /**
+     * @generated from protobuf enum value: AUCTION_STATE_REVEALED = 2;
+     */
+    REVEALED = 2
+}
 // @generated message type with reflection information, may provide speed optimized methods
 class Auction$Type extends MessageType<Auction> {
     constructor() {
@@ -513,7 +530,7 @@ class Auction$Type extends MessageType<Auction> {
             { no: 5, name: "description", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 6, name: "reserve_price", kind: "scalar", T: 2 /*ScalarType.FLOAT*/ },
             { no: 7, name: "bids", kind: "map", K: 9 /*ScalarType.STRING*/, V: { kind: "scalar", T: 2 /*ScalarType.FLOAT*/ } },
-            { no: 8, name: "is_revealed", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 8, name: "state", kind: "enum", T: () => ["blindsided.AuctionState", AuctionState, "AUCTION_STATE_"] },
             { no: 9, name: "version", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 10, name: "reserve_met", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
         ]);
@@ -527,7 +544,7 @@ class Auction$Type extends MessageType<Auction> {
         message.description = "";
         message.reservePrice = 0;
         message.bids = {};
-        message.isRevealed = false;
+        message.state = 0;
         message.version = 0;
         message.reserveMet = false;
         if (value !== undefined)
@@ -560,8 +577,8 @@ class Auction$Type extends MessageType<Auction> {
                 case /* map<string, float> bids */ 7:
                     this.binaryReadMap7(message.bids, reader, options);
                     break;
-                case /* bool is_revealed */ 8:
-                    message.isRevealed = reader.bool();
+                case /* blindsided.AuctionState state */ 8:
+                    message.state = reader.int32();
                     break;
                 case /* int32 version */ 9:
                     message.version = reader.int32();
@@ -618,9 +635,9 @@ class Auction$Type extends MessageType<Auction> {
         /* map<string, float> bids = 7; */
         for (let k of globalThis.Object.keys(message.bids))
             writer.tag(7, WireType.LengthDelimited).fork().tag(1, WireType.LengthDelimited).string(k).tag(2, WireType.Bit32).float(message.bids[k]).join();
-        /* bool is_revealed = 8; */
-        if (message.isRevealed !== false)
-            writer.tag(8, WireType.Varint).bool(message.isRevealed);
+        /* blindsided.AuctionState state = 8; */
+        if (message.state !== 0)
+            writer.tag(8, WireType.Varint).int32(message.state);
         /* int32 version = 9; */
         if (message.version !== 0)
             writer.tag(9, WireType.Varint).int32(message.version);
@@ -1284,7 +1301,7 @@ export const AuctionRequest = new AuctionRequest$Type();
 class AuctionUpdate$Type extends MessageType<AuctionUpdate> {
     constructor() {
         super("blindsided.AuctionUpdate", [
-            { no: 1, name: "is_revealed", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 1, name: "state", kind: "enum", T: () => ["blindsided.AuctionState", AuctionState, "AUCTION_STATE_"] },
             { no: 2, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 3, name: "high_range", kind: "scalar", T: 2 /*ScalarType.FLOAT*/ },
             { no: 4, name: "low_range", kind: "scalar", T: 2 /*ScalarType.FLOAT*/ },
@@ -1296,7 +1313,7 @@ class AuctionUpdate$Type extends MessageType<AuctionUpdate> {
     }
     create(value?: PartialMessage<AuctionUpdate>): AuctionUpdate {
         const message = globalThis.Object.create((this.messagePrototype!));
-        message.isRevealed = false;
+        message.state = 0;
         message.message = "";
         message.highRange = 0;
         message.lowRange = 0;
@@ -1313,8 +1330,8 @@ class AuctionUpdate$Type extends MessageType<AuctionUpdate> {
         while (reader.pos < end) {
             let [fieldNo, wireType] = reader.tag();
             switch (fieldNo) {
-                case /* bool is_revealed */ 1:
-                    message.isRevealed = reader.bool();
+                case /* blindsided.AuctionState state */ 1:
+                    message.state = reader.int32();
                     break;
                 case /* string message */ 2:
                     message.message = reader.string();
@@ -1349,9 +1366,9 @@ class AuctionUpdate$Type extends MessageType<AuctionUpdate> {
         return message;
     }
     internalBinaryWrite(message: AuctionUpdate, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
-        /* bool is_revealed = 1; */
-        if (message.isRevealed !== false)
-            writer.tag(1, WireType.Varint).bool(message.isRevealed);
+        /* blindsided.AuctionState state = 1; */
+        if (message.state !== 0)
+            writer.tag(1, WireType.Varint).int32(message.state);
         /* string message = 2; */
         if (message.message !== "")
             writer.tag(2, WireType.LengthDelimited).string(message.message);
