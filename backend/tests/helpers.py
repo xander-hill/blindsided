@@ -6,6 +6,7 @@ from contextlib import ExitStack, contextmanager
 from unittest import mock
 
 import grpc
+from google.protobuf import timestamp_pb2
 
 from blindsided.auction_service import service as auction_service_module
 from blindsided.auction_service.service import AuctionService
@@ -26,6 +27,10 @@ class ChannelContext:
 
     def __exit__(self, exc_type, exc, tb):
         return False
+
+
+def future_timestamp() -> timestamp_pb2.Timestamp:
+    return timestamp_pb2.Timestamp(seconds=4102444800)
 
 
 def free_port() -> int:

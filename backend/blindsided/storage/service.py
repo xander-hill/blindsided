@@ -64,17 +64,39 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                         success=False,
                         message="Cannot reveal an auction that does not exist.",
                     )
+                if not auction_id.strip():
+                    return pb2.AuctionMutationResponse(
+                        success=False,
+                        message="Auction creation requires an auction id.",
+                    )
+                if not incoming_auction.seller_id.strip():
+                    return pb2.AuctionMutationResponse(
+                        success=False,
+                        message="Auction creation requires a seller id.",
+                    )
+                if not incoming_auction.HasField("ends_at"):
+                    return pb2.AuctionMutationResponse(
+                        success=False,
+                        message="Auction creation requires an immutable closing timestamp.",
+                    )
+                if incoming_auction.reserve_price <= 0:
+                    return pb2.AuctionMutationResponse(
+                        success=False,
+                        message="Auction creation requires a positive reserve price.",
+                    )
+                if incoming_auction.bids:
+                    return pb2.AuctionMutationResponse(
+                        success=False,
+                        message="Auction creation must start with no active bids.",
+                    )
                 if incoming_auction.state == pb2.AUCTION_STATE_REVEALED:
                     return pb2.AuctionMutationResponse(
                         success=False,
                         message="Auction creation must begin open.",
                     )
                 incoming_auction.state = pb2.AUCTION_STATE_OPEN
-                if incoming_auction.version == 0:
-                    incoming_auction.version = 1
-                if incoming_auction.bids:
-                    highest_bid_amount = max(incoming_auction.bids.values())
-                    incoming_auction.reserve_met = highest_bid_amount >= incoming_auction.reserve_price
+                incoming_auction.version = 1
+                incoming_auction.reserve_met = False
 
             elif existing_auction.state == pb2.AUCTION_STATE_REVEALED:
                 return pb2.AuctionMutationResponse(
@@ -91,8 +113,17 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                     message="Reveal requires a reveal event.",
                 )
 
-            elif not request.skip_consistency_check:
-                if incoming_auction.version != existing_auction.version:
+            else:
+                if self._includes_creation_metadata(incoming_auction):
+                    return pb2.AuctionMutationResponse(
+                        success=False,
+                        message="Auction creation properties are immutable.",
+                    )
+
+                if (
+                    not request.skip_consistency_check
+                    and incoming_auction.version != existing_auction.version
+                ):
                     return pb2.AuctionMutationResponse(
                         success=False,
                         message="Fog conflict: Stale version.",
@@ -107,10 +138,13 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                     for bidder_id, amount in incoming_auction.bids.items():
                         updated_auction.bids[bidder_id] = amount
 
-                    highest_bid_amount = max(updated_auction.bids.values())
-                    updated_auction.reserve_met = (
-                        highest_bid_amount >= updated_auction.reserve_price
-                    )
+                    if updated_auction.bids:
+                        highest_bid_amount = max(updated_auction.bids.values())
+                        updated_auction.reserve_met = (
+                            highest_bid_amount >= updated_auction.reserve_price
+                        )
+                    else:
+                        updated_auction.reserve_met = False
 
                 updated_auction.version = existing_auction.version + 1
                 incoming_auction = updated_auction
@@ -131,6 +165,16 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 current_version=incoming_auction.version,
                 message="Vault updated.",
             )
+
+    def _includes_creation_metadata(self, auction: pb2.Auction) -> bool:
+        return (
+            bool(auction.seller_id.strip())
+            or bool(auction.title.strip())
+            or bool(auction.category.strip())
+            or bool(auction.description.strip())
+            or auction.reserve_price > 0
+            or auction.HasField("ends_at")
+        )
 
     def GetAuction(self, request: pb2.GetAuctionRequest, context) -> pb2.GetAuctionResponse:
         with self.state_lock:

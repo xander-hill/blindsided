@@ -6,7 +6,13 @@ import grpc
 from blindsided.controller.service import ControllerService
 from blindsided.generated import blindsided_pb2 as pb2
 from blindsided.generated import blindsided_pb2_grpc as pb2_grpc
-from backend.tests.helpers import BackendTestCase, NoopContext, make_judge, running_backend_stack
+from backend.tests.helpers import (
+    BackendTestCase,
+    NoopContext,
+    future_timestamp,
+    make_judge,
+    running_backend_stack,
+)
 
 
 class DistributedBehaviorTests(BackendTestCase):
@@ -16,21 +22,23 @@ class DistributedBehaviorTests(BackendTestCase):
         with running_backend_stack() as stack:
             with grpc.insecure_channel(stack["auction_addr"]) as channel:
                 stub = pb2_grpc.AuctionServiceStub(channel)
-                opened = stub.CreateAuction(pb2.CreateAuctionRequest(auction=pb2.Auction(
-                    auction_id="chaos-auction",
+                opened = stub.CreateAuction(pb2.CreateAuctionRequest(
+                    seller_id="seller-a",
                     title="Chaos Auction",
                     reserve_price=1000.0,
-                )), timeout=5)
+                    ends_at=future_timestamp(),
+                ), timeout=5)
                 self.assertTrue(opened.ok)
+                auction_id = opened.auction_id
 
             def place_bid(index: int):
                 with grpc.insecure_channel(stack["auction_addr"]) as channel:
                     local_stub = pb2_grpc.AuctionServiceStub(channel)
                     status = local_stub.GetAuction(pb2.GetAuctionRequest(
-                        auction_id="chaos-auction",
+                        auction_id=auction_id,
                     ), timeout=5)
                     return local_stub.PlaceBid(pb2.BidRequest(
-                        auction_id="chaos-auction",
+                        auction_id=auction_id,
                         bidder_id=f"buyer-{index}",
                         amount=100.0 + index,
                         expected_version=status.auction.version,
@@ -42,10 +50,10 @@ class DistributedBehaviorTests(BackendTestCase):
             with grpc.insecure_channel(stack["auction_addr"]) as channel:
                 stub = pb2_grpc.AuctionServiceStub(channel)
                 gavel = stub.RevealAuction(pb2.RevealAuctionRequest(
-                    auction_id="chaos-auction",
+                    auction_id=auction_id,
                 ), timeout=20)
                 final_status = stub.GetAuction(pb2.GetAuctionRequest(
-                    auction_id="chaos-auction",
+                    auction_id=auction_id,
                 ), timeout=20)
 
         self.assertTrue(all(result.success for result in results))
@@ -64,7 +72,10 @@ class DistributedBehaviorTests(BackendTestCase):
         response = judge.ApplyAuctionMutation(
             pb2.AuctionMutationRequest(auction=pb2.Auction(
                 auction_id="degraded-auction",
+                seller_id="seller-a",
                 title="Degraded Auction",
+                reserve_price=100.0,
+                ends_at=future_timestamp(),
             )),
             NoopContext(),
         )

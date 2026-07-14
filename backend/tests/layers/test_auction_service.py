@@ -1,6 +1,9 @@
+from unittest import mock
+from uuid import UUID
+
 from blindsided.auction_service.service import AuctionService
 from blindsided.generated import blindsided_pb2 as pb2
-from backend.tests.helpers import BackendTestCase, ChannelContext, NoopContext
+from backend.tests.helpers import BackendTestCase, ChannelContext, NoopContext, future_timestamp
 
 
 class FakeJudgeStub:
@@ -51,15 +54,65 @@ class AuctionServiceTests(BackendTestCase):
         stub = FakeJudgeStub()
         service = TestableAuctionService(stub)
 
-        response = service.CreateAuction(
-            pb2.CreateAuctionRequest(auction=pb2.Auction(auction_id="auction-1")),
+        with mock.patch(
+            "blindsided.auction_service.service.uuid4",
+            return_value="generated-auction-id",
+        ):
+            response = service.CreateAuction(
+                pb2.CreateAuctionRequest(
+                    seller_id="seller-a",
+                    title="Watch",
+                    category="collectibles",
+                    description="A clean example",
+                    reserve_price=100.0,
+                    ends_at=future_timestamp(),
+                ),
+                NoopContext(),
+            )
+
+        self.assertTrue(response.ok)
+        self.assertEqual(response.auction_id, "generated-auction-id")
+        self.assertEqual(stub.mutations[0].auction.auction_id, "generated-auction-id")
+        self.assertEqual(stub.mutations[0].auction.seller_id, "seller-a")
+        self.assertEqual(stub.mutations[0].auction.title, "Watch")
+        self.assertEqual(stub.mutations[0].auction.category, "collectibles")
+        self.assertEqual(stub.mutations[0].auction.description, "A clean example")
+        self.assertEqual(stub.mutations[0].auction.reserve_price, 100.0)
+        self.assertEqual(stub.mutations[0].auction.ends_at, future_timestamp())
+        self.assertEqual(stub.mutations[0].auction.state, pb2.AUCTION_STATE_OPEN)
+        self.assertEqual(dict(stub.mutations[0].auction.bids), {})
+        self.assertEqual(stub.mutations[0].auction.version, 0)
+        self.assertFalse(stub.mutations[0].auction.reserve_met)
+        self.assertFalse(stub.mutations[0].is_reveal_event)
+
+    def test_create_auction_generates_unique_uuid_ids(self):
+        stub = FakeJudgeStub()
+        service = TestableAuctionService(stub)
+
+        first = service.CreateAuction(
+            pb2.CreateAuctionRequest(
+                seller_id="seller-a",
+                title="First",
+                reserve_price=100.0,
+                ends_at=future_timestamp(),
+            ),
+            NoopContext(),
+        )
+        second = service.CreateAuction(
+            pb2.CreateAuctionRequest(
+                seller_id="seller-a",
+                title="Second",
+                reserve_price=100.0,
+                ends_at=future_timestamp(),
+            ),
             NoopContext(),
         )
 
-        self.assertTrue(response.ok)
-        self.assertEqual(response.auction_id, "auction-1")
-        self.assertEqual(stub.mutations[0].auction.auction_id, "auction-1")
-        self.assertFalse(stub.mutations[0].is_reveal_event)
+        self.assertTrue(first.ok)
+        self.assertTrue(second.ok)
+        self.assertNotEqual(first.auction_id, second.auction_id)
+        self.assertEqual(str(UUID(first.auction_id)), first.auction_id)
+        self.assertEqual(str(UUID(second.auction_id)), second.auction_id)
 
     def test_status_masks_bids_before_reveal(self):
         stub = FakeJudgeStub()

@@ -1,5 +1,5 @@
 from blindsided.generated import blindsided_pb2 as pb2
-from backend.tests.helpers import BackendTestCase, NoopContext, make_judge
+from backend.tests.helpers import BackendTestCase, NoopContext, future_timestamp, make_judge
 
 
 class AuctionLifecycleSpecificationTests(BackendTestCase):
@@ -12,7 +12,10 @@ class AuctionLifecycleSpecificationTests(BackendTestCase):
             pb2.AuctionMutationRequest(
                 auction=pb2.Auction(
                     auction_id="lifecycle-open",
+                    seller_id="seller-a",
                     title="Lifecycle Open",
+                    reserve_price=100.0,
+                    ends_at=future_timestamp(),
                 )
             ),
             NoopContext(),
@@ -25,7 +28,13 @@ class AuctionLifecycleSpecificationTests(BackendTestCase):
         judge = make_judge(role="backup")
         judge.ApplyAuctionMutation(
             pb2.AuctionMutationRequest(
-                auction=pb2.Auction(auction_id="lifecycle-reveal")
+                auction=pb2.Auction(
+                    auction_id="lifecycle-reveal",
+                    seller_id="seller-a",
+                    title="Lifecycle Reveal",
+                    reserve_price=100.0,
+                    ends_at=future_timestamp(),
+                )
             ),
             NoopContext(),
         )

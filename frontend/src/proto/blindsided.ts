@@ -11,6 +11,7 @@ import { UnknownFieldHandler } from "@protobuf-ts/runtime";
 import type { PartialMessage } from "@protobuf-ts/runtime";
 import { reflectionMergePartial } from "@protobuf-ts/runtime";
 import { MessageType } from "@protobuf-ts/runtime";
+import { Timestamp } from "./google/protobuf/timestamp";
 /**
  * @generated from protobuf message blindsided.Auction
  */
@@ -57,6 +58,10 @@ export interface Auction {
      * @generated from protobuf field: bool reserve_met = 10
      */
     reserveMet: boolean;
+    /**
+     * @generated from protobuf field: google.protobuf.Timestamp ends_at = 11
+     */
+    endsAt?: Timestamp;
 }
 // --- Requests & Responses ---
 
@@ -65,9 +70,29 @@ export interface Auction {
  */
 export interface CreateAuctionRequest {
     /**
-     * @generated from protobuf field: blindsided.Auction auction = 1
+     * @generated from protobuf field: string seller_id = 1
      */
-    auction?: Auction;
+    sellerId: string;
+    /**
+     * @generated from protobuf field: string title = 2
+     */
+    title: string;
+    /**
+     * @generated from protobuf field: string category = 3
+     */
+    category: string;
+    /**
+     * @generated from protobuf field: string description = 4
+     */
+    description: string;
+    /**
+     * @generated from protobuf field: float reserve_price = 5
+     */
+    reservePrice: number;
+    /**
+     * @generated from protobuf field: google.protobuf.Timestamp ends_at = 6
+     */
+    endsAt?: Timestamp;
 }
 /**
  * @generated from protobuf message blindsided.CreateAuctionResponse
@@ -506,7 +531,8 @@ class Auction$Type extends MessageType<Auction> {
             { no: 7, name: "bids", kind: "map", K: 9 /*ScalarType.STRING*/, V: { kind: "scalar", T: 2 /*ScalarType.FLOAT*/ } },
             { no: 8, name: "state", kind: "enum", T: () => ["blindsided.AuctionState", AuctionState, "AUCTION_STATE_"] },
             { no: 9, name: "version", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
-            { no: 10, name: "reserve_met", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+            { no: 10, name: "reserve_met", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 11, name: "ends_at", kind: "message", T: () => Timestamp }
         ]);
     }
     create(value?: PartialMessage<Auction>): Auction {
@@ -559,6 +585,9 @@ class Auction$Type extends MessageType<Auction> {
                     break;
                 case /* bool reserve_met */ 10:
                     message.reserveMet = reader.bool();
+                    break;
+                case /* google.protobuf.Timestamp ends_at */ 11:
+                    message.endsAt = Timestamp.internalBinaryRead(reader, reader.uint32(), options, message.endsAt);
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -618,6 +647,9 @@ class Auction$Type extends MessageType<Auction> {
         /* bool reserve_met = 10; */
         if (message.reserveMet !== false)
             writer.tag(10, WireType.Varint).bool(message.reserveMet);
+        /* google.protobuf.Timestamp ends_at = 11; */
+        if (message.endsAt)
+            Timestamp.internalBinaryWrite(message.endsAt, writer.tag(11, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -632,11 +664,21 @@ export const Auction = new Auction$Type();
 class CreateAuctionRequest$Type extends MessageType<CreateAuctionRequest> {
     constructor() {
         super("blindsided.CreateAuctionRequest", [
-            { no: 1, name: "auction", kind: "message", T: () => Auction }
+            { no: 1, name: "seller_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "title", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "category", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "description", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "reserve_price", kind: "scalar", T: 2 /*ScalarType.FLOAT*/ },
+            { no: 6, name: "ends_at", kind: "message", T: () => Timestamp }
         ]);
     }
     create(value?: PartialMessage<CreateAuctionRequest>): CreateAuctionRequest {
         const message = globalThis.Object.create((this.messagePrototype!));
+        message.sellerId = "";
+        message.title = "";
+        message.category = "";
+        message.description = "";
+        message.reservePrice = 0;
         if (value !== undefined)
             reflectionMergePartial<CreateAuctionRequest>(this, message, value);
         return message;
@@ -646,8 +688,23 @@ class CreateAuctionRequest$Type extends MessageType<CreateAuctionRequest> {
         while (reader.pos < end) {
             let [fieldNo, wireType] = reader.tag();
             switch (fieldNo) {
-                case /* blindsided.Auction auction */ 1:
-                    message.auction = Auction.internalBinaryRead(reader, reader.uint32(), options, message.auction);
+                case /* string seller_id */ 1:
+                    message.sellerId = reader.string();
+                    break;
+                case /* string title */ 2:
+                    message.title = reader.string();
+                    break;
+                case /* string category */ 3:
+                    message.category = reader.string();
+                    break;
+                case /* string description */ 4:
+                    message.description = reader.string();
+                    break;
+                case /* float reserve_price */ 5:
+                    message.reservePrice = reader.float();
+                    break;
+                case /* google.protobuf.Timestamp ends_at */ 6:
+                    message.endsAt = Timestamp.internalBinaryRead(reader, reader.uint32(), options, message.endsAt);
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -661,9 +718,24 @@ class CreateAuctionRequest$Type extends MessageType<CreateAuctionRequest> {
         return message;
     }
     internalBinaryWrite(message: CreateAuctionRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
-        /* blindsided.Auction auction = 1; */
-        if (message.auction)
-            Auction.internalBinaryWrite(message.auction, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* string seller_id = 1; */
+        if (message.sellerId !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.sellerId);
+        /* string title = 2; */
+        if (message.title !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.title);
+        /* string category = 3; */
+        if (message.category !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.category);
+        /* string description = 4; */
+        if (message.description !== "")
+            writer.tag(4, WireType.LengthDelimited).string(message.description);
+        /* float reserve_price = 5; */
+        if (message.reservePrice !== 0)
+            writer.tag(5, WireType.Bit32).float(message.reservePrice);
+        /* google.protobuf.Timestamp ends_at = 6; */
+        if (message.endsAt)
+            Timestamp.internalBinaryWrite(message.endsAt, writer.tag(6, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

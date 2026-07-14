@@ -1,20 +1,21 @@
 from unittest import mock
 
 from blindsided.generated import blindsided_pb2 as pb2
-from backend.tests.helpers import BackendTestCase, NoopContext, make_judge
+from backend.tests.helpers import BackendTestCase, NoopContext, future_timestamp, make_judge
 
 
 class StorageServiceTests(BackendTestCase):
-    def test_initial_commit_assigns_version_and_reserve_met(self):
+    def test_initial_commit_assigns_version_and_starts_without_active_bids(self):
         judge = make_judge(role="backup")
 
         response = judge.ApplyAuctionMutation(
             pb2.AuctionMutationRequest(
                 auction=pb2.Auction(
                     auction_id="auction-1",
+                    seller_id="seller-a",
                     title="Chronograph",
                     reserve_price=500.0,
-                    bids={"buyer-a": 650.0},
+                    ends_at=future_timestamp(),
                 )
             ),
             NoopContext(),
@@ -23,7 +24,8 @@ class StorageServiceTests(BackendTestCase):
         self.assertTrue(response.success)
         self.assertEqual(response.current_version, 1)
         self.assertEqual(judge.auction_store["auction-1"].version, 1)
-        self.assertTrue(judge.auction_store["auction-1"].reserve_met)
+        self.assertEqual(dict(judge.auction_store["auction-1"].bids), {})
+        self.assertFalse(judge.auction_store["auction-1"].reserve_met)
 
     def test_commit_rejects_stale_versions_and_preserves_existing_state(self):
         judge = make_judge(role="backup")
