@@ -85,11 +85,11 @@ Each bidder MAY have no more than one active bid per auction.
 
 Required behavior:
 
-- The system MUST enforce at most one active bid per bidder per auction.
-- A new accepted bid from a bidder with an existing active bid MUST
+- ✅ The system MUST enforce at most one active bid per bidder per auction.
+- ✅ A new accepted bid from a bidder with an existing active bid MUST
   replace that bidder's previous active bid.
-- A replaced bid MUST NOT remain eligible to win.
-- A replaced bid MUST NOT count toward distinct active bidder count.
+- ✅ A replaced bid MUST NOT remain eligible to win.
+- ✅ A replaced bid MUST NOT count toward distinct active bidder count.
 
 ### 3.2 Bid Submission
 
