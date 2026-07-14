@@ -14,14 +14,10 @@ CONTROLLER_ADDRESS = f"{controller_host}:{CONTROLLER_PORT}"
 
 
 class AuctionService(pb2_grpc.AuctionServiceServicer):
-    """
-    The API Gateway for the BlindSided system.
-    Enforces the 'Fog of War' by masking sensitive data from the Judge
-    before it reaches the client.
-    """
+    """API layer that hides sealed bid details until an auction is revealed."""
 
     def _get_primary_address(self, force_refresh=False) -> str | None:
-        """Consult the Controller. If force_refresh is True, we don't use cache."""
+        """Ask the controller which storage replica owns authoritative writes."""
         try:
             with grpc.insecure_channel(CONTROLLER_ADDRESS) as ch:
                 stub = pb2_grpc.ClusterControllerStub(ch)
@@ -33,7 +29,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
         return None
 
     def _get_storage_node_addresses(self) -> list[str]:
-        """Fetch all healthy Judge nodes for distributed reads."""
+        """Return storage replicas that can serve stale-tolerant discovery reads."""
         try:
             with grpc.insecure_channel(CONTROLLER_ADDRESS) as ch:
                 stub = pb2_grpc.ClusterControllerStub(ch)
@@ -45,12 +41,12 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
         return []
 
     def _create_storage_stub(self, address: str):
-        """Helper to create a stub for the Storage/Judge layer."""
+        """Create a storage replica client and its owning channel."""
         channel = grpc.insecure_channel(address)
         return pb2_grpc.StorageReplicaServiceStub(channel), channel
 
     def CreateAuction(self, request: pb2.CreateAuctionRequest, context) -> pb2.CreateAuctionResponse:
-        """Initializes a new auction in the vault."""
+        """Persist a new auction through the current primary replica."""
         primary_address = self._get_primary_address()
         if not primary_address:
             return pb2.CreateAuctionResponse(ok=False, message="The Vault is unreachable")
@@ -76,9 +72,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
             return pb2.CreateAuctionResponse(ok=False, message=f"Judge error: {e.details()}")
 
     def PlaceBid(self, request: pb2.BidRequest, context) -> pb2.BidResponse:
-        """
-        Submits a bid with an internal retry loop for Concurrency Conflicts.
-        """
+        """Retry stale-version bid writes against the latest committed version."""
         max_retries = int(os.getenv("BID_MAX_RETRIES", "50"))
         last_error = "Unknown error"
         current_attempt_version = request.expected_version
@@ -156,7 +150,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
             )
 
     def SearchAuctions(self, request: pb2.SearchAuctionsRequest, context) -> pb2.SearchAuctionsResponse:
-        """Queries the vault and applies the Fog masking logic to results."""
+        """Search available replicas and return only public auction fields."""
         candidates = self._get_storage_node_addresses()
         if not candidates:
             primary_address = self._get_primary_address()
@@ -185,7 +179,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
         return pb2.SearchAuctionsResponse(ok=False, message="Vault unreachable")
 
     def GetAuction(self, request: pb2.GetAuctionRequest, context) -> pb2.GetAuctionResponse:
-        """Fetch a single auction, public_auction by the Fog if not revealed."""
+        """Fetch one auction from the primary and hide sealed bids while open."""
         primary_address = self._get_primary_address()
         if not primary_address:
             return pb2.GetAuctionResponse(ok=False, message="Judge unreachable")
@@ -211,7 +205,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
         return public_auction
 
     def _to_public_auction_update(self, auction: pb2.Auction) -> pb2.AuctionUpdate:
-        """Transforms raw vault data into Opaque Thermal Readings."""
+        """Convert private storage state into the live public stream shape."""
         if auction.state != pb2.AUCTION_STATE_REVEALED:
             bid_amounts = list(auction.bids.values())
 
@@ -235,10 +229,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
         )
 
     def WatchAuction(self, request: pb2.AuctionRequest, context):
-        """
-        The 'Opaque Watcher': Streams thermal readings of the vault.
-        Reveals the specific winner and price ONLY when the Gavel falls.
-        """
+        """Stream public auction updates, revealing winner and amount only at close."""
         auction_id = request.auction_id
         last_version = -1
 

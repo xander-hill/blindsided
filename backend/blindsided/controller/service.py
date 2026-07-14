@@ -7,6 +7,8 @@ from blindsided.generated import blindsided_pb2 as pb2
 from blindsided.generated import blindsided_pb2_grpc as pb2_grpc
 
 class ControllerService(pb2_grpc.ClusterControllerServicer):
+    """Tracks storage replicas and promotes a new primary after failures."""
+
     def __init__(self):
         self.lock = threading.Lock()
         self.nodes = {} 
@@ -20,7 +22,6 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
                 self.primary_address = addr
                 print(f"[Controller] Initial Judge assigned as Primary: {addr}")
             print(f"[Controller] Registered node: {addr}")
-            # FIX: Added 'message' to match the updated Proto
             return pb2.RegisterResponse(
                 success=True, 
                 is_primary=(addr == self.primary_address),
@@ -39,7 +40,6 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
 
     def GetClusterInfo(self, request, context):
         with self.lock:
-            # FIX: Added 'message' to match the updated Proto
             return pb2.ClusterInfoResponse(
                 success=True,
                 node_addresses=list(self.nodes.keys()),
@@ -54,7 +54,6 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
                     try:
                         with grpc.insecure_channel(addr) as channel:
                             stub = pb2_grpc.StorageReplicaServiceStub(channel)
-                            # StorageReplicaService.Heartbeat response includes a message field too.
                             response = stub.Heartbeat(pb2.HealthCheckRequest(request_source="CONTROLLER"), timeout=2.0)
                             if not response.alive:
                                 raise Exception("Node reported unhealthy")
@@ -79,7 +78,6 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
         try:
             with grpc.insecure_channel(address) as channel:
                 stub = pb2_grpc.StorageReplicaServiceStub(channel)
-                # StorageReplicaService.PromoteToPrimary returns PromotionResponse(success, message).
                 stub.PromoteToPrimary(pb2.PromotionRequest(new_role="primary"))
                 print(f"[Controller] Node {address} acknowledged promotion.")
         except Exception as e:

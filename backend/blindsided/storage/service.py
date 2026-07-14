@@ -10,6 +10,8 @@ from blindsided.generated import blindsided_pb2_grpc as pb2_grpc
 
 
 class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
+    """Replicated storage layer that owns auction state and version checks."""
+
     def __init__(self) -> None:
         self.state_lock = threading.Condition()
         self.auction_store: dict[str, pb2.Auction] = {}
