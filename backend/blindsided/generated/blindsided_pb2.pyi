@@ -1,3 +1,6 @@
+import datetime
+
+from google.protobuf import timestamp_pb2 as _timestamp_pb2
 from google.protobuf.internal import containers as _containers
 from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 from google.protobuf import descriptor as _descriptor
@@ -17,7 +20,7 @@ AUCTION_STATE_OPEN: AuctionState
 AUCTION_STATE_REVEALED: AuctionState
 
 class Auction(_message.Message):
-    __slots__ = ("auction_id", "seller_id", "title", "category", "description", "reserve_price", "bids", "state", "version", "reserve_met")
+    __slots__ = ("auction_id", "seller_id", "title", "category", "description", "reserve_price", "bids", "state", "version", "reserve_met", "ends_at")
     class BidsEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -35,6 +38,7 @@ class Auction(_message.Message):
     STATE_FIELD_NUMBER: _ClassVar[int]
     VERSION_FIELD_NUMBER: _ClassVar[int]
     RESERVE_MET_FIELD_NUMBER: _ClassVar[int]
+    ENDS_AT_FIELD_NUMBER: _ClassVar[int]
     auction_id: str
     seller_id: str
     title: str
@@ -45,13 +49,24 @@ class Auction(_message.Message):
     state: AuctionState
     version: int
     reserve_met: bool
-    def __init__(self, auction_id: _Optional[str] = ..., seller_id: _Optional[str] = ..., title: _Optional[str] = ..., category: _Optional[str] = ..., description: _Optional[str] = ..., reserve_price: _Optional[float] = ..., bids: _Optional[_Mapping[str, float]] = ..., state: _Optional[_Union[AuctionState, str]] = ..., version: _Optional[int] = ..., reserve_met: bool = ...) -> None: ...
+    ends_at: _timestamp_pb2.Timestamp
+    def __init__(self, auction_id: _Optional[str] = ..., seller_id: _Optional[str] = ..., title: _Optional[str] = ..., category: _Optional[str] = ..., description: _Optional[str] = ..., reserve_price: _Optional[float] = ..., bids: _Optional[_Mapping[str, float]] = ..., state: _Optional[_Union[AuctionState, str]] = ..., version: _Optional[int] = ..., reserve_met: bool = ..., ends_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
 
 class CreateAuctionRequest(_message.Message):
-    __slots__ = ("auction",)
-    AUCTION_FIELD_NUMBER: _ClassVar[int]
-    auction: Auction
-    def __init__(self, auction: _Optional[_Union[Auction, _Mapping]] = ...) -> None: ...
+    __slots__ = ("seller_id", "title", "category", "description", "reserve_price", "ends_at")
+    SELLER_ID_FIELD_NUMBER: _ClassVar[int]
+    TITLE_FIELD_NUMBER: _ClassVar[int]
+    CATEGORY_FIELD_NUMBER: _ClassVar[int]
+    DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
+    RESERVE_PRICE_FIELD_NUMBER: _ClassVar[int]
+    ENDS_AT_FIELD_NUMBER: _ClassVar[int]
+    seller_id: str
+    title: str
+    category: str
+    description: str
+    reserve_price: float
+    ends_at: _timestamp_pb2.Timestamp
+    def __init__(self, seller_id: _Optional[str] = ..., title: _Optional[str] = ..., category: _Optional[str] = ..., description: _Optional[str] = ..., reserve_price: _Optional[float] = ..., ends_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
 
 class CreateAuctionResponse(_message.Message):
     __slots__ = ("ok", "auction_id", "message")

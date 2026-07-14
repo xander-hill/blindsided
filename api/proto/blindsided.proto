@@ -1,5 +1,7 @@
 syntax = "proto3";
 
+import "google/protobuf/timestamp.proto";
+
 package blindsided;
 
 enum AuctionState {
@@ -19,6 +21,7 @@ message Auction {
     AuctionState state = 8;
     int32 version = 9;
     bool reserve_met = 10;
+    google.protobuf.Timestamp ends_at = 11;
 }
 
 service AuctionService {
@@ -48,7 +51,14 @@ service ClusterController {
 
 // --- Requests & Responses ---
 
-message CreateAuctionRequest { Auction auction = 1; }
+message CreateAuctionRequest {
+    string seller_id = 1;
+    string title = 2;
+    string category = 3;
+    string description = 4;
+    float reserve_price = 5;
+    google.protobuf.Timestamp ends_at = 6;
+}
 message CreateAuctionResponse { bool ok = 1; string auction_id = 2; string message = 3; }
 
 message GetAuctionRequest { string auction_id = 1; }

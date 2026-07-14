@@ -2,6 +2,7 @@ import grpc
 import threading
 import random
 import time
+from google.protobuf import timestamp_pb2
 from backend.blindsided.generated import blindsided_pb2 as pb2
 from backend.blindsided.generated import blindsided_pb2_grpc as pb2_grpc
 
@@ -10,6 +11,11 @@ AUCTION_ID = f"chaos_test_{int(time.time())}"
 NUM_BIDDERS = 50
 BIDS_PER_BIDDER = 10
 SERVICE_ADDR = 'localhost:50051'
+
+
+def future_timestamp():
+    return timestamp_pb2.Timestamp(seconds=4102444800)
+
 
 def hammer_the_vault(bidder_id):
     channel = grpc.insecure_channel(SERVICE_ADDR)
@@ -44,15 +50,22 @@ def hammer_the_vault(bidder_id):
                 break
 
 def run_chaos_test():
+    global AUCTION_ID
+
     channel = grpc.insecure_channel(SERVICE_ADDR)
     stub = pb2_grpc.AuctionServiceStub(channel)
 
     print(f"🔥 Starting Chaos Test: {NUM_BIDDERS} bidders, {BIDS_PER_BIDDER} bids each.")
     
     # 1. Open the Auction
-    stub.CreateAuction(pb2.CreateAuctionRequest(auction=pb2.Auction(
-        auction_id=AUCTION_ID, title="Chaos Item", reserve_price=700.0
-    )))
+    opened = stub.CreateAuction(pb2.CreateAuctionRequest(
+        seller_id="seller-chaos",
+        title="Chaos Item",
+        reserve_price=700.0,
+        ends_at=future_timestamp(),
+    ))
+    AUCTION_ID = opened.auction_id
+    print(f"Generated Auction ID: {AUCTION_ID}")
 
     threads = []
     start_time = time.time()

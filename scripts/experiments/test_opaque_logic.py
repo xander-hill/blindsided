@@ -2,11 +2,17 @@ import grpc
 import sys
 import time
 from pathlib import Path
+from google.protobuf import timestamp_pb2
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "backend"))
 
 from backend.blindsided.generated import blindsided_pb2 as pb2
 from backend.blindsided.generated import blindsided_pb2_grpc as pb2_grpc
+
+
+def future_timestamp():
+    return timestamp_pb2.Timestamp(seconds=4102444800)
+
 
 def run_test():
     channel = grpc.insecure_channel('localhost:50051')
@@ -17,9 +23,14 @@ def run_test():
 
     # --- SCENARIO 1: Initialization with Reserve ---
     print("\n1️⃣  Initializing Auction (Reserve: $500)...")
-    stub.CreateAuction(pb2.CreateAuctionRequest(auction=pb2.Auction(
-        auction_id=auc_id, title="Test Item", reserve_price=500.0
-    )))
+    opened = stub.CreateAuction(pb2.CreateAuctionRequest(
+        seller_id="seller-test",
+        title="Test Item",
+        reserve_price=500.0,
+        ends_at=future_timestamp(),
+    ))
+    auc_id = opened.auction_id
+    print(f"Generated Auction ID: {auc_id}")
 
     def get_opaque_stats():
         # Using GetAuction (which we updated to return public_auction data)

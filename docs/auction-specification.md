@@ -42,22 +42,22 @@ Required behavior:
 
 A successful auction creation MUST establish all of the following:
 
-- a unique auction identifier
-- seller identity
-- immutable closing timestamp (`ends_at`)
-- reserve price
-- an empty active bid collection
-- lifecycle state `OPEN`
-- initial auction version
+- ✅ a unique auction identifier
+- ✅ seller identity
+- ✅ immutable closing timestamp (`ends_at`)
+- ✅ reserve price
+- ✅ an empty active bid collection
+- ✅ lifecycle state `OPEN`
+- ✅ initial auction version
 
 Required behavior:
 
-- The auction identifier MUST be unique across all auctions.
-- The seller identity MUST be recorded as part of auction creation.
-- The `ends_at` timestamp MUST NOT be mutable after creation.
-- The active bid collection MUST be empty at creation.
-- The initial auction version MUST be assigned by the system.
-- A creation request that cannot establish every required creation
+- ✅ The auction identifier MUST be unique across all auctions.
+- ✅ The seller identity MUST be recorded as part of auction creation.
+- ✅ The `ends_at` timestamp MUST NOT be mutable after creation.
+- ✅ The active bid collection MUST be empty at creation.
+- ✅ The initial auction version MUST be assigned by the system.
+- ✅ A creation request that cannot establish every required creation
   property MUST fail without creating a partial auction.
 
 ### 2.3 Reserve Price

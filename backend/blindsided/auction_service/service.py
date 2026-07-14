@@ -2,6 +2,8 @@ import os
 import random
 import time
 
+from uuid import uuid4
+
 import grpc
 
 from blindsided.common.config import CONTROLLER_PORT
@@ -51,11 +53,23 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
         if not primary_address:
             return pb2.CreateAuctionResponse(ok=False, message="The Vault is unreachable")
 
+        auction = pb2.Auction(
+            auction_id=str(uuid4()),
+            seller_id=request.seller_id,
+            title=request.title,
+            category=request.category,
+            description=request.description,
+            reserve_price=request.reserve_price,
+            state=pb2.AUCTION_STATE_OPEN,
+        )
+        if request.HasField("ends_at"):
+            auction.ends_at.CopyFrom(request.ends_at)
+
         try:
             stub, channel = self._create_storage_stub(primary_address)
             with channel:
                 response = stub.ApplyAuctionMutation(pb2.AuctionMutationRequest(
-                    auction=request.auction,
+                    auction=auction,
                     is_reveal_event=False,
                     skip_consistency_check=False
                 ), timeout=5.0)
@@ -63,7 +77,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                 if response.success:
                     return pb2.CreateAuctionResponse(
                         ok=True,
-                        auction_id=request.auction.auction_id,
+                        auction_id=auction.auction_id,
                         message="Auction opened in the Vault.",
                     )
                 return pb2.CreateAuctionResponse(ok=False, message=response.message)
