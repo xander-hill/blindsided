@@ -6,7 +6,7 @@ from backend.blindsided.generated import blindsided_pb2_grpc as pb2_grpc
 def run():
     # We hit Envoy, which we know works based on your previous logs
     with grpc.insecure_channel('localhost:8080') as channel:
-        stub = pb2_grpc.BlindSidedStub(channel)
+        stub = pb2_grpc.AuctionServiceStub(channel)
         
         # Create the Rolex auction
         auction = pb2.Auction(
@@ -19,7 +19,7 @@ def run():
         )
         
         print("🌱 Seeding auction 'vintage-rolex'...")
-        resp = stub.OpenAuction(pb2.OpenRequest(auction=auction))
+        resp = stub.CreateAuction(pb2.CreateAuctionRequest(auction=auction))
         print(f"Result: {resp.message}")
 
 if __name__ == "__main__":

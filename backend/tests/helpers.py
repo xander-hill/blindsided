@@ -8,11 +8,11 @@ from unittest import mock
 import grpc
 
 from blindsided.auction_service import service as auction_service_module
-from blindsided.auction_service.service import BlindSidedService
+from blindsided.auction_service.service import AuctionService
 from blindsided.controller.service import ControllerService
 from blindsided.generated import blindsided_pb2_grpc as pb2_grpc
 from blindsided.storage import service as storage_service_module
-from blindsided.storage.service import JudgeNode
+from blindsided.storage.service import StorageReplicaService
 
 
 class NoopContext:
@@ -39,14 +39,14 @@ def make_judge(
     role: str = "backup",
     peers: list[str] | None = None,
     address: str = "storage-0.storage-service:50051",
-) -> JudgeNode:
-    judge = JudgeNode.__new__(JudgeNode)
-    judge.cv = storage_service_module.threading.Condition()
-    judge.vault = {}
+) -> StorageReplicaService:
+    judge = StorageReplicaService.__new__(StorageReplicaService)
+    judge.state_lock = storage_service_module.threading.Condition()
+    judge.auction_store = {}
     judge.port = address.rsplit(":", 1)[-1]
-    judge.role = role
+    judge.replica_role = role
     judge.peer_addresses = peers or []
-    judge.my_full_address = address
+    judge.node_address = address
     return judge
 
 
@@ -63,7 +63,7 @@ def running_backend_stack():
     try:
         controller_service = ControllerService()
         controller_server = grpc.server(futures.ThreadPoolExecutor(max_workers=20))
-        pb2_grpc.add_ControllerServicer_to_server(
+        pb2_grpc.add_ClusterControllerServicer_to_server(
             controller_service,
             controller_server,
         )
@@ -95,9 +95,9 @@ def running_backend_stack():
             str(storage_port),
         ))
 
-        storage_node = JudgeNode()
+        storage_node = StorageReplicaService()
         storage_server = grpc.server(futures.ThreadPoolExecutor(max_workers=40))
-        pb2_grpc.add_JudgeNodeServicer_to_server(storage_node, storage_server)
+        pb2_grpc.add_StorageReplicaServiceServicer_to_server(storage_node, storage_server)
         storage_server.add_insecure_port(storage_addr)
         start(storage_server)
 
@@ -107,8 +107,8 @@ def running_backend_stack():
             "CONTROLLER_ADDRESS",
             controller_addr,
         ))
-        pb2_grpc.add_BlindSidedServicer_to_server(
-            BlindSidedService(),
+        pb2_grpc.add_AuctionServiceServicer_to_server(
+            AuctionService(),
             auction_server,
         )
         auction_port = free_port()

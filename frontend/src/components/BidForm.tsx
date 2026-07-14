@@ -10,9 +10,9 @@ export const BidForm = ({ auctionId }: { auctionId: string }) => {
     setStatus('Transmitting...');
 
     try {
-      const { response } = await auctionClient.placeSecretBid({
+      const { response } = await auctionClient.placeBid({
         auctionId,
-        buyerId: "bidder_01",
+        bidderId: "bidder_01",
         amount,
         expectedVersion: 0
       });

@@ -21,25 +21,26 @@ message Auction {
     bool reserve_met = 10;
 }
 
-service BlindSided {
-    rpc OpenAuction (OpenRequest) returns (OpenResponse);
-    rpc GetStatus (StatusRequest) returns (StatusResponse);
-    rpc SearchAuctions (SearchRequest) returns (SearchResponse);
-    rpc PlaceSecretBid (BidRequest) returns (BidResponse);
-    rpc DropTheGavel (GavelRequest) returns (GavelResponse);
-    rpc JoinLiveAuction (AuctionRequest) returns (stream AuctionUpdate);
+service AuctionService {
+    rpc CreateAuction (CreateAuctionRequest) returns (CreateAuctionResponse);
+    rpc GetAuction (GetAuctionRequest) returns (GetAuctionResponse);
+    rpc SearchAuctions (SearchAuctionsRequest) returns (SearchAuctionsResponse);
+    rpc PlaceBid (BidRequest) returns (BidResponse);
+    rpc RevealAuction (RevealAuctionRequest) returns (RevealAuctionResponse);
+    rpc WatchAuction (AuctionRequest) returns (stream AuctionUpdate);
 }
 
-service JudgeNode {
-    rpc CommitToVault (CommitRequest) returns (CommitResponse);
-    rpc QueryVault (QueryRequest) returns (QueryResponse);
+service StorageReplicaService {
+    rpc ApplyAuctionMutation (AuctionMutationRequest) returns (AuctionMutationResponse);
+    rpc GetAuction (GetAuctionRequest) returns (GetAuctionResponse);
+    rpc SearchAuctions (SearchAuctionsRequest) returns (SearchAuctionsResponse);
     rpc SyncFullState (StateRequest) returns (StateResponse);
-    rpc ReplicateSecret (ReplicationRequest) returns (ReplicationResponse);
+    rpc ReplicateAuction (ReplicationRequest) returns (ReplicationResponse);
     rpc Heartbeat (HealthCheckRequest) returns (HealthCheckResponse);
     rpc PromoteToPrimary (PromotionRequest) returns (PromotionResponse);
 }
 
-service Controller {
+service ClusterController {
     rpc RegisterNode (RegisterRequest) returns (RegisterResponse);
     rpc GetPrimary (GetPrimaryRequest) returns (GetPrimaryResponse);
     rpc GetClusterInfo (ClusterInfoRequest) returns (ClusterInfoResponse);
@@ -47,25 +48,25 @@ service Controller {
 
 // --- Requests & Responses ---
 
-message OpenRequest { Auction auction = 1; }
-message OpenResponse { bool ok = 1; string auction_id = 2; string message = 3; }
+message CreateAuctionRequest { Auction auction = 1; }
+message CreateAuctionResponse { bool ok = 1; string auction_id = 2; string message = 3; }
 
-message StatusRequest { string auction_id = 1; }
-message StatusResponse { bool ok = 1; Auction auction = 2; string message = 3; }
+message GetAuctionRequest { string auction_id = 1; }
+message GetAuctionResponse { bool ok = 1; Auction auction = 2; string message = 3; }
 
-message SearchRequest { string query = 1; string category = 2; }
-message SearchResponse { bool ok = 1; repeated Auction auctions = 2; string message = 3; }
+message SearchAuctionsRequest { string query = 1; string category = 2; }
+message SearchAuctionsResponse { bool ok = 1; repeated Auction auctions = 2; string message = 3; int32 count = 4; }
 
-message GavelRequest { 
+message RevealAuctionRequest {
     string auction_id = 1; 
     string seller_id = 2; 
     int32 expected_version = 3; 
 }
-message GavelResponse { bool ok = 1; int32 final_version = 2; string message = 3; }
+message RevealAuctionResponse { bool ok = 1; int32 final_version = 2; string message = 3; }
 
 message BidRequest {
     string auction_id = 1;
-    string buyer_id = 2;
+    string bidder_id = 2;
     float amount = 3;
     int32 expected_version = 4;
 }
@@ -78,20 +79,17 @@ message AuctionUpdate {
     float high_range = 3;
     float low_range = 4;
     int32 bidder_count = 5;
-    bool reserve_status = 6;
-    float final_price = 7;
-    string winner_id = 8;
+    bool reserve_met = 6;
+    float winning_amount = 7;
+    string winning_bidder_id = 8;
 }
 
-message CommitRequest { 
+message AuctionMutationRequest {
     Auction auction = 1; 
     bool is_reveal_event = 2; 
     bool skip_consistency_check = 3; 
 }
-message CommitResponse { bool success = 1; int32 current_version = 2; string message = 3; }
-
-message QueryRequest { string filter = 1; }
-message QueryResponse { bool ok = 1; repeated Auction auctions = 2; int32 count = 3; string message = 4; }
+message AuctionMutationResponse { bool success = 1; int32 current_version = 2; string message = 3; }
 
 message StateRequest { string requester_id = 1; }
 message StateResponse { bool ok = 1; repeated Auction auctions = 2; string message = 3; }

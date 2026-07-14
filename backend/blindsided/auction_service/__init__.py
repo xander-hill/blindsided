@@ -1,3 +1,3 @@
-from blindsided.auction_service.service import BlindSidedService
+from blindsided.auction_service.service import AuctionService
 
-__all__ = ["BlindSidedService"]
+__all__ = ["AuctionService"]

@@ -15,7 +15,7 @@ The Service Node (API Gateway): The "Fog" generator. It masks bid data and provi
 
 [x] K8s Orchestration: Migrated all components into a dedicated Kubernetes namespace with internal discovery.
 
-[x] Real-time Opaque Streaming: Implemented JoinLiveAuction streams that push "Fog" updates (high/low ranges) to the UI.
+[x] Real-time Opaque Streaming: Implemented WatchAuction streams that push "Fog" updates (high/low ranges) to the UI.
 
 [x] The Gavel Logic: Added reveal mechanics to transition from masked ranges to the final winning state.
 
