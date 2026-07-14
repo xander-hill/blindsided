@@ -155,6 +155,9 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 if not self._replicate_to_peers(incoming_auction):
                     if existing_auction:
                         self.auction_store[auction_id] = existing_auction
+                    else:
+                        del self.auction_store[auction_id]
+                
                     return pb2.AuctionMutationResponse(
                         success=False,
                         message="Vault replication failed.",

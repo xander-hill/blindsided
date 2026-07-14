@@ -144,6 +144,27 @@ class StorageServiceTests(BackendTestCase):
         self.assertEqual(judge.auction_store["auction-1"].version, 1)
         self.assertNotIn("buyer-b", judge.auction_store["auction-1"].bids)
 
+    def test_primary_deletes_new_auction_when_reachable_peer_rejects_replication(self):
+        judge = make_judge(role="primary", peers=["peer-a:50051"])
+
+        with mock.patch.object(judge, "_replicate_to_peers", return_value=False):
+            response = judge.ApplyAuctionMutation(
+                pb2.AuctionMutationRequest(
+                    auction=pb2.Auction(
+                        auction_id="auction-1",
+                        seller_id="seller-a",
+                        title="Chronograph",
+                        reserve_price=500.0,
+                        ends_at=future_timestamp(),
+                    )
+                ),
+                NoopContext(),
+            )
+
+        self.assertFalse(response.success)
+        self.assertIn("replication failed", response.message)
+        self.assertNotIn("auction-1", judge.auction_store)
+
     def test_query_filters_by_id_title_and_description(self):
         judge = make_judge(role="backup")
         judge.auction_store["a-1"] = pb2.Auction(
