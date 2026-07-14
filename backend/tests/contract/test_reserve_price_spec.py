@@ -1,6 +1,12 @@
 from blindsided.auction_service.service import AuctionService
 from blindsided.generated import blindsided_pb2 as pb2
-from backend.tests.helpers import BackendTestCase, NoopContext, future_timestamp, make_judge
+from backend.tests.helpers import (
+    BackendTestCase,
+    NoopContext,
+    active_bid,
+    future_timestamp,
+    make_judge,
+)
 
 
 class ReservePriceSpecificationTests(BackendTestCase):
@@ -46,7 +52,7 @@ class ReservePriceSpecificationTests(BackendTestCase):
 
         update = service._to_public_auction_update(
             pb2.Auction(
-                bids={"buyer-a": 250.0},
+                bids={"buyer-a": active_bid(250.0, 1)},
                 reserve_price=500.0,
                 state=pb2.AUCTION_STATE_OPEN,
             )
@@ -74,7 +80,7 @@ class ReservePriceSpecificationTests(BackendTestCase):
             pb2.Auction(
                 reserve_price=500.0,
                 reserve_met=True,
-                bids={"buyer-a": 750.0},
+                bids={"buyer-a": active_bid(750.0, 1)},
                 state=pb2.AUCTION_STATE_OPEN,
             )
         )
@@ -82,7 +88,7 @@ class ReservePriceSpecificationTests(BackendTestCase):
             pb2.Auction(
                 reserve_price=500.0,
                 reserve_met=True,
-                bids={"buyer-a": 750.0},
+                bids={"buyer-a": active_bid(750.0, 1)},
                 state=pb2.AUCTION_STATE_OPEN,
             )
         )
@@ -97,14 +103,14 @@ class ReservePriceSpecificationTests(BackendTestCase):
 
         below_reserve = service._to_public_auction_update(
             pb2.Auction(
-                bids={"buyer-a": 499.0},
+                bids={"buyer-a": active_bid(499.0, 1)},
                 reserve_price=500.0,
                 state=pb2.AUCTION_STATE_REVEALED,
             )
         )
         meeting_reserve = service._to_public_auction_update(
             pb2.Auction(
-                bids={"buyer-a": 500.0},
+                bids={"buyer-a": active_bid(500.0, 1)},
                 reserve_price=500.0,
                 state=pb2.AUCTION_STATE_REVEALED,
             )
@@ -130,7 +136,7 @@ class ReservePriceSpecificationTests(BackendTestCase):
                 auction=pb2.Auction(
                     auction_id="reserve-finalized-on-reveal",
                     version=1,
-                    bids={"buyer-a": 750.0},
+                    bids={"buyer-a": active_bid(750.0)},
                 )
             ),
             NoopContext(),

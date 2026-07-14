@@ -3,7 +3,13 @@ from unittest import mock
 from google.protobuf import timestamp_pb2
 
 from blindsided.generated import blindsided_pb2 as pb2
-from backend.tests.helpers import BackendTestCase, NoopContext, future_timestamp, make_judge
+from backend.tests.helpers import (
+    BackendTestCase,
+    NoopContext,
+    active_bid,
+    future_timestamp,
+    make_judge,
+)
 
 
 class StorageServiceTests(BackendTestCase):
@@ -35,7 +41,7 @@ class StorageServiceTests(BackendTestCase):
             auction_id="auction-1",
             title="Chronograph",
             version=3,
-            bids={"buyer-a": 300.0},
+            bids={"buyer-a": active_bid(300.0, 1)},
         )
 
         response = judge.ApplyAuctionMutation(
@@ -43,7 +49,7 @@ class StorageServiceTests(BackendTestCase):
                 auction=pb2.Auction(
                     auction_id="auction-1",
                     version=2,
-                    bids={"buyer-b": 400.0},
+                    bids={"buyer-b": active_bid(400.0)},
                 )
             ),
             NoopContext(),
@@ -60,7 +66,8 @@ class StorageServiceTests(BackendTestCase):
             title="Chronograph",
             reserve_price=500.0,
             version=1,
-            bids={"buyer-a": 300.0},
+            next_bid_sequence=2,
+            bids={"buyer-a": active_bid(300.0, 1)},
         )
 
         first = judge.ApplyAuctionMutation(
@@ -68,7 +75,7 @@ class StorageServiceTests(BackendTestCase):
                 auction=pb2.Auction(
                     auction_id="auction-1",
                     version=1,
-                    bids={"buyer-b": 450.0},
+                    bids={"buyer-b": active_bid(450.0)},
                 )
             ),
             NoopContext(),
@@ -78,7 +85,7 @@ class StorageServiceTests(BackendTestCase):
                 auction=pb2.Auction(
                     auction_id="auction-1",
                     version=2,
-                    bids={"buyer-a": 700.0},
+                    bids={"buyer-a": active_bid(700.0)},
                 )
             ),
             NoopContext(),
@@ -87,8 +94,11 @@ class StorageServiceTests(BackendTestCase):
         self.assertTrue(first.success)
         self.assertTrue(second.success)
         self.assertEqual(judge.auction_store["auction-1"].version, 3)
-        self.assertEqual(judge.auction_store["auction-1"].bids["buyer-a"], 700.0)
-        self.assertEqual(judge.auction_store["auction-1"].bids["buyer-b"], 450.0)
+        self.assertEqual(judge.auction_store["auction-1"].bids["buyer-a"].amount, 700.0)
+        self.assertEqual(judge.auction_store["auction-1"].bids["buyer-a"].acceptance_order, 3)
+        self.assertEqual(judge.auction_store["auction-1"].bids["buyer-b"].amount, 450.0)
+        self.assertEqual(judge.auction_store["auction-1"].bids["buyer-b"].acceptance_order, 2)
+        self.assertEqual(judge.auction_store["auction-1"].next_bid_sequence, 4)
         self.assertFalse(judge.auction_store["auction-1"].reserve_met)
 
     def test_commit_rejects_same_buyer_lower_bid_and_preserves_state(self):
@@ -96,7 +106,7 @@ class StorageServiceTests(BackendTestCase):
         judge.auction_store["auction-1"] = pb2.Auction(
             auction_id="auction-1",
             version=1,
-            bids={"buyer-a": 300.0},
+            bids={"buyer-a": active_bid(300.0, 1)},
         )
 
         response = judge.ApplyAuctionMutation(
@@ -104,7 +114,7 @@ class StorageServiceTests(BackendTestCase):
                 auction=pb2.Auction(
                     auction_id="auction-1",
                     version=1,
-                    bids={"buyer-a": 250.0},
+                    bids={"buyer-a": active_bid(250.0)},
                 )
             ),
             NoopContext(),
@@ -112,7 +122,7 @@ class StorageServiceTests(BackendTestCase):
 
         self.assertFalse(response.success)
         self.assertIn("higher", response.message)
-        self.assertEqual(judge.auction_store["auction-1"].bids["buyer-a"], 300.0)
+        self.assertEqual(judge.auction_store["auction-1"].bids["buyer-a"].amount, 300.0)
         self.assertEqual(judge.auction_store["auction-1"].version, 1)
 
     def test_commit_rejects_same_buyer_equal_bid_and_preserves_state(self):
@@ -120,7 +130,7 @@ class StorageServiceTests(BackendTestCase):
         judge.auction_store["auction-1"] = pb2.Auction(
             auction_id="auction-1",
             version=1,
-            bids={"buyer-a": 300.0},
+            bids={"buyer-a": active_bid(300.0, 1)},
         )
 
         response = judge.ApplyAuctionMutation(
@@ -128,7 +138,7 @@ class StorageServiceTests(BackendTestCase):
                 auction=pb2.Auction(
                     auction_id="auction-1",
                     version=1,
-                    bids={"buyer-a": 300.0},
+                    bids={"buyer-a": active_bid(300.0)},
                 )
             ),
             NoopContext(),
@@ -136,7 +146,7 @@ class StorageServiceTests(BackendTestCase):
 
         self.assertFalse(response.success)
         self.assertIn("higher", response.message)
-        self.assertEqual(judge.auction_store["auction-1"].bids["buyer-a"], 300.0)
+        self.assertEqual(judge.auction_store["auction-1"].bids["buyer-a"].amount, 300.0)
         self.assertEqual(judge.auction_store["auction-1"].version, 1)
 
     def test_reveal_calculates_reserve_met_from_final_active_bids(self):
@@ -145,7 +155,7 @@ class StorageServiceTests(BackendTestCase):
             auction_id="auction-1",
             reserve_price=500.0,
             version=1,
-            bids={"buyer-a": 700.0},
+            bids={"buyer-a": active_bid(700.0, 1)},
             reserve_met=False,
         )
 
@@ -174,14 +184,15 @@ class StorageServiceTests(BackendTestCase):
                     auction=pb2.Auction(
                         auction_id="auction-1",
                         version=1,
-                        bids={"buyer-a": 100.0},
+                        bids={"buyer-a": active_bid(100.0)},
                     )
                 ),
                 NoopContext(),
             )
 
         self.assertTrue(response.success)
-        self.assertEqual(judge.auction_store["auction-1"].bids["buyer-a"], 100.0)
+        self.assertEqual(judge.auction_store["auction-1"].bids["buyer-a"].amount, 100.0)
+        self.assertEqual(judge.auction_store["auction-1"].bids["buyer-a"].acceptance_order, 1)
         self.assertEqual(judge.auction_store["auction-1"].version, 2)
 
     def test_bid_at_ends_at_is_rejected_without_mutating_state_or_version(self):
@@ -189,7 +200,7 @@ class StorageServiceTests(BackendTestCase):
         judge.auction_store["auction-1"] = pb2.Auction(
             auction_id="auction-1",
             version=1,
-            bids={"buyer-a": 100.0},
+            bids={"buyer-a": active_bid(100.0, 1)},
             ends_at=timestamp_pb2.Timestamp(seconds=1000),
         )
 
@@ -199,7 +210,7 @@ class StorageServiceTests(BackendTestCase):
                     auction=pb2.Auction(
                         auction_id="auction-1",
                         version=1,
-                        bids={"buyer-b": 200.0},
+                        bids={"buyer-b": active_bid(200.0)},
                     )
                 ),
                 NoopContext(),
@@ -215,7 +226,7 @@ class StorageServiceTests(BackendTestCase):
         judge.auction_store["auction-1"] = pb2.Auction(
             auction_id="auction-1",
             version=1,
-            bids={"buyer-a": 100.0},
+            bids={"buyer-a": active_bid(100.0, 1)},
             ends_at=timestamp_pb2.Timestamp(seconds=1000),
         )
 
@@ -225,7 +236,7 @@ class StorageServiceTests(BackendTestCase):
                     auction=pb2.Auction(
                         auction_id="auction-1",
                         version=1,
-                        bids={"buyer-b": 200.0},
+                        bids={"buyer-b": active_bid(200.0)},
                     )
                 ),
                 NoopContext(),
@@ -241,7 +252,7 @@ class StorageServiceTests(BackendTestCase):
         judge.auction_store["auction-1"] = pb2.Auction(
             auction_id="auction-1",
             version=4,
-            bids={"buyer-a": 900.0},
+            bids={"buyer-a": active_bid(900.0, 1)},
         )
 
         reveal = judge.ApplyAuctionMutation(
@@ -256,7 +267,7 @@ class StorageServiceTests(BackendTestCase):
                 auction=pb2.Auction(
                     auction_id="auction-1",
                     version=5,
-                    bids={"buyer-b": 1000.0},
+                    bids={"buyer-b": active_bid(1000.0)},
                 )
             ),
             NoopContext(),
@@ -272,7 +283,7 @@ class StorageServiceTests(BackendTestCase):
         judge.auction_store["auction-1"] = pb2.Auction(
             auction_id="auction-1",
             version=1,
-            bids={"buyer-a": 100.0},
+            bids={"buyer-a": active_bid(100.0, 1)},
         )
 
         with mock.patch.object(judge, "_replicate_to_peers", return_value=False):
@@ -281,7 +292,7 @@ class StorageServiceTests(BackendTestCase):
                     auction=pb2.Auction(
                         auction_id="auction-1",
                         version=1,
-                        bids={"buyer-b": 200.0},
+                        bids={"buyer-b": active_bid(200.0)},
                     )
                 ),
                 NoopContext(),

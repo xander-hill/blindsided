@@ -9,6 +9,7 @@ from blindsided.generated import blindsided_pb2_grpc as pb2_grpc
 from backend.tests.helpers import (
     BackendTestCase,
     NoopContext,
+    active_bid,
     future_timestamp,
     make_judge,
     running_backend_stack,
@@ -60,7 +61,7 @@ class DistributedBehaviorTests(BackendTestCase):
         self.assertTrue(gavel.ok)
         self.assertEqual(len(final_status.auction.bids), bidder_count)
         self.assertEqual(final_status.auction.state, pb2.AUCTION_STATE_REVEALED)
-        self.assertEqual(final_status.auction.bids["buyer-11"], 111.0)
+        self.assertEqual(final_status.auction.bids["buyer-11"].amount, 111.0)
 
     def test_primary_storage_allows_degraded_commit_when_peer_is_unreachable(self):
         judge = make_judge(
@@ -90,7 +91,7 @@ class DistributedBehaviorTests(BackendTestCase):
             auction_id="replicated-auction",
             title="Replicated Auction",
             version=7,
-            bids={"buyer-a": 400.0},
+            bids={"buyer-a": active_bid(400.0, 1)},
         )
         primary.auction_store[auction.auction_id] = auction
 
@@ -102,6 +103,12 @@ class DistributedBehaviorTests(BackendTestCase):
 
         self.assertTrue(replication.success)
         self.assertEqual(backup.auction_store["replicated-auction"].version, 7)
+        self.assertEqual(
+            backup.auction_store["replicated-auction"]
+            .bids["buyer-a"]
+            .acceptance_order,
+            1,
+        )
         self.assertTrue(state.ok)
         self.assertEqual(state.auctions[0].auction_id, "replicated-auction")
 

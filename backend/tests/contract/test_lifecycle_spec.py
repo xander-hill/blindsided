@@ -1,5 +1,11 @@
 from blindsided.generated import blindsided_pb2 as pb2
-from backend.tests.helpers import BackendTestCase, NoopContext, future_timestamp, make_judge
+from backend.tests.helpers import (
+    BackendTestCase,
+    NoopContext,
+    active_bid,
+    future_timestamp,
+    make_judge,
+)
 
 
 class AuctionLifecycleSpecificationTests(BackendTestCase):
@@ -83,7 +89,7 @@ class AuctionLifecycleSpecificationTests(BackendTestCase):
             auction_id="lifecycle-terminal",
             version=4,
             state=pb2.AUCTION_STATE_REVEALED,
-            bids={"buyer-a": 500.0},
+            bids={"buyer-a": active_bid(500.0, 1)},
         )
 
         response = judge.ApplyAuctionMutation(
@@ -91,7 +97,7 @@ class AuctionLifecycleSpecificationTests(BackendTestCase):
                 auction=pb2.Auction(
                     auction_id="lifecycle-terminal",
                     version=4,
-                    bids={"buyer-b": 750.0},
+                    bids={"buyer-b": active_bid(750.0)},
                 )
             ),
             NoopContext(),

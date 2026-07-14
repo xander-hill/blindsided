@@ -1,6 +1,6 @@
 from blindsided.auction_service.service import AuctionService
 from blindsided.generated import blindsided_pb2 as pb2
-from backend.tests.helpers import BackendTestCase, NoopContext, make_judge
+from backend.tests.helpers import BackendTestCase, NoopContext, active_bid, make_judge
 
 
 class ActiveBidSpecificationTests(BackendTestCase):
@@ -18,7 +18,7 @@ class ActiveBidSpecificationTests(BackendTestCase):
                 auction=pb2.Auction(
                     auction_id="active-one-per-bidder",
                     version=1,
-                    bids={"buyer-a": 100.0},
+                    bids={"buyer-a": active_bid(100.0)},
                 )
             ),
             NoopContext(),
@@ -28,7 +28,7 @@ class ActiveBidSpecificationTests(BackendTestCase):
                 auction=pb2.Auction(
                     auction_id="active-one-per-bidder",
                     version=2,
-                    bids={"buyer-a": 150.0},
+                    bids={"buyer-a": active_bid(150.0)},
                 )
             ),
             NoopContext(),
@@ -37,8 +37,8 @@ class ActiveBidSpecificationTests(BackendTestCase):
         self.assertTrue(first.success)
         self.assertTrue(second.success)
         self.assertEqual(
-            dict(judge.auction_store["active-one-per-bidder"].bids),
-            {"buyer-a": 150.0},
+            judge.auction_store["active-one-per-bidder"].bids["buyer-a"].amount,
+            150.0,
         )
 
     def test_new_accepted_bid_replaces_same_bidder_previous_bid(self):
@@ -46,7 +46,7 @@ class ActiveBidSpecificationTests(BackendTestCase):
         judge.auction_store["active-replacement"] = pb2.Auction(
             auction_id="active-replacement",
             version=1,
-            bids={"buyer-a": 100.0},
+            bids={"buyer-a": active_bid(100.0, 1)},
         )
 
         response = judge.ApplyAuctionMutation(
@@ -54,7 +54,7 @@ class ActiveBidSpecificationTests(BackendTestCase):
                 auction=pb2.Auction(
                     auction_id="active-replacement",
                     version=1,
-                    bids={"buyer-a": 250.0},
+                    bids={"buyer-a": active_bid(250.0)},
                 )
             ),
             NoopContext(),
@@ -63,7 +63,7 @@ class ActiveBidSpecificationTests(BackendTestCase):
         self.assertTrue(response.success)
         self.assertEqual(
             judge.auction_store["active-replacement"].bids["buyer-a"],
-            250.0,
+            active_bid(250.0, 2),
         )
 
     def test_replaced_bid_does_not_remain_eligible_to_win(self):
@@ -73,7 +73,8 @@ class ActiveBidSpecificationTests(BackendTestCase):
             auction_id="active-replaced-not-winner",
             reserve_price=1.0,
             version=1,
-            bids={"buyer-a": 100.0, "buyer-b": 150.0},
+            next_bid_sequence=3,
+            bids={"buyer-a": active_bid(100.0, 1), "buyer-b": active_bid(150.0, 2)},
         )
 
         replace = judge.ApplyAuctionMutation(
@@ -81,7 +82,7 @@ class ActiveBidSpecificationTests(BackendTestCase):
                 auction=pb2.Auction(
                     auction_id="active-replaced-not-winner",
                     version=1,
-                    bids={"buyer-a": 200.0},
+                    bids={"buyer-a": active_bid(200.0)},
                 )
             ),
             NoopContext(),
@@ -110,7 +111,10 @@ class ActiveBidSpecificationTests(BackendTestCase):
 
         update = service._to_public_auction_update(
             pb2.Auction(
-                bids={"buyer-a": 250.0, "buyer-b": 300.0},
+                bids={
+                    "buyer-a": active_bid(250.0, 1),
+                    "buyer-b": active_bid(300.0, 2),
+                },
                 state=pb2.AUCTION_STATE_OPEN,
             )
         )

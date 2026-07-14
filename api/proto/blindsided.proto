@@ -17,11 +17,12 @@ message Auction {
     string category = 4;
     string description = 5;
     float reserve_price = 6;
-    map<string, float> bids = 7;
+    map<string, ActiveBid> bids = 7;
     AuctionState state = 8;
     int32 version = 9;
     bool reserve_met = 10;
     google.protobuf.Timestamp ends_at = 11;
+    int64 next_bid_sequence = 12;
 }
 
 service AuctionService {
@@ -121,3 +122,8 @@ message GetPrimaryResponse { bool success = 1; string primary_address = 2; strin
 
 message ClusterInfoRequest {}
 message ClusterInfoResponse { bool success = 1; repeated string node_addresses = 2; string message = 3; }
+
+message ActiveBid {
+    float amount = 1;
+    int64 acceptance_order = 2;
+}

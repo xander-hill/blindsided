@@ -60,8 +60,10 @@ class BackendLifecycleTests(BackendTestCase):
             revealed_status.auction.state,
             pb2.AUCTION_STATE_REVEALED,
         )
-        self.assertEqual(revealed_status.auction.bids["opening"], 250.0)
-        self.assertEqual(revealed_status.auction.bids["buyer-a"], 750.0)
+        self.assertEqual(revealed_status.auction.bids["opening"].amount, 250.0)
+        self.assertEqual(revealed_status.auction.bids["opening"].acceptance_order, 1)
+        self.assertEqual(revealed_status.auction.bids["buyer-a"].amount, 750.0)
+        self.assertEqual(revealed_status.auction.bids["buyer-a"].acceptance_order, 2)
         self.assertTrue(revealed_status.auction.reserve_met)
 
     def test_live_stream_reports_opaque_update_then_revealed_update(self):

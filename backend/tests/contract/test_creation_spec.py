@@ -1,7 +1,13 @@
 from google.protobuf import timestamp_pb2
 
 from blindsided.generated import blindsided_pb2 as pb2
-from backend.tests.helpers import BackendTestCase, NoopContext, future_timestamp, make_judge
+from backend.tests.helpers import (
+    BackendTestCase,
+    NoopContext,
+    active_bid,
+    future_timestamp,
+    make_judge,
+)
 
 
 class AuctionCreationSpecificationTests(BackendTestCase):
@@ -105,7 +111,7 @@ class AuctionCreationSpecificationTests(BackendTestCase):
                     seller_id="seller-a",
                     title="Creation With Bid",
                     reserve_price=100.0,
-                    bids={"bidder-a": 125.0},
+                    bids={"bidder-a": active_bid(125.0)},
                     ends_at=future_timestamp(),
                 )
             ),

@@ -41,10 +41,10 @@ export interface Auction {
      */
     reservePrice: number;
     /**
-     * @generated from protobuf field: map<string, float> bids = 7
+     * @generated from protobuf field: map<string, blindsided.ActiveBid> bids = 7
      */
     bids: {
-        [key: string]: number;
+        [key: string]: ActiveBid;
     };
     /**
      * @generated from protobuf field: blindsided.AuctionState state = 8
@@ -62,6 +62,10 @@ export interface Auction {
      * @generated from protobuf field: google.protobuf.Timestamp ends_at = 11
      */
     endsAt?: Timestamp;
+    /**
+     * @generated from protobuf field: int64 next_bid_sequence = 12
+     */
+    nextBidSequence: bigint;
 }
 // --- Requests & Responses ---
 
@@ -502,6 +506,19 @@ export interface ClusterInfoResponse {
     message: string;
 }
 /**
+ * @generated from protobuf message blindsided.ActiveBid
+ */
+export interface ActiveBid {
+    /**
+     * @generated from protobuf field: float amount = 1
+     */
+    amount: number;
+    /**
+     * @generated from protobuf field: int64 acceptance_order = 2
+     */
+    acceptanceOrder: bigint;
+}
+/**
  * @generated from protobuf enum blindsided.AuctionState
  */
 export enum AuctionState {
@@ -528,11 +545,12 @@ class Auction$Type extends MessageType<Auction> {
             { no: 4, name: "category", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 5, name: "description", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 6, name: "reserve_price", kind: "scalar", T: 2 /*ScalarType.FLOAT*/ },
-            { no: 7, name: "bids", kind: "map", K: 9 /*ScalarType.STRING*/, V: { kind: "scalar", T: 2 /*ScalarType.FLOAT*/ } },
+            { no: 7, name: "bids", kind: "map", K: 9 /*ScalarType.STRING*/, V: { kind: "message", T: () => ActiveBid } },
             { no: 8, name: "state", kind: "enum", T: () => ["blindsided.AuctionState", AuctionState, "AUCTION_STATE_"] },
             { no: 9, name: "version", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 10, name: "reserve_met", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
-            { no: 11, name: "ends_at", kind: "message", T: () => Timestamp }
+            { no: 11, name: "ends_at", kind: "message", T: () => Timestamp },
+            { no: 12, name: "next_bid_sequence", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<Auction>): Auction {
@@ -547,6 +565,7 @@ class Auction$Type extends MessageType<Auction> {
         message.state = 0;
         message.version = 0;
         message.reserveMet = false;
+        message.nextBidSequence = 0n;
         if (value !== undefined)
             reflectionMergePartial<Auction>(this, message, value);
         return message;
@@ -574,7 +593,7 @@ class Auction$Type extends MessageType<Auction> {
                 case /* float reserve_price */ 6:
                     message.reservePrice = reader.float();
                     break;
-                case /* map<string, float> bids */ 7:
+                case /* map<string, blindsided.ActiveBid> bids */ 7:
                     this.binaryReadMap7(message.bids, reader, options);
                     break;
                 case /* blindsided.AuctionState state */ 8:
@@ -588,6 +607,9 @@ class Auction$Type extends MessageType<Auction> {
                     break;
                 case /* google.protobuf.Timestamp ends_at */ 11:
                     message.endsAt = Timestamp.internalBinaryRead(reader, reader.uint32(), options, message.endsAt);
+                    break;
+                case /* int64 next_bid_sequence */ 12:
+                    message.nextBidSequence = reader.int64().toBigInt();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -609,12 +631,12 @@ class Auction$Type extends MessageType<Auction> {
                     key = reader.string();
                     break;
                 case 2:
-                    val = reader.float();
+                    val = ActiveBid.internalBinaryRead(reader, reader.uint32(), options);
                     break;
                 default: throw new globalThis.Error("unknown map entry field for blindsided.Auction.bids");
             }
         }
-        map[key ?? ""] = val ?? 0;
+        map[key ?? ""] = val ?? ActiveBid.create();
     }
     internalBinaryWrite(message: Auction, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
         /* string auction_id = 1; */
@@ -635,9 +657,13 @@ class Auction$Type extends MessageType<Auction> {
         /* float reserve_price = 6; */
         if (message.reservePrice !== 0)
             writer.tag(6, WireType.Bit32).float(message.reservePrice);
-        /* map<string, float> bids = 7; */
-        for (let k of globalThis.Object.keys(message.bids))
-            writer.tag(7, WireType.LengthDelimited).fork().tag(1, WireType.LengthDelimited).string(k).tag(2, WireType.Bit32).float(message.bids[k]).join();
+        /* map<string, blindsided.ActiveBid> bids = 7; */
+        for (let k of globalThis.Object.keys(message.bids)) {
+            writer.tag(7, WireType.LengthDelimited).fork().tag(1, WireType.LengthDelimited).string(k);
+            writer.tag(2, WireType.LengthDelimited).fork();
+            ActiveBid.internalBinaryWrite(message.bids[k], writer, options);
+            writer.join().join();
+        }
         /* blindsided.AuctionState state = 8; */
         if (message.state !== 0)
             writer.tag(8, WireType.Varint).int32(message.state);
@@ -650,6 +676,9 @@ class Auction$Type extends MessageType<Auction> {
         /* google.protobuf.Timestamp ends_at = 11; */
         if (message.endsAt)
             Timestamp.internalBinaryWrite(message.endsAt, writer.tag(11, WireType.LengthDelimited).fork(), options).join();
+        /* int64 next_bid_sequence = 12; */
+        if (message.nextBidSequence !== 0n)
+            writer.tag(12, WireType.Varint).int64(message.nextBidSequence);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -2339,6 +2368,61 @@ class ClusterInfoResponse$Type extends MessageType<ClusterInfoResponse> {
  * @generated MessageType for protobuf message blindsided.ClusterInfoResponse
  */
 export const ClusterInfoResponse = new ClusterInfoResponse$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ActiveBid$Type extends MessageType<ActiveBid> {
+    constructor() {
+        super("blindsided.ActiveBid", [
+            { no: 1, name: "amount", kind: "scalar", T: 2 /*ScalarType.FLOAT*/ },
+            { no: 2, name: "acceptance_order", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ActiveBid>): ActiveBid {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.amount = 0;
+        message.acceptanceOrder = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<ActiveBid>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ActiveBid): ActiveBid {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* float amount */ 1:
+                    message.amount = reader.float();
+                    break;
+                case /* int64 acceptance_order */ 2:
+                    message.acceptanceOrder = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ActiveBid, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* float amount = 1; */
+        if (message.amount !== 0)
+            writer.tag(1, WireType.Bit32).float(message.amount);
+        /* int64 acceptance_order = 2; */
+        if (message.acceptanceOrder !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.acceptanceOrder);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message blindsided.ActiveBid
+ */
+export const ActiveBid = new ActiveBid$Type();
 /**
  * @generated ServiceType for protobuf service blindsided.AuctionService
  */

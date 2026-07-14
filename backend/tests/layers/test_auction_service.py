@@ -3,7 +3,13 @@ from uuid import UUID
 
 from blindsided.auction_service.service import AuctionService
 from blindsided.generated import blindsided_pb2 as pb2
-from backend.tests.helpers import BackendTestCase, ChannelContext, NoopContext, future_timestamp
+from backend.tests.helpers import (
+    BackendTestCase,
+    ChannelContext,
+    NoopContext,
+    active_bid,
+    future_timestamp,
+)
 
 
 class FakeJudgeStub:
@@ -118,9 +124,9 @@ class AuctionServiceTests(BackendTestCase):
         stub = FakeJudgeStub()
         stub.get_responses.append(pb2.GetAuctionResponse(
             ok=True,
-            auction=pb2.Auction(
-                auction_id="auction-1",
-                bids={"buyer-a": 100.0},
+                auction=pb2.Auction(
+                    auction_id="auction-1",
+                    bids={"buyer-a": active_bid(100.0, 1)},
                 reserve_price=500.0,
                 reserve_met=True,
                 state=pb2.AUCTION_STATE_OPEN,
@@ -143,9 +149,9 @@ class AuctionServiceTests(BackendTestCase):
         stub = FakeJudgeStub()
         stub.get_responses.append(pb2.GetAuctionResponse(
             ok=True,
-            auction=pb2.Auction(
-                auction_id="auction-1",
-                bids={"buyer-a": 100.0},
+                auction=pb2.Auction(
+                    auction_id="auction-1",
+                    bids={"buyer-a": active_bid(100.0, 1)},
                 state=pb2.AUCTION_STATE_REVEALED,
             ),
         ))
@@ -157,7 +163,7 @@ class AuctionServiceTests(BackendTestCase):
         )
 
         self.assertTrue(response.ok)
-        self.assertEqual(response.auction.bids["buyer-a"], 100.0)
+        self.assertEqual(response.auction.bids["buyer-a"].amount, 100.0)
 
     def test_bid_retries_with_latest_version_after_stale_conflict(self):
         stub = FakeJudgeStub()
@@ -183,6 +189,11 @@ class AuctionServiceTests(BackendTestCase):
 
         self.assertTrue(response.success)
         self.assertEqual(stub.mutations[0].auction.version, 6)
+        self.assertEqual(stub.mutations[0].auction.bids["buyer-a"].amount, 250.0)
+        self.assertEqual(
+            stub.mutations[0].auction.bids["buyer-a"].acceptance_order,
+            0,
+        )
         self.assertEqual(stub.mutations[1].auction.version, 7)
 
     def test_drop_gavel_returns_public_gavel_response(self):
@@ -212,11 +223,11 @@ class AuctionServiceTests(BackendTestCase):
         service = TestableAuctionService(FakeJudgeStub())
 
         hidden = service._to_public_auction_update(pb2.Auction(
-            bids={"a": 100.0, "b": 250.0},
+            bids={"a": active_bid(100.0, 1), "b": active_bid(250.0, 2)},
             reserve_met=True,
         ))
         revealed = service._to_public_auction_update(pb2.Auction(
-            bids={"a": 100.0, "b": 250.0},
+            bids={"a": active_bid(100.0, 1), "b": active_bid(250.0, 2)},
             reserve_price=200.0,
             state=pb2.AUCTION_STATE_REVEALED,
         ))
@@ -233,7 +244,7 @@ class AuctionServiceTests(BackendTestCase):
         service = TestableAuctionService(FakeJudgeStub())
 
         update = service._to_public_auction_update(pb2.Auction(
-            bids={"buyer-a": 250.0},
+            bids={"buyer-a": active_bid(250.0, 1)},
             reserve_price=500.0,
             state=pb2.AUCTION_STATE_REVEALED,
         ))
