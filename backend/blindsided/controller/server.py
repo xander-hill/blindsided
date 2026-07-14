@@ -12,7 +12,7 @@ def serve():
     controller_service = ControllerService()
 
     monitor_thread = threading.Thread(
-        target=controller_service.HeartbeatMonitor,
+        target=controller_service._monitor_heartbeats,
         daemon=True,
     )
     monitor_thread.start()
@@ -21,7 +21,7 @@ def serve():
         futures.ThreadPoolExecutor(max_workers=10)
     )
 
-    pb2_grpc.add_ControllerServicer_to_server(
+    pb2_grpc.add_ClusterControllerServicer_to_server(
         controller_service,
         server,
     )

@@ -6,8 +6,8 @@ def check_vault():
     try:
         # We hit your Envoy port-forward
         with grpc.insecure_channel('localhost:8080') as channel:
-            stub = pb2_grpc.BlindSidedStub(channel)
-            resp = stub.SearchAuctions(pb2.SearchRequest(query="vintage-rolex"))
+            stub = pb2_grpc.AuctionServiceStub(channel)
+            resp = stub.SearchAuctions(pb2.SearchAuctionsRequest(query="vintage-rolex"))
             if resp.ok:
                 print(f"✅ Found {len(resp.auctions)} auctions.")
                 for a in resp.auctions:

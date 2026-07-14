@@ -25,7 +25,7 @@ if _version_not_supported:
     )
 
 
-class BlindSidedStub(object):
+class AuctionServiceStub(object):
     """Missing associated documentation comment in .proto file."""
 
     def __init__(self, channel):
@@ -34,48 +34,48 @@ class BlindSidedStub(object):
         Args:
             channel: A grpc.Channel.
         """
-        self.OpenAuction = channel.unary_unary(
-                '/blindsided.BlindSided/OpenAuction',
-                request_serializer=blindsided__pb2.OpenRequest.SerializeToString,
-                response_deserializer=blindsided__pb2.OpenResponse.FromString,
+        self.CreateAuction = channel.unary_unary(
+                '/blindsided.AuctionService/CreateAuction',
+                request_serializer=blindsided__pb2.CreateAuctionRequest.SerializeToString,
+                response_deserializer=blindsided__pb2.CreateAuctionResponse.FromString,
                 _registered_method=True)
-        self.GetStatus = channel.unary_unary(
-                '/blindsided.BlindSided/GetStatus',
-                request_serializer=blindsided__pb2.StatusRequest.SerializeToString,
-                response_deserializer=blindsided__pb2.StatusResponse.FromString,
+        self.GetAuction = channel.unary_unary(
+                '/blindsided.AuctionService/GetAuction',
+                request_serializer=blindsided__pb2.GetAuctionRequest.SerializeToString,
+                response_deserializer=blindsided__pb2.GetAuctionResponse.FromString,
                 _registered_method=True)
         self.SearchAuctions = channel.unary_unary(
-                '/blindsided.BlindSided/SearchAuctions',
-                request_serializer=blindsided__pb2.SearchRequest.SerializeToString,
-                response_deserializer=blindsided__pb2.SearchResponse.FromString,
+                '/blindsided.AuctionService/SearchAuctions',
+                request_serializer=blindsided__pb2.SearchAuctionsRequest.SerializeToString,
+                response_deserializer=blindsided__pb2.SearchAuctionsResponse.FromString,
                 _registered_method=True)
-        self.PlaceSecretBid = channel.unary_unary(
-                '/blindsided.BlindSided/PlaceSecretBid',
+        self.PlaceBid = channel.unary_unary(
+                '/blindsided.AuctionService/PlaceBid',
                 request_serializer=blindsided__pb2.BidRequest.SerializeToString,
                 response_deserializer=blindsided__pb2.BidResponse.FromString,
                 _registered_method=True)
-        self.DropTheGavel = channel.unary_unary(
-                '/blindsided.BlindSided/DropTheGavel',
-                request_serializer=blindsided__pb2.GavelRequest.SerializeToString,
-                response_deserializer=blindsided__pb2.GavelResponse.FromString,
+        self.RevealAuction = channel.unary_unary(
+                '/blindsided.AuctionService/RevealAuction',
+                request_serializer=blindsided__pb2.RevealAuctionRequest.SerializeToString,
+                response_deserializer=blindsided__pb2.RevealAuctionResponse.FromString,
                 _registered_method=True)
-        self.JoinLiveAuction = channel.unary_stream(
-                '/blindsided.BlindSided/JoinLiveAuction',
+        self.WatchAuction = channel.unary_stream(
+                '/blindsided.AuctionService/WatchAuction',
                 request_serializer=blindsided__pb2.AuctionRequest.SerializeToString,
                 response_deserializer=blindsided__pb2.AuctionUpdate.FromString,
                 _registered_method=True)
 
 
-class BlindSidedServicer(object):
+class AuctionServiceServicer(object):
     """Missing associated documentation comment in .proto file."""
 
-    def OpenAuction(self, request, context):
+    def CreateAuction(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def GetStatus(self, request, context):
+    def GetAuction(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -87,70 +87,70 @@ class BlindSidedServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def PlaceSecretBid(self, request, context):
+    def PlaceBid(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def DropTheGavel(self, request, context):
+    def RevealAuction(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def JoinLiveAuction(self, request, context):
+    def WatchAuction(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
 
-def add_BlindSidedServicer_to_server(servicer, server):
+def add_AuctionServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
-            'OpenAuction': grpc.unary_unary_rpc_method_handler(
-                    servicer.OpenAuction,
-                    request_deserializer=blindsided__pb2.OpenRequest.FromString,
-                    response_serializer=blindsided__pb2.OpenResponse.SerializeToString,
+            'CreateAuction': grpc.unary_unary_rpc_method_handler(
+                    servicer.CreateAuction,
+                    request_deserializer=blindsided__pb2.CreateAuctionRequest.FromString,
+                    response_serializer=blindsided__pb2.CreateAuctionResponse.SerializeToString,
             ),
-            'GetStatus': grpc.unary_unary_rpc_method_handler(
-                    servicer.GetStatus,
-                    request_deserializer=blindsided__pb2.StatusRequest.FromString,
-                    response_serializer=blindsided__pb2.StatusResponse.SerializeToString,
+            'GetAuction': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetAuction,
+                    request_deserializer=blindsided__pb2.GetAuctionRequest.FromString,
+                    response_serializer=blindsided__pb2.GetAuctionResponse.SerializeToString,
             ),
             'SearchAuctions': grpc.unary_unary_rpc_method_handler(
                     servicer.SearchAuctions,
-                    request_deserializer=blindsided__pb2.SearchRequest.FromString,
-                    response_serializer=blindsided__pb2.SearchResponse.SerializeToString,
+                    request_deserializer=blindsided__pb2.SearchAuctionsRequest.FromString,
+                    response_serializer=blindsided__pb2.SearchAuctionsResponse.SerializeToString,
             ),
-            'PlaceSecretBid': grpc.unary_unary_rpc_method_handler(
-                    servicer.PlaceSecretBid,
+            'PlaceBid': grpc.unary_unary_rpc_method_handler(
+                    servicer.PlaceBid,
                     request_deserializer=blindsided__pb2.BidRequest.FromString,
                     response_serializer=blindsided__pb2.BidResponse.SerializeToString,
             ),
-            'DropTheGavel': grpc.unary_unary_rpc_method_handler(
-                    servicer.DropTheGavel,
-                    request_deserializer=blindsided__pb2.GavelRequest.FromString,
-                    response_serializer=blindsided__pb2.GavelResponse.SerializeToString,
+            'RevealAuction': grpc.unary_unary_rpc_method_handler(
+                    servicer.RevealAuction,
+                    request_deserializer=blindsided__pb2.RevealAuctionRequest.FromString,
+                    response_serializer=blindsided__pb2.RevealAuctionResponse.SerializeToString,
             ),
-            'JoinLiveAuction': grpc.unary_stream_rpc_method_handler(
-                    servicer.JoinLiveAuction,
+            'WatchAuction': grpc.unary_stream_rpc_method_handler(
+                    servicer.WatchAuction,
                     request_deserializer=blindsided__pb2.AuctionRequest.FromString,
                     response_serializer=blindsided__pb2.AuctionUpdate.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
-            'blindsided.BlindSided', rpc_method_handlers)
+            'blindsided.AuctionService', rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers('blindsided.BlindSided', rpc_method_handlers)
+    server.add_registered_method_handlers('blindsided.AuctionService', rpc_method_handlers)
 
 
  # This class is part of an EXPERIMENTAL API.
-class BlindSided(object):
+class AuctionService(object):
     """Missing associated documentation comment in .proto file."""
 
     @staticmethod
-    def OpenAuction(request,
+    def CreateAuction(request,
             target,
             options=(),
             channel_credentials=None,
@@ -163,9 +163,9 @@ class BlindSided(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/blindsided.BlindSided/OpenAuction',
-            blindsided__pb2.OpenRequest.SerializeToString,
-            blindsided__pb2.OpenResponse.FromString,
+            '/blindsided.AuctionService/CreateAuction',
+            blindsided__pb2.CreateAuctionRequest.SerializeToString,
+            blindsided__pb2.CreateAuctionResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -177,7 +177,7 @@ class BlindSided(object):
             _registered_method=True)
 
     @staticmethod
-    def GetStatus(request,
+    def GetAuction(request,
             target,
             options=(),
             channel_credentials=None,
@@ -190,9 +190,9 @@ class BlindSided(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/blindsided.BlindSided/GetStatus',
-            blindsided__pb2.StatusRequest.SerializeToString,
-            blindsided__pb2.StatusResponse.FromString,
+            '/blindsided.AuctionService/GetAuction',
+            blindsided__pb2.GetAuctionRequest.SerializeToString,
+            blindsided__pb2.GetAuctionResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -217,9 +217,9 @@ class BlindSided(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/blindsided.BlindSided/SearchAuctions',
-            blindsided__pb2.SearchRequest.SerializeToString,
-            blindsided__pb2.SearchResponse.FromString,
+            '/blindsided.AuctionService/SearchAuctions',
+            blindsided__pb2.SearchAuctionsRequest.SerializeToString,
+            blindsided__pb2.SearchAuctionsResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -231,7 +231,7 @@ class BlindSided(object):
             _registered_method=True)
 
     @staticmethod
-    def PlaceSecretBid(request,
+    def PlaceBid(request,
             target,
             options=(),
             channel_credentials=None,
@@ -244,7 +244,7 @@ class BlindSided(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/blindsided.BlindSided/PlaceSecretBid',
+            '/blindsided.AuctionService/PlaceBid',
             blindsided__pb2.BidRequest.SerializeToString,
             blindsided__pb2.BidResponse.FromString,
             options,
@@ -258,7 +258,7 @@ class BlindSided(object):
             _registered_method=True)
 
     @staticmethod
-    def DropTheGavel(request,
+    def RevealAuction(request,
             target,
             options=(),
             channel_credentials=None,
@@ -271,9 +271,9 @@ class BlindSided(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/blindsided.BlindSided/DropTheGavel',
-            blindsided__pb2.GavelRequest.SerializeToString,
-            blindsided__pb2.GavelResponse.FromString,
+            '/blindsided.AuctionService/RevealAuction',
+            blindsided__pb2.RevealAuctionRequest.SerializeToString,
+            blindsided__pb2.RevealAuctionResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -285,7 +285,7 @@ class BlindSided(object):
             _registered_method=True)
 
     @staticmethod
-    def JoinLiveAuction(request,
+    def WatchAuction(request,
             target,
             options=(),
             channel_credentials=None,
@@ -298,7 +298,7 @@ class BlindSided(object):
         return grpc.experimental.unary_stream(
             request,
             target,
-            '/blindsided.BlindSided/JoinLiveAuction',
+            '/blindsided.AuctionService/WatchAuction',
             blindsided__pb2.AuctionRequest.SerializeToString,
             blindsided__pb2.AuctionUpdate.FromString,
             options,
@@ -312,7 +312,7 @@ class BlindSided(object):
             _registered_method=True)
 
 
-class JudgeNodeStub(object):
+class StorageReplicaServiceStub(object):
     """Missing associated documentation comment in .proto file."""
 
     def __init__(self, channel):
@@ -322,38 +322,38 @@ class JudgeNodeStub(object):
             channel: A grpc.Channel.
         """
         self.CommitToVault = channel.unary_unary(
-                '/blindsided.JudgeNode/CommitToVault',
+                '/blindsided.StorageReplicaService/CommitToVault',
                 request_serializer=blindsided__pb2.CommitRequest.SerializeToString,
                 response_deserializer=blindsided__pb2.CommitResponse.FromString,
                 _registered_method=True)
         self.QueryVault = channel.unary_unary(
-                '/blindsided.JudgeNode/QueryVault',
+                '/blindsided.StorageReplicaService/QueryVault',
                 request_serializer=blindsided__pb2.QueryRequest.SerializeToString,
                 response_deserializer=blindsided__pb2.QueryResponse.FromString,
                 _registered_method=True)
         self.SyncFullState = channel.unary_unary(
-                '/blindsided.JudgeNode/SyncFullState',
+                '/blindsided.StorageReplicaService/SyncFullState',
                 request_serializer=blindsided__pb2.StateRequest.SerializeToString,
                 response_deserializer=blindsided__pb2.StateResponse.FromString,
                 _registered_method=True)
-        self.ReplicateSecret = channel.unary_unary(
-                '/blindsided.JudgeNode/ReplicateSecret',
+        self.ReplicateAuction = channel.unary_unary(
+                '/blindsided.StorageReplicaService/ReplicateAuction',
                 request_serializer=blindsided__pb2.ReplicationRequest.SerializeToString,
                 response_deserializer=blindsided__pb2.ReplicationResponse.FromString,
                 _registered_method=True)
         self.Heartbeat = channel.unary_unary(
-                '/blindsided.JudgeNode/Heartbeat',
+                '/blindsided.StorageReplicaService/Heartbeat',
                 request_serializer=blindsided__pb2.HealthCheckRequest.SerializeToString,
                 response_deserializer=blindsided__pb2.HealthCheckResponse.FromString,
                 _registered_method=True)
         self.PromoteToPrimary = channel.unary_unary(
-                '/blindsided.JudgeNode/PromoteToPrimary',
+                '/blindsided.StorageReplicaService/PromoteToPrimary',
                 request_serializer=blindsided__pb2.PromotionRequest.SerializeToString,
                 response_deserializer=blindsided__pb2.PromotionResponse.FromString,
                 _registered_method=True)
 
 
-class JudgeNodeServicer(object):
+class StorageReplicaServiceServicer(object):
     """Missing associated documentation comment in .proto file."""
 
     def CommitToVault(self, request, context):
@@ -374,7 +374,7 @@ class JudgeNodeServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def ReplicateSecret(self, request, context):
+    def ReplicateAuction(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -393,7 +393,7 @@ class JudgeNodeServicer(object):
         raise NotImplementedError('Method not implemented!')
 
 
-def add_JudgeNodeServicer_to_server(servicer, server):
+def add_StorageReplicaServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'CommitToVault': grpc.unary_unary_rpc_method_handler(
                     servicer.CommitToVault,
@@ -410,8 +410,8 @@ def add_JudgeNodeServicer_to_server(servicer, server):
                     request_deserializer=blindsided__pb2.StateRequest.FromString,
                     response_serializer=blindsided__pb2.StateResponse.SerializeToString,
             ),
-            'ReplicateSecret': grpc.unary_unary_rpc_method_handler(
-                    servicer.ReplicateSecret,
+            'ReplicateAuction': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReplicateAuction,
                     request_deserializer=blindsided__pb2.ReplicationRequest.FromString,
                     response_serializer=blindsided__pb2.ReplicationResponse.SerializeToString,
             ),
@@ -427,13 +427,13 @@ def add_JudgeNodeServicer_to_server(servicer, server):
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
-            'blindsided.JudgeNode', rpc_method_handlers)
+            'blindsided.StorageReplicaService', rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers('blindsided.JudgeNode', rpc_method_handlers)
+    server.add_registered_method_handlers('blindsided.StorageReplicaService', rpc_method_handlers)
 
 
  # This class is part of an EXPERIMENTAL API.
-class JudgeNode(object):
+class StorageReplicaService(object):
     """Missing associated documentation comment in .proto file."""
 
     @staticmethod
@@ -450,7 +450,7 @@ class JudgeNode(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/blindsided.JudgeNode/CommitToVault',
+            '/blindsided.StorageReplicaService/CommitToVault',
             blindsided__pb2.CommitRequest.SerializeToString,
             blindsided__pb2.CommitResponse.FromString,
             options,
@@ -477,7 +477,7 @@ class JudgeNode(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/blindsided.JudgeNode/QueryVault',
+            '/blindsided.StorageReplicaService/QueryVault',
             blindsided__pb2.QueryRequest.SerializeToString,
             blindsided__pb2.QueryResponse.FromString,
             options,
@@ -504,7 +504,7 @@ class JudgeNode(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/blindsided.JudgeNode/SyncFullState',
+            '/blindsided.StorageReplicaService/SyncFullState',
             blindsided__pb2.StateRequest.SerializeToString,
             blindsided__pb2.StateResponse.FromString,
             options,
@@ -518,7 +518,7 @@ class JudgeNode(object):
             _registered_method=True)
 
     @staticmethod
-    def ReplicateSecret(request,
+    def ReplicateAuction(request,
             target,
             options=(),
             channel_credentials=None,
@@ -531,7 +531,7 @@ class JudgeNode(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/blindsided.JudgeNode/ReplicateSecret',
+            '/blindsided.StorageReplicaService/ReplicateAuction',
             blindsided__pb2.ReplicationRequest.SerializeToString,
             blindsided__pb2.ReplicationResponse.FromString,
             options,
@@ -558,7 +558,7 @@ class JudgeNode(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/blindsided.JudgeNode/Heartbeat',
+            '/blindsided.StorageReplicaService/Heartbeat',
             blindsided__pb2.HealthCheckRequest.SerializeToString,
             blindsided__pb2.HealthCheckResponse.FromString,
             options,
@@ -585,7 +585,7 @@ class JudgeNode(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/blindsided.JudgeNode/PromoteToPrimary',
+            '/blindsided.StorageReplicaService/PromoteToPrimary',
             blindsided__pb2.PromotionRequest.SerializeToString,
             blindsided__pb2.PromotionResponse.FromString,
             options,
@@ -599,7 +599,7 @@ class JudgeNode(object):
             _registered_method=True)
 
 
-class ControllerStub(object):
+class ClusterControllerStub(object):
     """Missing associated documentation comment in .proto file."""
 
     def __init__(self, channel):
@@ -609,23 +609,23 @@ class ControllerStub(object):
             channel: A grpc.Channel.
         """
         self.RegisterNode = channel.unary_unary(
-                '/blindsided.Controller/RegisterNode',
+                '/blindsided.ClusterController/RegisterNode',
                 request_serializer=blindsided__pb2.RegisterRequest.SerializeToString,
                 response_deserializer=blindsided__pb2.RegisterResponse.FromString,
                 _registered_method=True)
         self.GetPrimary = channel.unary_unary(
-                '/blindsided.Controller/GetPrimary',
+                '/blindsided.ClusterController/GetPrimary',
                 request_serializer=blindsided__pb2.GetPrimaryRequest.SerializeToString,
                 response_deserializer=blindsided__pb2.GetPrimaryResponse.FromString,
                 _registered_method=True)
         self.GetClusterInfo = channel.unary_unary(
-                '/blindsided.Controller/GetClusterInfo',
+                '/blindsided.ClusterController/GetClusterInfo',
                 request_serializer=blindsided__pb2.ClusterInfoRequest.SerializeToString,
                 response_deserializer=blindsided__pb2.ClusterInfoResponse.FromString,
                 _registered_method=True)
 
 
-class ControllerServicer(object):
+class ClusterControllerServicer(object):
     """Missing associated documentation comment in .proto file."""
 
     def RegisterNode(self, request, context):
@@ -647,7 +647,7 @@ class ControllerServicer(object):
         raise NotImplementedError('Method not implemented!')
 
 
-def add_ControllerServicer_to_server(servicer, server):
+def add_ClusterControllerServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'RegisterNode': grpc.unary_unary_rpc_method_handler(
                     servicer.RegisterNode,
@@ -666,13 +666,13 @@ def add_ControllerServicer_to_server(servicer, server):
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
-            'blindsided.Controller', rpc_method_handlers)
+            'blindsided.ClusterController', rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers('blindsided.Controller', rpc_method_handlers)
+    server.add_registered_method_handlers('blindsided.ClusterController', rpc_method_handlers)
 
 
  # This class is part of an EXPERIMENTAL API.
-class Controller(object):
+class ClusterController(object):
     """Missing associated documentation comment in .proto file."""
 
     @staticmethod
@@ -689,7 +689,7 @@ class Controller(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/blindsided.Controller/RegisterNode',
+            '/blindsided.ClusterController/RegisterNode',
             blindsided__pb2.RegisterRequest.SerializeToString,
             blindsided__pb2.RegisterResponse.FromString,
             options,
@@ -716,7 +716,7 @@ class Controller(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/blindsided.Controller/GetPrimary',
+            '/blindsided.ClusterController/GetPrimary',
             blindsided__pb2.GetPrimaryRequest.SerializeToString,
             blindsided__pb2.GetPrimaryResponse.FromString,
             options,
@@ -743,7 +743,7 @@ class Controller(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/blindsided.Controller/GetClusterInfo',
+            '/blindsided.ClusterController/GetClusterInfo',
             blindsided__pb2.ClusterInfoRequest.SerializeToString,
             blindsided__pb2.ClusterInfoResponse.FromString,
             options,

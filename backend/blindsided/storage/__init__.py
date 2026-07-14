@@ -1,3 +1,3 @@
-from blindsided.storage.service import JudgeNode
+from blindsided.storage.service import StorageReplicaService
 
-__all__ = ["JudgeNode"]
+__all__ = ["StorageReplicaService"]

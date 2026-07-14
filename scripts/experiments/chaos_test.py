@@ -13,7 +13,7 @@ SERVICE_ADDR = 'localhost:50051'
 
 def hammer_the_vault(bidder_id):
     channel = grpc.insecure_channel(SERVICE_ADDR)
-    stub = pb2_grpc.BlindSidedStub(channel)
+    stub = pb2_grpc.AuctionServiceStub(channel)
     
     for i in range(BIDS_PER_BIDDER):
         success = False
@@ -21,12 +21,12 @@ def hammer_the_vault(bidder_id):
         while not success and retries < 5:
             try:
                 # Add a short timeout so a single call can't hang the thread forever
-                status = stub.GetStatus(pb2.StatusRequest(auction_id=AUCTION_ID), timeout=2.0)
+                status = stub.GetAuction(pb2.GetAuctionRequest(auction_id=AUCTION_ID), timeout=2.0)
                 v = status.auction.version
                 
-                resp = stub.PlaceSecretBid(pb2.BidRequest(
+                resp = stub.PlaceBid(pb2.BidRequest(
                     auction_id=AUCTION_ID,
-                    buyer_id=bidder_id,
+                    bidder_id=bidder_id,
                     amount=random.uniform(100, 1000),
                     expected_version=v
                 ), timeout=2.0)
@@ -45,12 +45,12 @@ def hammer_the_vault(bidder_id):
 
 def run_chaos_test():
     channel = grpc.insecure_channel(SERVICE_ADDR)
-    stub = pb2_grpc.BlindSidedStub(channel)
+    stub = pb2_grpc.AuctionServiceStub(channel)
 
     print(f"🔥 Starting Chaos Test: {NUM_BIDDERS} bidders, {BIDS_PER_BIDDER} bids each.")
     
     # 1. Open the Auction
-    stub.OpenAuction(pb2.OpenRequest(auction=pb2.Auction(
+    stub.CreateAuction(pb2.CreateAuctionRequest(auction=pb2.Auction(
         auction_id=AUCTION_ID, title="Chaos Item", reserve_price=700.0
     )))
 
@@ -73,10 +73,10 @@ def run_chaos_test():
     print(f"Total Time: {end_time - start_time:.2f} seconds")
     
     # Check the state
-    final_status = stub.GetStatus(pb2.StatusRequest(auction_id=AUCTION_ID))
+    final_status = stub.GetAuction(pb2.GetAuctionRequest(auction_id=AUCTION_ID))
     
     # We join the stream once to get the opaque stats
-    stream = stub.JoinLiveAuction(pb2.AuctionRequest(auction_id=AUCTION_ID))
+    stream = stub.WatchAuction(pb2.AuctionRequest(auction_id=AUCTION_ID))
     opaque_data = next(stream)
 
     print(f"Final Version in Vault: {final_status.auction.version}")

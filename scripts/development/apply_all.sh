@@ -14,7 +14,7 @@ kubectl apply -f deploy/kubernetes/controller.yaml
 sleep 5
 
 # 3. Apply the Storage Layer (The Judge / Vault)
-echo "🏛️  Deploying JudgeNode StatefulSet..."
+echo "🏛️  Deploying StorageReplicaService StatefulSet..."
 kubectl apply -f deploy/kubernetes/storage.yaml
 
 # 4. Apply the Service Layer (The Fog API)

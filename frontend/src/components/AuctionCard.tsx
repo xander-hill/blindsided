@@ -14,8 +14,8 @@ export const AuctionCard = ({ id }: { id: string }) => {
       {data.state === AuctionState.REVEALED ? (
         <div style={{ color: '#00ff00' }}>
           <h4>🔨 GAVEL FELL</h4>
-          <p>Winner: {data.winnerId}</p>
-          <p>Price: ${data.finalPrice}</p>
+          <p>Winner: {data.winningBidderId}</p>
+          <p>Price: ${data.winningAmount}</p>
         </div>
       ) : (
         <div>
@@ -29,7 +29,7 @@ export const AuctionCard = ({ id }: { id: string }) => {
              }}></div>
           </div>
           <p>Opaque Range: ${data.lowRange} - ${data.highRange}</p>
-          {data.reserveStatus && <span style={{color: 'gold'}}>Reserve Met</span>}
+          {data.reserveMet && <span style={{color: 'gold'}}>Reserve Met</span>}
         </div>
       )}
     </div>

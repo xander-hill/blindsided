@@ -9,30 +9,30 @@ class BackendLifecycleTests(BackendTestCase):
     def test_full_open_bid_status_reveal_flow_over_grpc(self):
         with running_backend_stack() as stack:
             with grpc.insecure_channel(stack["auction_addr"]) as channel:
-                stub = pb2_grpc.BlindSidedStub(channel)
+                stub = pb2_grpc.AuctionServiceStub(channel)
 
-                opened = stub.OpenAuction(pb2.OpenRequest(auction=pb2.Auction(
+                opened = stub.CreateAuction(pb2.CreateAuctionRequest(auction=pb2.Auction(
                     auction_id="integration-watch",
                     title="Integration Watch",
                     reserve_price=500.0,
                     bids={"opening": 250.0},
                 )), timeout=5)
-                hidden_status = stub.GetStatus(pb2.StatusRequest(
+                hidden_status = stub.GetAuction(pb2.GetAuctionRequest(
                     auction_id="integration-watch",
                 ), timeout=5)
-                bid = stub.PlaceSecretBid(pb2.BidRequest(
+                bid = stub.PlaceBid(pb2.BidRequest(
                     auction_id="integration-watch",
-                    buyer_id="buyer-a",
+                    bidder_id="buyer-a",
                     amount=750.0,
                     expected_version=hidden_status.auction.version,
                 ), timeout=5)
-                post_bid_status = stub.GetStatus(pb2.StatusRequest(
+                post_bid_status = stub.GetAuction(pb2.GetAuctionRequest(
                     auction_id="integration-watch",
                 ), timeout=5)
-                gavel = stub.DropTheGavel(pb2.GavelRequest(
+                gavel = stub.RevealAuction(pb2.RevealAuctionRequest(
                     auction_id="integration-watch",
                 ), timeout=5)
-                revealed_status = stub.GetStatus(pb2.StatusRequest(
+                revealed_status = stub.GetAuction(pb2.GetAuctionRequest(
                     auction_id="integration-watch",
                 ), timeout=5)
 
@@ -55,25 +55,25 @@ class BackendLifecycleTests(BackendTestCase):
     def test_live_stream_reports_opaque_update_then_revealed_update(self):
         with running_backend_stack() as stack:
             with grpc.insecure_channel(stack["auction_addr"]) as channel:
-                stub = pb2_grpc.BlindSidedStub(channel)
-                stub.OpenAuction(pb2.OpenRequest(auction=pb2.Auction(
+                stub = pb2_grpc.AuctionServiceStub(channel)
+                stub.CreateAuction(pb2.CreateAuctionRequest(auction=pb2.Auction(
                     auction_id="streamed-auction",
                     title="Streamed Auction",
                     reserve_price=300.0,
                     bids={"opening": 125.0},
                 )), timeout=5)
 
-                first_stream = stub.JoinLiveAuction(pb2.AuctionRequest(
+                first_stream = stub.WatchAuction(pb2.AuctionRequest(
                     auction_id="streamed-auction",
                     user_id="watcher",
                 ), timeout=5)
                 opaque_update = next(first_stream)
 
-                stub.DropTheGavel(pb2.GavelRequest(
+                stub.RevealAuction(pb2.RevealAuctionRequest(
                     auction_id="streamed-auction",
                 ), timeout=5)
 
-                reveal_stream = stub.JoinLiveAuction(pb2.AuctionRequest(
+                reveal_stream = stub.WatchAuction(pb2.AuctionRequest(
                     auction_id="streamed-auction",
                     user_id="watcher",
                 ), timeout=5)
@@ -84,5 +84,5 @@ class BackendLifecycleTests(BackendTestCase):
         self.assertEqual(opaque_update.low_range, 125.0)
         self.assertEqual(opaque_update.high_range, 125.0)
         self.assertEqual(reveal_update.state, pb2.AUCTION_STATE_REVEALED)
-        self.assertEqual(reveal_update.final_price, 125.0)
-        self.assertEqual(reveal_update.winner_id, "opening")
+        self.assertEqual(reveal_update.winning_amount, 125.0)
+        self.assertEqual(reveal_update.winning_bidder_id, "opening")

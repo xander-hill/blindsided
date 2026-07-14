@@ -19,7 +19,7 @@ export function useLiveAuction(auctionId: string) {
     async function runStream() {
         console.log("📡 Attempting to open gRPC Stream...");
         try {
-        const stream = auctionClient.joinLiveAuction({
+        const stream = auctionClient.watchAuction({
             auctionId,
             userId: "user_123"
         }, { abort: abortController.signal });

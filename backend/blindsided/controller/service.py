@@ -6,7 +6,7 @@ import grpc
 from blindsided.generated import blindsided_pb2 as pb2
 from blindsided.generated import blindsided_pb2_grpc as pb2_grpc
 
-class ControllerService(pb2_grpc.ControllerServicer):
+class ControllerService(pb2_grpc.ClusterControllerServicer):
     def __init__(self):
         self.lock = threading.Lock()
         self.nodes = {} 
@@ -46,15 +46,15 @@ class ControllerService(pb2_grpc.ControllerServicer):
                 message=f"Found {len(self.nodes)} active Judges"
             )
 
-    def HeartbeatMonitor(self):
+    def _monitor_heartbeats(self):
         while True:
             time.sleep(5)
             with self.lock:
                 for addr in list(self.nodes.keys()):
                     try:
                         with grpc.insecure_channel(addr) as channel:
-                            stub = pb2_grpc.JudgeNodeStub(channel)
-                            # The JudgeNode's Heartbeat response now has a 'message' field too
+                            stub = pb2_grpc.StorageReplicaServiceStub(channel)
+                            # StorageReplicaService.Heartbeat response includes a message field too.
                             response = stub.Heartbeat(pb2.HealthCheckRequest(request_source="CONTROLLER"), timeout=2.0)
                             if not response.alive:
                                 raise Exception("Node reported unhealthy")
@@ -63,23 +63,23 @@ class ControllerService(pb2_grpc.ControllerServicer):
                         del self.nodes[addr]
                         if self.primary_address == addr:
                             self.primary_address = None
-                            self.ElectNewPrimary()
+                            self._elect_new_primary()
     
-    def ElectNewPrimary(self):
+    def _elect_new_primary(self):
         if not self.nodes:
             print("[Controller] CRITICAL: The Vault is empty. All Judges are dead.")
             return
 
-        new_primary = list(self.nodes.keys())[0]
-        self.primary_address = new_primary
+        new_primary_address = list(self.nodes.keys())[0]
+        self.primary_address = new_primary_address
         print(f"[Controller] ELECTED NEW PRIMARY: {self.primary_address}")
-        threading.Thread(target=self.NotifyPromotion, args=(new_primary,)).start()
+        threading.Thread(target=self._notify_promotion, args=(new_primary_address,)).start()
 
-    def NotifyPromotion(self, address):
+    def _notify_promotion(self, address):
         try:
             with grpc.insecure_channel(address) as channel:
-                stub = pb2_grpc.JudgeNodeStub(channel)
-                # JudgeNode.PromoteToPrimary returns PromotionResponse(success, message)
+                stub = pb2_grpc.StorageReplicaServiceStub(channel)
+                # StorageReplicaService.PromoteToPrimary returns PromotionResponse(success, message).
                 stub.PromoteToPrimary(pb2.PromotionRequest(new_role="primary"))
                 print(f"[Controller] Node {address} acknowledged promotion.")
         except Exception as e:
