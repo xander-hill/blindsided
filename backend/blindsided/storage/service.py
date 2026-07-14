@@ -143,6 +143,12 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                         )
 
                     for bidder_id, amount in incoming_auction.bids.items():
+                        current_amount = existing_auction.bids.get(bidder_id)
+                        if current_amount is not None and amount <= current_amount:
+                            return pb2.AuctionMutationResponse(
+                                success=False,
+                                message="Bid must be higher than bidder's active bid.",
+                            )
                         updated_auction.bids[bidder_id] = amount
 
                 updated_auction.version = existing_auction.version + 1

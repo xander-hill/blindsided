@@ -91,6 +91,54 @@ class StorageServiceTests(BackendTestCase):
         self.assertEqual(judge.auction_store["auction-1"].bids["buyer-b"], 450.0)
         self.assertFalse(judge.auction_store["auction-1"].reserve_met)
 
+    def test_commit_rejects_same_buyer_lower_bid_and_preserves_state(self):
+        judge = make_judge(role="backup")
+        judge.auction_store["auction-1"] = pb2.Auction(
+            auction_id="auction-1",
+            version=1,
+            bids={"buyer-a": 300.0},
+        )
+
+        response = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
+                auction=pb2.Auction(
+                    auction_id="auction-1",
+                    version=1,
+                    bids={"buyer-a": 250.0},
+                )
+            ),
+            NoopContext(),
+        )
+
+        self.assertFalse(response.success)
+        self.assertIn("higher", response.message)
+        self.assertEqual(judge.auction_store["auction-1"].bids["buyer-a"], 300.0)
+        self.assertEqual(judge.auction_store["auction-1"].version, 1)
+
+    def test_commit_rejects_same_buyer_equal_bid_and_preserves_state(self):
+        judge = make_judge(role="backup")
+        judge.auction_store["auction-1"] = pb2.Auction(
+            auction_id="auction-1",
+            version=1,
+            bids={"buyer-a": 300.0},
+        )
+
+        response = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
+                auction=pb2.Auction(
+                    auction_id="auction-1",
+                    version=1,
+                    bids={"buyer-a": 300.0},
+                )
+            ),
+            NoopContext(),
+        )
+
+        self.assertFalse(response.success)
+        self.assertIn("higher", response.message)
+        self.assertEqual(judge.auction_store["auction-1"].bids["buyer-a"], 300.0)
+        self.assertEqual(judge.auction_store["auction-1"].version, 1)
+
     def test_reveal_calculates_reserve_met_from_final_active_bids(self):
         judge = make_judge(role="backup")
         judge.auction_store["auction-1"] = pb2.Auction(

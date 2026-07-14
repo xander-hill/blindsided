@@ -73,7 +73,7 @@ class ActiveBidSpecificationTests(BackendTestCase):
             auction_id="active-replaced-not-winner",
             reserve_price=1.0,
             version=1,
-            bids={"buyer-a": 900.0, "buyer-b": 500.0},
+            bids={"buyer-a": 100.0, "buyer-b": 150.0},
         )
 
         replace = judge.ApplyAuctionMutation(
@@ -81,7 +81,7 @@ class ActiveBidSpecificationTests(BackendTestCase):
                 auction=pb2.Auction(
                     auction_id="active-replaced-not-winner",
                     version=1,
-                    bids={"buyer-a": 100.0},
+                    bids={"buyer-a": 200.0},
                 )
             ),
             NoopContext(),
@@ -102,8 +102,8 @@ class ActiveBidSpecificationTests(BackendTestCase):
 
         self.assertTrue(replace.success)
         self.assertTrue(reveal.success)
-        self.assertEqual(public_update.winning_bidder_id, "buyer-b")
-        self.assertEqual(public_update.winning_amount, 500.0)
+        self.assertEqual(public_update.winning_bidder_id, "buyer-a")
+        self.assertEqual(public_update.winning_amount, 200.0)
 
     def test_replaced_bid_does_not_count_toward_distinct_active_bidder_count(self):
         service = AuctionService()
