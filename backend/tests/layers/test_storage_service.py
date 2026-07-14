@@ -1,5 +1,7 @@
 from unittest import mock
 
+from google.protobuf import timestamp_pb2
+
 from blindsided.generated import blindsided_pb2 as pb2
 from backend.tests.helpers import BackendTestCase, NoopContext, future_timestamp, make_judge
 
@@ -109,6 +111,82 @@ class StorageServiceTests(BackendTestCase):
 
         self.assertTrue(response.success)
         self.assertTrue(judge.auction_store["auction-1"].reserve_met)
+
+    def test_bid_before_ends_at_is_accepted(self):
+        judge = make_judge(role="backup")
+        judge.auction_store["auction-1"] = pb2.Auction(
+            auction_id="auction-1",
+            version=1,
+            ends_at=timestamp_pb2.Timestamp(seconds=1000),
+        )
+
+        with mock.patch("blindsided.storage.service.time.time", return_value=999.999):
+            response = judge.ApplyAuctionMutation(
+                pb2.AuctionMutationRequest(
+                    auction=pb2.Auction(
+                        auction_id="auction-1",
+                        version=1,
+                        bids={"buyer-a": 100.0},
+                    )
+                ),
+                NoopContext(),
+            )
+
+        self.assertTrue(response.success)
+        self.assertEqual(judge.auction_store["auction-1"].bids["buyer-a"], 100.0)
+        self.assertEqual(judge.auction_store["auction-1"].version, 2)
+
+    def test_bid_at_ends_at_is_rejected_without_mutating_state_or_version(self):
+        judge = make_judge(role="backup")
+        judge.auction_store["auction-1"] = pb2.Auction(
+            auction_id="auction-1",
+            version=1,
+            bids={"buyer-a": 100.0},
+            ends_at=timestamp_pb2.Timestamp(seconds=1000),
+        )
+
+        with mock.patch("blindsided.storage.service.time.time", return_value=1000.0):
+            response = judge.ApplyAuctionMutation(
+                pb2.AuctionMutationRequest(
+                    auction=pb2.Auction(
+                        auction_id="auction-1",
+                        version=1,
+                        bids={"buyer-b": 200.0},
+                    )
+                ),
+                NoopContext(),
+            )
+
+        self.assertFalse(response.success)
+        self.assertIn("deadline", response.message)
+        self.assertNotIn("buyer-b", judge.auction_store["auction-1"].bids)
+        self.assertEqual(judge.auction_store["auction-1"].version, 1)
+
+    def test_bid_after_ends_at_is_rejected_without_mutating_state_or_version(self):
+        judge = make_judge(role="backup")
+        judge.auction_store["auction-1"] = pb2.Auction(
+            auction_id="auction-1",
+            version=1,
+            bids={"buyer-a": 100.0},
+            ends_at=timestamp_pb2.Timestamp(seconds=1000),
+        )
+
+        with mock.patch("blindsided.storage.service.time.time", return_value=1000.001):
+            response = judge.ApplyAuctionMutation(
+                pb2.AuctionMutationRequest(
+                    auction=pb2.Auction(
+                        auction_id="auction-1",
+                        version=1,
+                        bids={"buyer-b": 200.0},
+                    )
+                ),
+                NoopContext(),
+            )
+
+        self.assertFalse(response.success)
+        self.assertIn("deadline", response.message)
+        self.assertNotIn("buyer-b", judge.auction_store["auction-1"].bids)
+        self.assertEqual(judge.auction_store["auction-1"].version, 1)
 
     def test_reveal_locks_auction_against_later_bids(self):
         judge = make_judge(role="backup")

@@ -136,6 +136,12 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                     updated_auction.state = pb2.AUCTION_STATE_REVEALED
                     updated_auction.reserve_met = self._reserve_met(updated_auction)
                 else:
+                    if incoming_auction.bids and self._auction_has_ended(existing_auction):
+                        return pb2.AuctionMutationResponse(
+                            success=False,
+                            message="Auction deadline has passed.",
+                        )
+
                     for bidder_id, amount in incoming_auction.bids.items():
                         updated_auction.bids[bidder_id] = amount
 
@@ -176,6 +182,12 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
         if not auction.bids:
             return False
         return max(auction.bids.values()) >= auction.reserve_price
+
+    def _auction_has_ended(self, auction: pb2.Auction) -> bool:
+        if not auction.HasField("ends_at"):
+            return False
+        deadline = auction.ends_at.seconds + (auction.ends_at.nanos / 1_000_000_000)
+        return time.time() >= deadline
 
     def GetAuction(self, request: pb2.GetAuctionRequest, context) -> pb2.GetAuctionResponse:
         with self.state_lock:
