@@ -116,3 +116,42 @@ class ReservePriceSpecificationTests(BackendTestCase):
         self.assertTrue(meeting_reserve.reserve_met)
         self.assertEqual(meeting_reserve.winning_amount, 500.0)
         self.assertEqual(meeting_reserve.winning_bidder_id, "buyer-a")
+
+    def test_reserve_met_is_calculated_only_when_auction_is_revealed(self):
+        judge = make_judge(role="backup")
+        judge.auction_store["reserve-finalized-on-reveal"] = pb2.Auction(
+            auction_id="reserve-finalized-on-reveal",
+            reserve_price=500.0,
+            version=1,
+        )
+
+        bid_response = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
+                auction=pb2.Auction(
+                    auction_id="reserve-finalized-on-reveal",
+                    version=1,
+                    bids={"buyer-a": 750.0},
+                )
+            ),
+            NoopContext(),
+        )
+        reserve_met_after_bid = (
+            judge.auction_store["reserve-finalized-on-reveal"].reserve_met
+        )
+        reveal_response = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
+                auction=pb2.Auction(
+                    auction_id="reserve-finalized-on-reveal",
+                    version=2,
+                ),
+                is_reveal_event=True,
+            ),
+            NoopContext(),
+        )
+
+        self.assertTrue(bid_response.success)
+        self.assertFalse(reserve_met_after_bid)
+        self.assertTrue(reveal_response.success)
+        self.assertTrue(
+            judge.auction_store["reserve-finalized-on-reveal"].reserve_met
+        )
