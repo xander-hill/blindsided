@@ -88,14 +88,16 @@ class SearchAuctionsRequest(_message.Message):
     def __init__(self, query: _Optional[str] = ..., category: _Optional[str] = ...) -> None: ...
 
 class SearchAuctionsResponse(_message.Message):
-    __slots__ = ("ok", "auctions", "message")
+    __slots__ = ("ok", "auctions", "message", "count")
     OK_FIELD_NUMBER: _ClassVar[int]
     AUCTIONS_FIELD_NUMBER: _ClassVar[int]
     MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    COUNT_FIELD_NUMBER: _ClassVar[int]
     ok: bool
     auctions: _containers.RepeatedCompositeFieldContainer[Auction]
     message: str
-    def __init__(self, ok: bool = ..., auctions: _Optional[_Iterable[_Union[Auction, _Mapping]]] = ..., message: _Optional[str] = ...) -> None: ...
+    count: int
+    def __init__(self, ok: bool = ..., auctions: _Optional[_Iterable[_Union[Auction, _Mapping]]] = ..., message: _Optional[str] = ..., count: _Optional[int] = ...) -> None: ...
 
 class RevealAuctionRequest(_message.Message):
     __slots__ = ("auction_id", "seller_id", "expected_version")
@@ -165,7 +167,7 @@ class AuctionUpdate(_message.Message):
     winning_bidder_id: str
     def __init__(self, state: _Optional[_Union[AuctionState, str]] = ..., message: _Optional[str] = ..., high_range: _Optional[float] = ..., low_range: _Optional[float] = ..., bidder_count: _Optional[int] = ..., reserve_met: bool = ..., winning_amount: _Optional[float] = ..., winning_bidder_id: _Optional[str] = ...) -> None: ...
 
-class CommitRequest(_message.Message):
+class AuctionMutationRequest(_message.Message):
     __slots__ = ("auction", "is_reveal_event", "skip_consistency_check")
     AUCTION_FIELD_NUMBER: _ClassVar[int]
     IS_REVEAL_EVENT_FIELD_NUMBER: _ClassVar[int]
@@ -175,7 +177,7 @@ class CommitRequest(_message.Message):
     skip_consistency_check: bool
     def __init__(self, auction: _Optional[_Union[Auction, _Mapping]] = ..., is_reveal_event: bool = ..., skip_consistency_check: bool = ...) -> None: ...
 
-class CommitResponse(_message.Message):
+class AuctionMutationResponse(_message.Message):
     __slots__ = ("success", "current_version", "message")
     SUCCESS_FIELD_NUMBER: _ClassVar[int]
     CURRENT_VERSION_FIELD_NUMBER: _ClassVar[int]
@@ -184,24 +186,6 @@ class CommitResponse(_message.Message):
     current_version: int
     message: str
     def __init__(self, success: bool = ..., current_version: _Optional[int] = ..., message: _Optional[str] = ...) -> None: ...
-
-class QueryRequest(_message.Message):
-    __slots__ = ("filter",)
-    FILTER_FIELD_NUMBER: _ClassVar[int]
-    filter: str
-    def __init__(self, filter: _Optional[str] = ...) -> None: ...
-
-class QueryResponse(_message.Message):
-    __slots__ = ("ok", "auctions", "count", "message")
-    OK_FIELD_NUMBER: _ClassVar[int]
-    AUCTIONS_FIELD_NUMBER: _ClassVar[int]
-    COUNT_FIELD_NUMBER: _ClassVar[int]
-    MESSAGE_FIELD_NUMBER: _ClassVar[int]
-    ok: bool
-    auctions: _containers.RepeatedCompositeFieldContainer[Auction]
-    count: int
-    message: str
-    def __init__(self, ok: bool = ..., auctions: _Optional[_Iterable[_Union[Auction, _Mapping]]] = ..., count: _Optional[int] = ..., message: _Optional[str] = ...) -> None: ...
 
 class StateRequest(_message.Message):
     __slots__ = ("requester_id",)

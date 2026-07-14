@@ -8,8 +8,8 @@ class StorageServiceTests(BackendTestCase):
     def test_initial_commit_assigns_version_and_reserve_met(self):
         judge = make_judge(role="backup")
 
-        response = judge.CommitToVault(
-            pb2.CommitRequest(
+        response = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
                 auction=pb2.Auction(
                     auction_id="auction-1",
                     title="Chronograph",
@@ -34,8 +34,8 @@ class StorageServiceTests(BackendTestCase):
             bids={"buyer-a": 300.0},
         )
 
-        response = judge.CommitToVault(
-            pb2.CommitRequest(
+        response = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
                 auction=pb2.Auction(
                     auction_id="auction-1",
                     version=2,
@@ -59,8 +59,8 @@ class StorageServiceTests(BackendTestCase):
             bids={"buyer-a": 300.0},
         )
 
-        first = judge.CommitToVault(
-            pb2.CommitRequest(
+        first = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
                 auction=pb2.Auction(
                     auction_id="auction-1",
                     version=1,
@@ -69,8 +69,8 @@ class StorageServiceTests(BackendTestCase):
             ),
             NoopContext(),
         )
-        second = judge.CommitToVault(
-            pb2.CommitRequest(
+        second = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
                 auction=pb2.Auction(
                     auction_id="auction-1",
                     version=2,
@@ -95,15 +95,15 @@ class StorageServiceTests(BackendTestCase):
             bids={"buyer-a": 900.0},
         )
 
-        reveal = judge.CommitToVault(
-            pb2.CommitRequest(
+        reveal = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
                 auction=pb2.Auction(auction_id="auction-1", version=4),
                 is_reveal_event=True,
             ),
             NoopContext(),
         )
-        bid_after_reveal = judge.CommitToVault(
-            pb2.CommitRequest(
+        bid_after_reveal = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
                 auction=pb2.Auction(
                     auction_id="auction-1",
                     version=5,
@@ -127,8 +127,8 @@ class StorageServiceTests(BackendTestCase):
         )
 
         with mock.patch.object(judge, "_replicate_to_peers", return_value=False):
-            response = judge.CommitToVault(
-                pb2.CommitRequest(
+            response = judge.ApplyAuctionMutation(
+                pb2.AuctionMutationRequest(
                     auction=pb2.Auction(
                         auction_id="auction-1",
                         version=1,
@@ -155,7 +155,7 @@ class StorageServiceTests(BackendTestCase):
             description="Steel bracelet",
         )
 
-        response = judge.QueryVault(pb2.QueryRequest(filter="brass"), NoopContext())
+        response = judge.SearchAuctions(pb2.SearchAuctionsRequest(query="brass"), NoopContext())
 
         self.assertTrue(response.ok)
         self.assertEqual(response.count, 1)

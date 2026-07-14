@@ -8,8 +8,8 @@ class AuctionLifecycleSpecificationTests(BackendTestCase):
     def test_auction_begins_open(self):
         judge = make_judge(role="backup")
 
-        response = judge.CommitToVault(
-            pb2.CommitRequest(
+        response = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
                 auction=pb2.Auction(
                     auction_id="lifecycle-open",
                     title="Lifecycle Open",
@@ -23,15 +23,15 @@ class AuctionLifecycleSpecificationTests(BackendTestCase):
 
     def test_system_performs_reveal_transition_from_open_to_revealed(self):
         judge = make_judge(role="backup")
-        judge.CommitToVault(
-            pb2.CommitRequest(
+        judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
                 auction=pb2.Auction(auction_id="lifecycle-reveal")
             ),
             NoopContext(),
         )
 
-        response = judge.CommitToVault(
-            pb2.CommitRequest(
+        response = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
                 auction=pb2.Auction(auction_id="lifecycle-reveal", version=1),
                 is_reveal_event=True,
             ),
@@ -53,8 +53,8 @@ class AuctionLifecycleSpecificationTests(BackendTestCase):
             state=pb2.AUCTION_STATE_REVEALED,
         )
 
-        response = judge.CommitToVault(
-            pb2.CommitRequest(
+        response = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
                 auction=pb2.Auction(auction_id="lifecycle-once", version=3),
                 is_reveal_event=True,
             ),
@@ -77,8 +77,8 @@ class AuctionLifecycleSpecificationTests(BackendTestCase):
             bids={"buyer-a": 500.0},
         )
 
-        response = judge.CommitToVault(
-            pb2.CommitRequest(
+        response = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
                 auction=pb2.Auction(
                     auction_id="lifecycle-terminal",
                     version=4,
@@ -100,8 +100,8 @@ class AuctionLifecycleSpecificationTests(BackendTestCase):
             state=pb2.AUCTION_STATE_REVEALED,
         )
 
-        response = judge.CommitToVault(
-            pb2.CommitRequest(
+        response = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
                 auction=pb2.Auction(
                     auction_id="lifecycle-no-reopen",
                     version=2,
@@ -122,8 +122,8 @@ class AuctionLifecycleSpecificationTests(BackendTestCase):
     def test_reveal_requires_an_existing_open_auction(self):
         judge = make_judge(role="backup")
 
-        response = judge.CommitToVault(
-            pb2.CommitRequest(
+        response = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
                 auction=pb2.Auction(auction_id="missing-auction"),
                 is_reveal_event=True,
             ),

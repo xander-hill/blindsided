@@ -141,6 +141,10 @@ export interface SearchAuctionsResponse {
      * @generated from protobuf field: string message = 3
      */
     message: string;
+    /**
+     * @generated from protobuf field: int32 count = 4
+     */
+    count: number;
 }
 /**
  * @generated from protobuf message blindsided.RevealAuctionRequest
@@ -261,9 +265,9 @@ export interface AuctionUpdate {
     winningBidderId: string;
 }
 /**
- * @generated from protobuf message blindsided.CommitRequest
+ * @generated from protobuf message blindsided.AuctionMutationRequest
  */
-export interface CommitRequest {
+export interface AuctionMutationRequest {
     /**
      * @generated from protobuf field: blindsided.Auction auction = 1
      */
@@ -278,9 +282,9 @@ export interface CommitRequest {
     skipConsistencyCheck: boolean;
 }
 /**
- * @generated from protobuf message blindsided.CommitResponse
+ * @generated from protobuf message blindsided.AuctionMutationResponse
  */
-export interface CommitResponse {
+export interface AuctionMutationResponse {
     /**
      * @generated from protobuf field: bool success = 1
      */
@@ -291,36 +295,6 @@ export interface CommitResponse {
     currentVersion: number;
     /**
      * @generated from protobuf field: string message = 3
-     */
-    message: string;
-}
-/**
- * @generated from protobuf message blindsided.QueryRequest
- */
-export interface QueryRequest {
-    /**
-     * @generated from protobuf field: string filter = 1
-     */
-    filter: string;
-}
-/**
- * @generated from protobuf message blindsided.QueryResponse
- */
-export interface QueryResponse {
-    /**
-     * @generated from protobuf field: bool ok = 1
-     */
-    ok: boolean;
-    /**
-     * @generated from protobuf field: repeated blindsided.Auction auctions = 2
-     */
-    auctions: Auction[];
-    /**
-     * @generated from protobuf field: int32 count = 3
-     */
-    count: number;
-    /**
-     * @generated from protobuf field: string message = 4
      */
     message: string;
 }
@@ -933,7 +907,8 @@ class SearchAuctionsResponse$Type extends MessageType<SearchAuctionsResponse> {
         super("blindsided.SearchAuctionsResponse", [
             { no: 1, name: "ok", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
             { no: 2, name: "auctions", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => Auction },
-            { no: 3, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+            { no: 3, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "count", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<SearchAuctionsResponse>): SearchAuctionsResponse {
@@ -941,6 +916,7 @@ class SearchAuctionsResponse$Type extends MessageType<SearchAuctionsResponse> {
         message.ok = false;
         message.auctions = [];
         message.message = "";
+        message.count = 0;
         if (value !== undefined)
             reflectionMergePartial<SearchAuctionsResponse>(this, message, value);
         return message;
@@ -958,6 +934,9 @@ class SearchAuctionsResponse$Type extends MessageType<SearchAuctionsResponse> {
                     break;
                 case /* string message */ 3:
                     message.message = reader.string();
+                    break;
+                case /* int32 count */ 4:
+                    message.count = reader.int32();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -980,6 +959,9 @@ class SearchAuctionsResponse$Type extends MessageType<SearchAuctionsResponse> {
         /* string message = 3; */
         if (message.message !== "")
             writer.tag(3, WireType.LengthDelimited).string(message.message);
+        /* int32 count = 4; */
+        if (message.count !== 0)
+            writer.tag(4, WireType.Varint).int32(message.count);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -1401,23 +1383,23 @@ class AuctionUpdate$Type extends MessageType<AuctionUpdate> {
  */
 export const AuctionUpdate = new AuctionUpdate$Type();
 // @generated message type with reflection information, may provide speed optimized methods
-class CommitRequest$Type extends MessageType<CommitRequest> {
+class AuctionMutationRequest$Type extends MessageType<AuctionMutationRequest> {
     constructor() {
-        super("blindsided.CommitRequest", [
+        super("blindsided.AuctionMutationRequest", [
             { no: 1, name: "auction", kind: "message", T: () => Auction },
             { no: 2, name: "is_reveal_event", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
             { no: 3, name: "skip_consistency_check", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
-    create(value?: PartialMessage<CommitRequest>): CommitRequest {
+    create(value?: PartialMessage<AuctionMutationRequest>): AuctionMutationRequest {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.isRevealEvent = false;
         message.skipConsistencyCheck = false;
         if (value !== undefined)
-            reflectionMergePartial<CommitRequest>(this, message, value);
+            reflectionMergePartial<AuctionMutationRequest>(this, message, value);
         return message;
     }
-    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: CommitRequest): CommitRequest {
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AuctionMutationRequest): AuctionMutationRequest {
         let message = target ?? this.create(), end = reader.pos + length;
         while (reader.pos < end) {
             let [fieldNo, wireType] = reader.tag();
@@ -1442,7 +1424,7 @@ class CommitRequest$Type extends MessageType<CommitRequest> {
         }
         return message;
     }
-    internalBinaryWrite(message: CommitRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+    internalBinaryWrite(message: AuctionMutationRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
         /* blindsided.Auction auction = 1; */
         if (message.auction)
             Auction.internalBinaryWrite(message.auction, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
@@ -1459,28 +1441,28 @@ class CommitRequest$Type extends MessageType<CommitRequest> {
     }
 }
 /**
- * @generated MessageType for protobuf message blindsided.CommitRequest
+ * @generated MessageType for protobuf message blindsided.AuctionMutationRequest
  */
-export const CommitRequest = new CommitRequest$Type();
+export const AuctionMutationRequest = new AuctionMutationRequest$Type();
 // @generated message type with reflection information, may provide speed optimized methods
-class CommitResponse$Type extends MessageType<CommitResponse> {
+class AuctionMutationResponse$Type extends MessageType<AuctionMutationResponse> {
     constructor() {
-        super("blindsided.CommitResponse", [
+        super("blindsided.AuctionMutationResponse", [
             { no: 1, name: "success", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
             { no: 2, name: "current_version", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 3, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
         ]);
     }
-    create(value?: PartialMessage<CommitResponse>): CommitResponse {
+    create(value?: PartialMessage<AuctionMutationResponse>): AuctionMutationResponse {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.success = false;
         message.currentVersion = 0;
         message.message = "";
         if (value !== undefined)
-            reflectionMergePartial<CommitResponse>(this, message, value);
+            reflectionMergePartial<AuctionMutationResponse>(this, message, value);
         return message;
     }
-    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: CommitResponse): CommitResponse {
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AuctionMutationResponse): AuctionMutationResponse {
         let message = target ?? this.create(), end = reader.pos + length;
         while (reader.pos < end) {
             let [fieldNo, wireType] = reader.tag();
@@ -1505,7 +1487,7 @@ class CommitResponse$Type extends MessageType<CommitResponse> {
         }
         return message;
     }
-    internalBinaryWrite(message: CommitResponse, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+    internalBinaryWrite(message: AuctionMutationResponse, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
         /* bool success = 1; */
         if (message.success !== false)
             writer.tag(1, WireType.Varint).bool(message.success);
@@ -1522,127 +1504,9 @@ class CommitResponse$Type extends MessageType<CommitResponse> {
     }
 }
 /**
- * @generated MessageType for protobuf message blindsided.CommitResponse
+ * @generated MessageType for protobuf message blindsided.AuctionMutationResponse
  */
-export const CommitResponse = new CommitResponse$Type();
-// @generated message type with reflection information, may provide speed optimized methods
-class QueryRequest$Type extends MessageType<QueryRequest> {
-    constructor() {
-        super("blindsided.QueryRequest", [
-            { no: 1, name: "filter", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
-        ]);
-    }
-    create(value?: PartialMessage<QueryRequest>): QueryRequest {
-        const message = globalThis.Object.create((this.messagePrototype!));
-        message.filter = "";
-        if (value !== undefined)
-            reflectionMergePartial<QueryRequest>(this, message, value);
-        return message;
-    }
-    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: QueryRequest): QueryRequest {
-        let message = target ?? this.create(), end = reader.pos + length;
-        while (reader.pos < end) {
-            let [fieldNo, wireType] = reader.tag();
-            switch (fieldNo) {
-                case /* string filter */ 1:
-                    message.filter = reader.string();
-                    break;
-                default:
-                    let u = options.readUnknownField;
-                    if (u === "throw")
-                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
-                    let d = reader.skip(wireType);
-                    if (u !== false)
-                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
-            }
-        }
-        return message;
-    }
-    internalBinaryWrite(message: QueryRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
-        /* string filter = 1; */
-        if (message.filter !== "")
-            writer.tag(1, WireType.LengthDelimited).string(message.filter);
-        let u = options.writeUnknownFields;
-        if (u !== false)
-            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
-        return writer;
-    }
-}
-/**
- * @generated MessageType for protobuf message blindsided.QueryRequest
- */
-export const QueryRequest = new QueryRequest$Type();
-// @generated message type with reflection information, may provide speed optimized methods
-class QueryResponse$Type extends MessageType<QueryResponse> {
-    constructor() {
-        super("blindsided.QueryResponse", [
-            { no: 1, name: "ok", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
-            { no: 2, name: "auctions", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => Auction },
-            { no: 3, name: "count", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
-            { no: 4, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
-        ]);
-    }
-    create(value?: PartialMessage<QueryResponse>): QueryResponse {
-        const message = globalThis.Object.create((this.messagePrototype!));
-        message.ok = false;
-        message.auctions = [];
-        message.count = 0;
-        message.message = "";
-        if (value !== undefined)
-            reflectionMergePartial<QueryResponse>(this, message, value);
-        return message;
-    }
-    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: QueryResponse): QueryResponse {
-        let message = target ?? this.create(), end = reader.pos + length;
-        while (reader.pos < end) {
-            let [fieldNo, wireType] = reader.tag();
-            switch (fieldNo) {
-                case /* bool ok */ 1:
-                    message.ok = reader.bool();
-                    break;
-                case /* repeated blindsided.Auction auctions */ 2:
-                    message.auctions.push(Auction.internalBinaryRead(reader, reader.uint32(), options));
-                    break;
-                case /* int32 count */ 3:
-                    message.count = reader.int32();
-                    break;
-                case /* string message */ 4:
-                    message.message = reader.string();
-                    break;
-                default:
-                    let u = options.readUnknownField;
-                    if (u === "throw")
-                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
-                    let d = reader.skip(wireType);
-                    if (u !== false)
-                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
-            }
-        }
-        return message;
-    }
-    internalBinaryWrite(message: QueryResponse, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
-        /* bool ok = 1; */
-        if (message.ok !== false)
-            writer.tag(1, WireType.Varint).bool(message.ok);
-        /* repeated blindsided.Auction auctions = 2; */
-        for (let i = 0; i < message.auctions.length; i++)
-            Auction.internalBinaryWrite(message.auctions[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
-        /* int32 count = 3; */
-        if (message.count !== 0)
-            writer.tag(3, WireType.Varint).int32(message.count);
-        /* string message = 4; */
-        if (message.message !== "")
-            writer.tag(4, WireType.LengthDelimited).string(message.message);
-        let u = options.writeUnknownFields;
-        if (u !== false)
-            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
-        return writer;
-    }
-}
-/**
- * @generated MessageType for protobuf message blindsided.QueryResponse
- */
-export const QueryResponse = new QueryResponse$Type();
+export const AuctionMutationResponse = new AuctionMutationResponse$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class StateRequest$Type extends MessageType<StateRequest> {
     constructor() {
@@ -2418,8 +2282,9 @@ export const AuctionService = new ServiceType("blindsided.AuctionService", [
  * @generated ServiceType for protobuf service blindsided.StorageReplicaService
  */
 export const StorageReplicaService = new ServiceType("blindsided.StorageReplicaService", [
-    { name: "CommitToVault", options: {}, I: CommitRequest, O: CommitResponse },
-    { name: "QueryVault", options: {}, I: QueryRequest, O: QueryResponse },
+    { name: "ApplyAuctionMutation", options: {}, I: AuctionMutationRequest, O: AuctionMutationResponse },
+    { name: "GetAuction", options: {}, I: GetAuctionRequest, O: GetAuctionResponse },
+    { name: "SearchAuctions", options: {}, I: SearchAuctionsRequest, O: SearchAuctionsResponse },
     { name: "SyncFullState", options: {}, I: StateRequest, O: StateResponse },
     { name: "ReplicateAuction", options: {}, I: ReplicationRequest, O: ReplicationResponse },
     { name: "Heartbeat", options: {}, I: HealthCheckRequest, O: HealthCheckResponse },

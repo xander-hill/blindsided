@@ -321,15 +321,20 @@ class StorageReplicaServiceStub(object):
         Args:
             channel: A grpc.Channel.
         """
-        self.CommitToVault = channel.unary_unary(
-                '/blindsided.StorageReplicaService/CommitToVault',
-                request_serializer=blindsided__pb2.CommitRequest.SerializeToString,
-                response_deserializer=blindsided__pb2.CommitResponse.FromString,
+        self.ApplyAuctionMutation = channel.unary_unary(
+                '/blindsided.StorageReplicaService/ApplyAuctionMutation',
+                request_serializer=blindsided__pb2.AuctionMutationRequest.SerializeToString,
+                response_deserializer=blindsided__pb2.AuctionMutationResponse.FromString,
                 _registered_method=True)
-        self.QueryVault = channel.unary_unary(
-                '/blindsided.StorageReplicaService/QueryVault',
-                request_serializer=blindsided__pb2.QueryRequest.SerializeToString,
-                response_deserializer=blindsided__pb2.QueryResponse.FromString,
+        self.GetAuction = channel.unary_unary(
+                '/blindsided.StorageReplicaService/GetAuction',
+                request_serializer=blindsided__pb2.GetAuctionRequest.SerializeToString,
+                response_deserializer=blindsided__pb2.GetAuctionResponse.FromString,
+                _registered_method=True)
+        self.SearchAuctions = channel.unary_unary(
+                '/blindsided.StorageReplicaService/SearchAuctions',
+                request_serializer=blindsided__pb2.SearchAuctionsRequest.SerializeToString,
+                response_deserializer=blindsided__pb2.SearchAuctionsResponse.FromString,
                 _registered_method=True)
         self.SyncFullState = channel.unary_unary(
                 '/blindsided.StorageReplicaService/SyncFullState',
@@ -356,13 +361,19 @@ class StorageReplicaServiceStub(object):
 class StorageReplicaServiceServicer(object):
     """Missing associated documentation comment in .proto file."""
 
-    def CommitToVault(self, request, context):
+    def ApplyAuctionMutation(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def QueryVault(self, request, context):
+    def GetAuction(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def SearchAuctions(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -395,15 +406,20 @@ class StorageReplicaServiceServicer(object):
 
 def add_StorageReplicaServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
-            'CommitToVault': grpc.unary_unary_rpc_method_handler(
-                    servicer.CommitToVault,
-                    request_deserializer=blindsided__pb2.CommitRequest.FromString,
-                    response_serializer=blindsided__pb2.CommitResponse.SerializeToString,
+            'ApplyAuctionMutation': grpc.unary_unary_rpc_method_handler(
+                    servicer.ApplyAuctionMutation,
+                    request_deserializer=blindsided__pb2.AuctionMutationRequest.FromString,
+                    response_serializer=blindsided__pb2.AuctionMutationResponse.SerializeToString,
             ),
-            'QueryVault': grpc.unary_unary_rpc_method_handler(
-                    servicer.QueryVault,
-                    request_deserializer=blindsided__pb2.QueryRequest.FromString,
-                    response_serializer=blindsided__pb2.QueryResponse.SerializeToString,
+            'GetAuction': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetAuction,
+                    request_deserializer=blindsided__pb2.GetAuctionRequest.FromString,
+                    response_serializer=blindsided__pb2.GetAuctionResponse.SerializeToString,
+            ),
+            'SearchAuctions': grpc.unary_unary_rpc_method_handler(
+                    servicer.SearchAuctions,
+                    request_deserializer=blindsided__pb2.SearchAuctionsRequest.FromString,
+                    response_serializer=blindsided__pb2.SearchAuctionsResponse.SerializeToString,
             ),
             'SyncFullState': grpc.unary_unary_rpc_method_handler(
                     servicer.SyncFullState,
@@ -437,7 +453,7 @@ class StorageReplicaService(object):
     """Missing associated documentation comment in .proto file."""
 
     @staticmethod
-    def CommitToVault(request,
+    def ApplyAuctionMutation(request,
             target,
             options=(),
             channel_credentials=None,
@@ -450,9 +466,9 @@ class StorageReplicaService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/blindsided.StorageReplicaService/CommitToVault',
-            blindsided__pb2.CommitRequest.SerializeToString,
-            blindsided__pb2.CommitResponse.FromString,
+            '/blindsided.StorageReplicaService/ApplyAuctionMutation',
+            blindsided__pb2.AuctionMutationRequest.SerializeToString,
+            blindsided__pb2.AuctionMutationResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -464,7 +480,7 @@ class StorageReplicaService(object):
             _registered_method=True)
 
     @staticmethod
-    def QueryVault(request,
+    def GetAuction(request,
             target,
             options=(),
             channel_credentials=None,
@@ -477,9 +493,36 @@ class StorageReplicaService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/blindsided.StorageReplicaService/QueryVault',
-            blindsided__pb2.QueryRequest.SerializeToString,
-            blindsided__pb2.QueryResponse.FromString,
+            '/blindsided.StorageReplicaService/GetAuction',
+            blindsided__pb2.GetAuctionRequest.SerializeToString,
+            blindsided__pb2.GetAuctionResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SearchAuctions(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/blindsided.StorageReplicaService/SearchAuctions',
+            blindsided__pb2.SearchAuctionsRequest.SerializeToString,
+            blindsided__pb2.SearchAuctionsResponse.FromString,
             options,
             channel_credentials,
             insecure,

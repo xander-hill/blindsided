@@ -5,22 +5,30 @@ from backend.tests.helpers import BackendTestCase, ChannelContext, NoopContext
 
 class FakeJudgeStub:
     def __init__(self):
-        self.commits: list[pb2.CommitRequest] = []
-        self.queries: list[pb2.QueryRequest] = []
-        self.commit_responses: list[pb2.CommitResponse] = []
-        self.query_responses: list[pb2.QueryResponse] = []
+        self.mutations: list[pb2.AuctionMutationRequest] = []
+        self.gets: list[pb2.GetAuctionRequest] = []
+        self.searches: list[pb2.SearchAuctionsRequest] = []
+        self.mutation_responses: list[pb2.AuctionMutationResponse] = []
+        self.get_responses: list[pb2.GetAuctionResponse] = []
+        self.search_responses: list[pb2.SearchAuctionsResponse] = []
 
-    def CommitToVault(self, request, timeout=None):
-        self.commits.append(request)
-        if self.commit_responses:
-            return self.commit_responses.pop(0)
-        return pb2.CommitResponse(success=True, current_version=1, message="ok")
+    def ApplyAuctionMutation(self, request, timeout=None):
+        self.mutations.append(request)
+        if self.mutation_responses:
+            return self.mutation_responses.pop(0)
+        return pb2.AuctionMutationResponse(success=True, current_version=1, message="ok")
 
-    def QueryVault(self, request, timeout=None):
-        self.queries.append(request)
-        if self.query_responses:
-            return self.query_responses.pop(0)
-        return pb2.QueryResponse(ok=True)
+    def GetAuction(self, request, timeout=None):
+        self.gets.append(request)
+        if self.get_responses:
+            return self.get_responses.pop(0)
+        return pb2.GetAuctionResponse(ok=False)
+
+    def SearchAuctions(self, request, timeout=None):
+        self.searches.append(request)
+        if self.search_responses:
+            return self.search_responses.pop(0)
+        return pb2.SearchAuctionsResponse(ok=True)
 
 
 class TestableAuctionService(AuctionService):
@@ -39,7 +47,7 @@ class TestableAuctionService(AuctionService):
 
 
 class AuctionServiceTests(BackendTestCase):
-    def test_open_auction_commits_to_primary_vault(self):
+    def test_open_auction_mutations_to_primary_vault(self):
         stub = FakeJudgeStub()
         service = TestableAuctionService(stub)
 
@@ -50,20 +58,18 @@ class AuctionServiceTests(BackendTestCase):
 
         self.assertTrue(response.ok)
         self.assertEqual(response.auction_id, "auction-1")
-        self.assertEqual(stub.commits[0].auction.auction_id, "auction-1")
-        self.assertFalse(stub.commits[0].is_reveal_event)
+        self.assertEqual(stub.mutations[0].auction.auction_id, "auction-1")
+        self.assertFalse(stub.mutations[0].is_reveal_event)
 
     def test_status_masks_bids_before_reveal(self):
         stub = FakeJudgeStub()
-        stub.query_responses.append(pb2.QueryResponse(
+        stub.get_responses.append(pb2.GetAuctionResponse(
             ok=True,
-            auctions=[
-                pb2.Auction(
-                    auction_id="auction-1",
-                    bids={"buyer-a": 100.0},
-                    state=pb2.AUCTION_STATE_OPEN,
-                )
-            ],
+            auction=pb2.Auction(
+                auction_id="auction-1",
+                bids={"buyer-a": 100.0},
+                state=pb2.AUCTION_STATE_OPEN,
+            ),
         ))
         service = TestableAuctionService(stub)
 
@@ -78,15 +84,13 @@ class AuctionServiceTests(BackendTestCase):
 
     def test_status_reveals_bids_after_gavel(self):
         stub = FakeJudgeStub()
-        stub.query_responses.append(pb2.QueryResponse(
+        stub.get_responses.append(pb2.GetAuctionResponse(
             ok=True,
-            auctions=[
-                pb2.Auction(
-                    auction_id="auction-1",
-                    bids={"buyer-a": 100.0},
-                    state=pb2.AUCTION_STATE_REVEALED,
-                )
-            ],
+            auction=pb2.Auction(
+                auction_id="auction-1",
+                bids={"buyer-a": 100.0},
+                state=pb2.AUCTION_STATE_REVEALED,
+            ),
         ))
         service = TestableAuctionService(stub)
 
@@ -100,13 +104,13 @@ class AuctionServiceTests(BackendTestCase):
 
     def test_bid_retries_with_latest_version_after_stale_conflict(self):
         stub = FakeJudgeStub()
-        stub.commit_responses.extend([
-            pb2.CommitResponse(success=False, message="Fog conflict: Stale version."),
-            pb2.CommitResponse(success=True, current_version=8, message="ok"),
+        stub.mutation_responses.extend([
+            pb2.AuctionMutationResponse(success=False, message="Fog conflict: Stale version."),
+            pb2.AuctionMutationResponse(success=True, current_version=8, message="ok"),
         ])
-        stub.query_responses.append(pb2.QueryResponse(
+        stub.get_responses.append(pb2.GetAuctionResponse(
             ok=True,
-            auctions=[pb2.Auction(auction_id="auction-1", version=7)],
+            auction=pb2.Auction(auction_id="auction-1", version=7),
         ))
         service = TestableAuctionService(stub)
 
@@ -121,16 +125,16 @@ class AuctionServiceTests(BackendTestCase):
         )
 
         self.assertTrue(response.success)
-        self.assertEqual(stub.commits[0].auction.version, 6)
-        self.assertEqual(stub.commits[1].auction.version, 7)
+        self.assertEqual(stub.mutations[0].auction.version, 6)
+        self.assertEqual(stub.mutations[1].auction.version, 7)
 
     def test_drop_gavel_returns_public_gavel_response(self):
         stub = FakeJudgeStub()
-        stub.query_responses.append(pb2.QueryResponse(
+        stub.get_responses.append(pb2.GetAuctionResponse(
             ok=True,
-            auctions=[pb2.Auction(auction_id="auction-1", version=3)],
+            auction=pb2.Auction(auction_id="auction-1", version=3),
         ))
-        stub.commit_responses.append(pb2.CommitResponse(
+        stub.mutation_responses.append(pb2.AuctionMutationResponse(
             success=True,
             current_version=4,
             message="Vault updated.",
@@ -145,7 +149,7 @@ class AuctionServiceTests(BackendTestCase):
         self.assertIsInstance(response, pb2.RevealAuctionResponse)
         self.assertTrue(response.ok)
         self.assertEqual(response.final_version, 4)
-        self.assertTrue(stub.commits[0].is_reveal_event)
+        self.assertTrue(stub.mutations[0].is_reveal_event)
 
     def test_opaque_update_uses_public_auction_update_fields(self):
         service = TestableAuctionService(FakeJudgeStub())

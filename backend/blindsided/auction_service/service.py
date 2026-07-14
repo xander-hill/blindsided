@@ -54,7 +54,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
         try:
             stub, channel = self._create_storage_stub(primary_address)
             with channel:
-                response = stub.CommitToVault(pb2.CommitRequest(
+                response = stub.ApplyAuctionMutation(pb2.AuctionMutationRequest(
                     auction=request.auction,
                     is_reveal_event=False,
                     skip_consistency_check=False
@@ -92,7 +92,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                         version=current_attempt_version
                     )
 
-                    response = stub.CommitToVault(pb2.CommitRequest(
+                    response = stub.ApplyAuctionMutation(pb2.AuctionMutationRequest(
                         auction=bid_mutation,
                         is_reveal_event=False
                     ), timeout=3.0)
@@ -101,9 +101,9 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                         return pb2.BidResponse(success=True, message="Vault Updated.")
 
                     if "Stale version" in response.message:
-                        query_response = stub.QueryVault(pb2.QueryRequest(filter=request.auction_id))
-                        if query_response.auctions:
-                            current_attempt_version = query_response.auctions[0].version
+                        query_response = stub.GetAuction(pb2.GetAuctionRequest(auction_id=request.auction_id))
+                        if query_response.ok:
+                            current_attempt_version = query_response.auction.version
                             print(
                                 "[ServiceNode] Version conflict. "
                                 f"Retrying with v{current_attempt_version}"
@@ -129,8 +129,8 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
 
         stub, channel = self._create_storage_stub(primary_address)
         with channel:
-            query_response = stub.QueryVault(pb2.QueryRequest(filter=request.auction_id))
-            current_version = query_response.auctions[0].version if query_response.auctions else 0
+            query_response = stub.GetAuction(pb2.GetAuctionRequest(auction_id=request.auction_id))
+            current_version = query_response.auction.version if query_response.ok else 0
 
             reveal_mutation = pb2.Auction(
                 auction_id=request.auction_id,
@@ -138,7 +138,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                 version=current_version
             )
 
-            response = stub.CommitToVault(pb2.CommitRequest(
+            response = stub.ApplyAuctionMutation(pb2.AuctionMutationRequest(
                 auction=reveal_mutation,
                 is_reveal_event=True
             ))
@@ -160,13 +160,13 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
         else:
             random.shuffle(candidates)
 
-        query = pb2.QueryRequest(filter=request.query)
+        query = pb2.SearchAuctionsRequest(query=request.query, category=request.category)
 
         for addr in candidates:
             try:
                 stub, channel = self._create_storage_stub(addr)
                 with channel:
-                    response = stub.QueryVault(query, timeout=5.0)
+                    response = stub.SearchAuctions(query, timeout=5.0)
                     public_auction = [self._to_public_auction(a) for a in response.auctions]
                     return pb2.SearchAuctionsResponse(
                         ok=True,
@@ -187,9 +187,9 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
         try:
             stub, channel = self._create_storage_stub(primary_address)
             with channel:
-                response = stub.QueryVault(pb2.QueryRequest(filter=request.auction_id))
-                if response.auctions:
-                    public_auction = self._to_public_auction(response.auctions[0])
+                response = stub.GetAuction(pb2.GetAuctionRequest(auction_id=request.auction_id))
+                if response.ok:
+                    public_auction = self._to_public_auction(response.auction)
                     return pb2.GetAuctionResponse(ok=True, auction=public_auction)
                 return pb2.GetAuctionResponse(ok=False, message="Auction not found")
         except Exception as e:
@@ -244,10 +244,10 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
             try:
                 stub, channel = self._create_storage_stub(primary_address)
                 with channel:
-                    response = stub.QueryVault(pb2.QueryRequest(filter=auction_id))
+                    response = stub.GetAuction(pb2.GetAuctionRequest(auction_id=auction_id))
 
-                    if response.auctions:
-                        auction = response.auctions[0]
+                    if response.ok:
+                        auction = response.auction
 
                         if auction.version > last_version:
                             last_version = auction.version

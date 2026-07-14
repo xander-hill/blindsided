@@ -8,8 +8,8 @@ class AuctionLifecycleNegativeSpecificationTests(BackendTestCase):
     def test_creation_request_cannot_start_auction_revealed(self):
         judge = make_judge(role="backup")
 
-        response = judge.CommitToVault(
-            pb2.CommitRequest(
+        response = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
                 auction=pb2.Auction(
                     auction_id="negative-start-revealed",
                     title="Invalid Revealed Auction",
@@ -31,8 +31,8 @@ class AuctionLifecycleNegativeSpecificationTests(BackendTestCase):
             state=pb2.AUCTION_STATE_OPEN,
         )
 
-        response = judge.CommitToVault(
-            pb2.CommitRequest(
+        response = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
                 auction=pb2.Auction(
                     auction_id="negative-direct-reveal",
                     version=5,
@@ -59,8 +59,8 @@ class AuctionLifecycleNegativeSpecificationTests(BackendTestCase):
             state=pb2.AUCTION_STATE_OPEN,
         )
 
-        response = judge.CommitToVault(
-            pb2.CommitRequest(
+        response = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
                 auction=pb2.Auction(
                     auction_id="negative-forced-direct-reveal",
                     version=2,
@@ -87,8 +87,8 @@ class AuctionLifecycleNegativeSpecificationTests(BackendTestCase):
             state=pb2.AUCTION_STATE_OPEN,
         )
 
-        response = judge.CommitToVault(
-            pb2.CommitRequest(
+        response = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
                 auction=pb2.Auction(
                     auction_id="negative-stale-reveal",
                     version=7,
@@ -114,8 +114,8 @@ class AuctionLifecycleNegativeSpecificationTests(BackendTestCase):
             state=pb2.AUCTION_STATE_REVEALED,
         )
 
-        response = judge.CommitToVault(
-            pb2.CommitRequest(
+        response = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
                 auction=pb2.Auction(
                     auction_id="negative-second-reveal",
                     version=3,
@@ -142,8 +142,8 @@ class AuctionLifecycleNegativeSpecificationTests(BackendTestCase):
             bids={"buyer-a": 900.0},
         )
 
-        response = judge.CommitToVault(
-            pb2.CommitRequest(
+        response = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
                 auction=pb2.Auction(
                     auction_id="negative-forced-terminal",
                     version=9,

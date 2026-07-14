@@ -61,8 +61,8 @@ class DistributedBehaviorTests(BackendTestCase):
             address="primary_address:50051",
         )
 
-        response = judge.CommitToVault(
-            pb2.CommitRequest(auction=pb2.Auction(
+        response = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(auction=pb2.Auction(
                 auction_id="degraded-auction",
                 title="Degraded Auction",
             )),

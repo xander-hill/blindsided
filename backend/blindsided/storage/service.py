@@ -52,7 +52,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 print(f"[Judge] Booting... Controller not ready: {e}")
                 time.sleep(2)
 
-    def CommitToVault(self, request: pb2.CommitRequest, context) -> pb2.CommitResponse:
+    def ApplyAuctionMutation(self, request: pb2.AuctionMutationRequest, context) -> pb2.AuctionMutationResponse:
         with self.state_lock:
             auction_id = request.auction.auction_id
             existing_auction = self.auction_store.get(auction_id)
@@ -60,12 +60,12 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
 
             if not existing_auction:
                 if request.is_reveal_event:
-                    return pb2.CommitResponse(
+                    return pb2.AuctionMutationResponse(
                         success=False,
                         message="Cannot reveal an auction that does not exist.",
                     )
                 if incoming_auction.state == pb2.AUCTION_STATE_REVEALED:
-                    return pb2.CommitResponse(
+                    return pb2.AuctionMutationResponse(
                         success=False,
                         message="Auction creation must begin open.",
                     )
@@ -77,7 +77,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                     incoming_auction.reserve_met = highest_bid_amount >= incoming_auction.reserve_price
 
             elif existing_auction.state == pb2.AUCTION_STATE_REVEALED:
-                return pb2.CommitResponse(
+                return pb2.AuctionMutationResponse(
                     success=False,
                     message="The Gavel has already fallen.",
                 )
@@ -86,14 +86,14 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 incoming_auction.state == pb2.AUCTION_STATE_REVEALED
                 and not request.is_reveal_event
             ):
-                return pb2.CommitResponse(
+                return pb2.AuctionMutationResponse(
                     success=False,
                     message="Reveal requires a reveal event.",
                 )
 
             elif not request.skip_consistency_check:
                 if incoming_auction.version != existing_auction.version:
-                    return pb2.CommitResponse(
+                    return pb2.AuctionMutationResponse(
                         success=False,
                         message="Fog conflict: Stale version.",
                     )
@@ -121,28 +121,37 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 if not self._replicate_to_peers(incoming_auction):
                     if existing_auction:
                         self.auction_store[auction_id] = existing_auction
-                    return pb2.CommitResponse(
+                    return pb2.AuctionMutationResponse(
                         success=False,
                         message="Vault replication failed.",
                     )
 
-            return pb2.CommitResponse(
+            return pb2.AuctionMutationResponse(
                 success=True,
                 current_version=incoming_auction.version,
                 message="Vault updated.",
             )
 
-    def QueryVault(self, request: pb2.QueryRequest, context) -> pb2.QueryResponse:
+    def GetAuction(self, request: pb2.GetAuctionRequest, context) -> pb2.GetAuctionResponse:
         with self.state_lock:
-            f = request.filter.strip().lower()
-            all_a = list(self.auction_store.values())
-            matches = all_a if not f else [
-                a for a in all_a
-                if f in a.auction_id.lower()
-                or f in a.title.lower()
-                or f in a.description.lower()
+            auction = self.auction_store.get(request.auction_id)
+            if auction:
+                return pb2.GetAuctionResponse(ok=True, auction=auction)
+            return pb2.GetAuctionResponse(ok=False, message="Auction not found")
+
+    def SearchAuctions(self, request: pb2.SearchAuctionsRequest, context) -> pb2.SearchAuctionsResponse:
+        with self.state_lock:
+            query = request.query.strip().lower()
+            category = request.category.strip().lower()
+            auctions = list(self.auction_store.values())
+            matches = [
+                auction for auction in auctions
+                if (not query or query in auction.auction_id.lower()
+                    or query in auction.title.lower()
+                    or query in auction.description.lower())
+                and (not category or category == auction.category.lower())
             ]
-            return pb2.QueryResponse(
+            return pb2.SearchAuctionsResponse(
                 ok=True,
                 auctions=matches,
                 count=len(matches),

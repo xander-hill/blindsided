@@ -17,10 +17,8 @@ import type { ReplicationResponse } from "./blindsided";
 import type { ReplicationRequest } from "./blindsided";
 import type { StateResponse } from "./blindsided";
 import type { StateRequest } from "./blindsided";
-import type { QueryResponse } from "./blindsided";
-import type { QueryRequest } from "./blindsided";
-import type { CommitResponse } from "./blindsided";
-import type { CommitRequest } from "./blindsided";
+import type { AuctionMutationResponse } from "./blindsided";
+import type { AuctionMutationRequest } from "./blindsided";
 import type { RpcTransport } from "@protobuf-ts/runtime-rpc";
 import type { ServiceInfo } from "@protobuf-ts/runtime-rpc";
 import { AuctionService } from "./blindsided";
@@ -126,13 +124,17 @@ export class AuctionServiceClient implements IAuctionServiceClient, ServiceInfo 
  */
 export interface IStorageReplicaServiceClient {
     /**
-     * @generated from protobuf rpc: CommitToVault
+     * @generated from protobuf rpc: ApplyAuctionMutation
      */
-    commitToVault(input: CommitRequest, options?: RpcOptions): UnaryCall<CommitRequest, CommitResponse>;
+    applyAuctionMutation(input: AuctionMutationRequest, options?: RpcOptions): UnaryCall<AuctionMutationRequest, AuctionMutationResponse>;
     /**
-     * @generated from protobuf rpc: QueryVault
+     * @generated from protobuf rpc: GetAuction
      */
-    queryVault(input: QueryRequest, options?: RpcOptions): UnaryCall<QueryRequest, QueryResponse>;
+    getAuction(input: GetAuctionRequest, options?: RpcOptions): UnaryCall<GetAuctionRequest, GetAuctionResponse>;
+    /**
+     * @generated from protobuf rpc: SearchAuctions
+     */
+    searchAuctions(input: SearchAuctionsRequest, options?: RpcOptions): UnaryCall<SearchAuctionsRequest, SearchAuctionsResponse>;
     /**
      * @generated from protobuf rpc: SyncFullState
      */
@@ -160,45 +162,52 @@ export class StorageReplicaServiceClient implements IStorageReplicaServiceClient
     constructor(private readonly _transport: RpcTransport) {
     }
     /**
-     * @generated from protobuf rpc: CommitToVault
+     * @generated from protobuf rpc: ApplyAuctionMutation
      */
-    commitToVault(input: CommitRequest, options?: RpcOptions): UnaryCall<CommitRequest, CommitResponse> {
+    applyAuctionMutation(input: AuctionMutationRequest, options?: RpcOptions): UnaryCall<AuctionMutationRequest, AuctionMutationResponse> {
         const method = this.methods[0], opt = this._transport.mergeOptions(options);
-        return stackIntercept<CommitRequest, CommitResponse>("unary", this._transport, method, opt, input);
+        return stackIntercept<AuctionMutationRequest, AuctionMutationResponse>("unary", this._transport, method, opt, input);
     }
     /**
-     * @generated from protobuf rpc: QueryVault
+     * @generated from protobuf rpc: GetAuction
      */
-    queryVault(input: QueryRequest, options?: RpcOptions): UnaryCall<QueryRequest, QueryResponse> {
+    getAuction(input: GetAuctionRequest, options?: RpcOptions): UnaryCall<GetAuctionRequest, GetAuctionResponse> {
         const method = this.methods[1], opt = this._transport.mergeOptions(options);
-        return stackIntercept<QueryRequest, QueryResponse>("unary", this._transport, method, opt, input);
+        return stackIntercept<GetAuctionRequest, GetAuctionResponse>("unary", this._transport, method, opt, input);
+    }
+    /**
+     * @generated from protobuf rpc: SearchAuctions
+     */
+    searchAuctions(input: SearchAuctionsRequest, options?: RpcOptions): UnaryCall<SearchAuctionsRequest, SearchAuctionsResponse> {
+        const method = this.methods[2], opt = this._transport.mergeOptions(options);
+        return stackIntercept<SearchAuctionsRequest, SearchAuctionsResponse>("unary", this._transport, method, opt, input);
     }
     /**
      * @generated from protobuf rpc: SyncFullState
      */
     syncFullState(input: StateRequest, options?: RpcOptions): UnaryCall<StateRequest, StateResponse> {
-        const method = this.methods[2], opt = this._transport.mergeOptions(options);
+        const method = this.methods[3], opt = this._transport.mergeOptions(options);
         return stackIntercept<StateRequest, StateResponse>("unary", this._transport, method, opt, input);
     }
     /**
      * @generated from protobuf rpc: ReplicateAuction
      */
     replicateAuction(input: ReplicationRequest, options?: RpcOptions): UnaryCall<ReplicationRequest, ReplicationResponse> {
-        const method = this.methods[3], opt = this._transport.mergeOptions(options);
+        const method = this.methods[4], opt = this._transport.mergeOptions(options);
         return stackIntercept<ReplicationRequest, ReplicationResponse>("unary", this._transport, method, opt, input);
     }
     /**
      * @generated from protobuf rpc: Heartbeat
      */
     heartbeat(input: HealthCheckRequest, options?: RpcOptions): UnaryCall<HealthCheckRequest, HealthCheckResponse> {
-        const method = this.methods[4], opt = this._transport.mergeOptions(options);
+        const method = this.methods[5], opt = this._transport.mergeOptions(options);
         return stackIntercept<HealthCheckRequest, HealthCheckResponse>("unary", this._transport, method, opt, input);
     }
     /**
      * @generated from protobuf rpc: PromoteToPrimary
      */
     promoteToPrimary(input: PromotionRequest, options?: RpcOptions): UnaryCall<PromotionRequest, PromotionResponse> {
-        const method = this.methods[5], opt = this._transport.mergeOptions(options);
+        const method = this.methods[6], opt = this._transport.mergeOptions(options);
         return stackIntercept<PromotionRequest, PromotionResponse>("unary", this._transport, method, opt, input);
     }
 }
