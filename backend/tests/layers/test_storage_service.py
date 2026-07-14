@@ -87,6 +87,27 @@ class StorageServiceTests(BackendTestCase):
         self.assertEqual(judge.auction_store["auction-1"].version, 3)
         self.assertEqual(judge.auction_store["auction-1"].bids["buyer-a"], 700.0)
         self.assertEqual(judge.auction_store["auction-1"].bids["buyer-b"], 450.0)
+        self.assertFalse(judge.auction_store["auction-1"].reserve_met)
+
+    def test_reveal_calculates_reserve_met_from_final_active_bids(self):
+        judge = make_judge(role="backup")
+        judge.auction_store["auction-1"] = pb2.Auction(
+            auction_id="auction-1",
+            reserve_price=500.0,
+            version=1,
+            bids={"buyer-a": 700.0},
+            reserve_met=False,
+        )
+
+        response = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
+                auction=pb2.Auction(auction_id="auction-1", version=1),
+                is_reveal_event=True,
+            ),
+            NoopContext(),
+        )
+
+        self.assertTrue(response.success)
         self.assertTrue(judge.auction_store["auction-1"].reserve_met)
 
     def test_reveal_locks_auction_against_later_bids(self):
@@ -143,6 +164,27 @@ class StorageServiceTests(BackendTestCase):
         self.assertFalse(response.success)
         self.assertEqual(judge.auction_store["auction-1"].version, 1)
         self.assertNotIn("buyer-b", judge.auction_store["auction-1"].bids)
+
+    def test_primary_deletes_new_auction_when_reachable_peer_rejects_replication(self):
+        judge = make_judge(role="primary", peers=["peer-a:50051"])
+
+        with mock.patch.object(judge, "_replicate_to_peers", return_value=False):
+            response = judge.ApplyAuctionMutation(
+                pb2.AuctionMutationRequest(
+                    auction=pb2.Auction(
+                        auction_id="auction-1",
+                        seller_id="seller-a",
+                        title="Chronograph",
+                        reserve_price=500.0,
+                        ends_at=future_timestamp(),
+                    )
+                ),
+                NoopContext(),
+            )
+
+        self.assertFalse(response.success)
+        self.assertIn("replication failed", response.message)
+        self.assertNotIn("auction-1", judge.auction_store)
 
     def test_query_filters_by_id_title_and_description(self):
         judge = make_judge(role="backup")

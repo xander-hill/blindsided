@@ -134,17 +134,10 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
 
                 if request.is_reveal_event:
                     updated_auction.state = pb2.AUCTION_STATE_REVEALED
+                    updated_auction.reserve_met = self._reserve_met(updated_auction)
                 else:
                     for bidder_id, amount in incoming_auction.bids.items():
                         updated_auction.bids[bidder_id] = amount
-
-                    if updated_auction.bids:
-                        highest_bid_amount = max(updated_auction.bids.values())
-                        updated_auction.reserve_met = (
-                            highest_bid_amount >= updated_auction.reserve_price
-                        )
-                    else:
-                        updated_auction.reserve_met = False
 
                 updated_auction.version = existing_auction.version + 1
                 incoming_auction = updated_auction
@@ -155,6 +148,9 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 if not self._replicate_to_peers(incoming_auction):
                     if existing_auction:
                         self.auction_store[auction_id] = existing_auction
+                    else:
+                        del self.auction_store[auction_id]
+                
                     return pb2.AuctionMutationResponse(
                         success=False,
                         message="Vault replication failed.",
@@ -175,6 +171,11 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             or auction.reserve_price > 0
             or auction.HasField("ends_at")
         )
+
+    def _reserve_met(self, auction: pb2.Auction) -> bool:
+        if not auction.bids:
+            return False
+        return max(auction.bids.values()) >= auction.reserve_price
 
     def GetAuction(self, request: pb2.GetAuctionRequest, context) -> pb2.GetAuctionResponse:
         with self.state_lock:
