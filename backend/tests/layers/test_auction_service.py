@@ -114,13 +114,15 @@ class AuctionServiceTests(BackendTestCase):
         self.assertEqual(str(UUID(first.auction_id)), first.auction_id)
         self.assertEqual(str(UUID(second.auction_id)), second.auction_id)
 
-    def test_status_masks_bids_before_reveal(self):
+    def test_status_masks_private_fields_before_reveal(self):
         stub = FakeJudgeStub()
         stub.get_responses.append(pb2.GetAuctionResponse(
             ok=True,
             auction=pb2.Auction(
                 auction_id="auction-1",
                 bids={"buyer-a": 100.0},
+                reserve_price=500.0,
+                reserve_met=True,
                 state=pb2.AUCTION_STATE_OPEN,
             ),
         ))
@@ -134,6 +136,8 @@ class AuctionServiceTests(BackendTestCase):
         self.assertTrue(response.ok)
         self.assertEqual(response.auction.auction_id, "auction-1")
         self.assertEqual(dict(response.auction.bids), {})
+        self.assertEqual(response.auction.reserve_price, 0.0)
+        self.assertFalse(response.auction.reserve_met)
 
     def test_status_reveals_bids_after_gavel(self):
         stub = FakeJudgeStub()
@@ -213,13 +217,28 @@ class AuctionServiceTests(BackendTestCase):
         ))
         revealed = service._to_public_auction_update(pb2.Auction(
             bids={"a": 100.0, "b": 250.0},
+            reserve_price=200.0,
             state=pb2.AUCTION_STATE_REVEALED,
         ))
 
         self.assertEqual(hidden.low_range, 100.0)
         self.assertEqual(hidden.high_range, 250.0)
         self.assertEqual(hidden.bidder_count, 2)
-        self.assertTrue(hidden.reserve_met)
+        self.assertFalse(hidden.reserve_met)
         self.assertEqual(revealed.state, pb2.AUCTION_STATE_REVEALED)
         self.assertEqual(revealed.winning_amount, 250.0)
         self.assertEqual(revealed.winning_bidder_id, "b")
+
+    def test_revealed_update_publishes_no_winner_when_reserve_not_met(self):
+        service = TestableAuctionService(FakeJudgeStub())
+
+        update = service._to_public_auction_update(pb2.Auction(
+            bids={"buyer-a": 250.0},
+            reserve_price=500.0,
+            state=pb2.AUCTION_STATE_REVEALED,
+        ))
+
+        self.assertEqual(update.state, pb2.AUCTION_STATE_REVEALED)
+        self.assertFalse(update.reserve_met)
+        self.assertEqual(update.winning_amount, 0.0)
+        self.assertEqual(update.winning_bidder_id, "")

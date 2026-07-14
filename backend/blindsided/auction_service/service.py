@@ -212,9 +212,11 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
     def _to_public_auction(self, auction: pb2.Auction) -> pb2.Auction:
         public_auction = pb2.Auction()
         public_auction.CopyFrom(auction)
+        public_auction.reserve_price = 0.0
 
         if auction.state != pb2.AUCTION_STATE_REVEALED:
             public_auction.bids.clear()
+            public_auction.reserve_met = False
 
         return public_auction
 
@@ -229,18 +231,30 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                 low_range=min(bid_amounts) if bid_amounts else 0.0,
                 high_range=max(bid_amounts) if bid_amounts else 0.0,
                 bidder_count=len(bid_amounts),
-                reserve_met=auction.reserve_met
+                reserve_met=False
             )
 
-        winning_price = max(auction.bids.values()) if auction.bids else 0.0
-        winning_bidder_id = max(auction.bids, key=auction.bids.get) if auction.bids else "N/A"
+        winning_price, winning_bidder_id = self._winner_from_active_bids(auction)
 
         return pb2.AuctionUpdate(
             state=pb2.AUCTION_STATE_REVEALED,
             message="GAVEL FELL!",
             winning_amount=winning_price,
-            winning_bidder_id=winning_bidder_id
+            winning_bidder_id=winning_bidder_id,
+            bidder_count=len(auction.bids),
+            reserve_met=bool(winning_bidder_id),
         )
+
+    def _winner_from_active_bids(self, auction: pb2.Auction) -> tuple[float, str]:
+        if not auction.bids:
+            return 0.0, ""
+
+        winning_bidder_id = max(auction.bids, key=auction.bids.get)
+        winning_price = auction.bids[winning_bidder_id]
+        if winning_price < auction.reserve_price:
+            return 0.0, ""
+
+        return winning_price, winning_bidder_id
 
     def WatchAuction(self, request: pb2.AuctionRequest, context):
         """Stream public auction updates, revealing winner and amount only at close."""
@@ -275,15 +289,12 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                                     low_range=min(bid_amounts) if bid_amounts else 0.0,
                                     high_range=max(bid_amounts) if bid_amounts else 0.0,
                                     bidder_count=len(bid_amounts),
-                                    reserve_met=auction.reserve_met
+                                    reserve_met=False
                                 )
                             else:
-                                if auction.bids:
-                                    winning_price = max(auction.bids.values())
-                                    winning_bidder_id = max(auction.bids, key=auction.bids.get)
-                                else:
-                                    winning_price = 0.0
-                                    winning_bidder_id = "No Bids Received"
+                                winning_price, winning_bidder_id = (
+                                    self._winner_from_active_bids(auction)
+                                )
 
                                 yield pb2.AuctionUpdate(
                                     state=pb2.AUCTION_STATE_REVEALED,
@@ -291,7 +302,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                                     winning_amount=winning_price,
                                     winning_bidder_id=winning_bidder_id,
                                     bidder_count=len(auction.bids),
-                                    reserve_met=auction.reserve_met
+                                    reserve_met=bool(winning_bidder_id)
                                 )
                                 return
 

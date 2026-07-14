@@ -66,13 +66,13 @@ The reserve price is an auction property, not a bid.
 
 Required behavior:
 
-- The seller MUST configure the reserve price during auction creation.
-- The reserve price MUST NOT be associated with any bidder.
-- The reserve price MUST NOT count toward distinct active bidder count.
-- The reserve price MUST NOT become the winning bid.
-- The reserve price MUST NOT be exposed to external bidders before
+- ✅ The seller MUST configure the reserve price during auction creation.
+- ✅ The reserve price MUST NOT be associated with any bidder.
+- ✅ The reserve price MUST NOT count toward distinct active bidder count.
+- ✅ The reserve price MUST NOT become the winning bid.
+- ✅ The reserve price MUST NOT be exposed to external bidders before
   reveal.
-- The reserve price MUST be evaluated only to determine whether the
+- ✅ The reserve price MUST be evaluated only to determine whether the
   auction outcome is a successful sale.
 
 ---
