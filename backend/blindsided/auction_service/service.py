@@ -102,7 +102,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                 with channel:
                     bid_mutation = pb2.Auction(
                         auction_id=request.auction_id,
-                        bids={request.bidder_id: request.amount},
+                        bids={request.bidder_id: pb2.ActiveBid(amount=request.amount)},
                         version=current_attempt_version
                     )
 
@@ -223,7 +223,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
     def _to_public_auction_update(self, auction: pb2.Auction) -> pb2.AuctionUpdate:
         """Convert private storage state into the live public stream shape."""
         if auction.state != pb2.AUCTION_STATE_REVEALED:
-            bid_amounts = list(auction.bids.values())
+            bid_amounts = [bid.amount for bid in auction.bids.values()]
 
             return pb2.AuctionUpdate(
                 state=pb2.AUCTION_STATE_OPEN,
@@ -249,8 +249,11 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
         if not auction.bids:
             return 0.0, ""
 
-        winning_bidder_id = max(auction.bids, key=auction.bids.get)
-        winning_price = auction.bids[winning_bidder_id]
+        winning_bidder_id, winning_bid = min(
+            auction.bids.items(),
+            key=lambda item: (-item[1].amount, item[1].acceptance_order, item[0]),
+        )
+        winning_price = winning_bid.amount
         if winning_price < auction.reserve_price:
             return 0.0, ""
 
@@ -281,7 +284,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                             last_version = auction.version
 
                             if auction.state != pb2.AUCTION_STATE_REVEALED:
-                                bid_amounts = list(auction.bids.values())
+                                bid_amounts = [bid.amount for bid in auction.bids.values()]
 
                                 yield pb2.AuctionUpdate(
                                     state=pb2.AUCTION_STATE_OPEN,

@@ -97,6 +97,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 incoming_auction.state = pb2.AUCTION_STATE_OPEN
                 incoming_auction.version = 1
                 incoming_auction.reserve_met = False
+                incoming_auction.next_bid_sequence = 1
 
             elif existing_auction.state == pb2.AUCTION_STATE_REVEALED:
                 return pb2.AuctionMutationResponse(
@@ -136,8 +137,31 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                     updated_auction.state = pb2.AUCTION_STATE_REVEALED
                     updated_auction.reserve_met = self._reserve_met(updated_auction)
                 else:
-                    for bidder_id, amount in incoming_auction.bids.items():
-                        updated_auction.bids[bidder_id] = amount
+                    if incoming_auction.bids and self._auction_has_ended(existing_auction):
+                        return pb2.AuctionMutationResponse(
+                            success=False,
+                            message="Auction deadline has passed.",
+                        )
+
+                    next_bid_sequence = self._next_bid_sequence(existing_auction)
+                    for bidder_id, incoming_bid in sorted(incoming_auction.bids.items()):
+                        current_bid = existing_auction.bids.get(bidder_id)
+                        if (
+                            current_bid is not None
+                            and incoming_bid.amount <= current_bid.amount
+                        ):
+                            return pb2.AuctionMutationResponse(
+                                success=False,
+                                message="Bid must be higher than bidder's active bid.",
+                            )
+                        updated_auction.bids[bidder_id].CopyFrom(
+                            pb2.ActiveBid(
+                                amount=incoming_bid.amount,
+                                acceptance_order=next_bid_sequence,
+                            )
+                        )
+                        next_bid_sequence += 1
+                    updated_auction.next_bid_sequence = next_bid_sequence
 
                 updated_auction.version = existing_auction.version + 1
                 incoming_auction = updated_auction
@@ -175,7 +199,20 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
     def _reserve_met(self, auction: pb2.Auction) -> bool:
         if not auction.bids:
             return False
-        return max(auction.bids.values()) >= auction.reserve_price
+        return max(bid.amount for bid in auction.bids.values()) >= auction.reserve_price
+
+    def _next_bid_sequence(self, auction: pb2.Auction) -> int:
+        if auction.next_bid_sequence > 0:
+            return auction.next_bid_sequence
+        if not auction.bids:
+            return 1
+        return max(bid.acceptance_order for bid in auction.bids.values()) + 1
+
+    def _auction_has_ended(self, auction: pb2.Auction) -> bool:
+        if not auction.HasField("ends_at"):
+            return False
+        deadline = auction.ends_at.seconds + (auction.ends_at.nanos / 1_000_000_000)
+        return time.time() >= deadline
 
     def GetAuction(self, request: pb2.GetAuctionRequest, context) -> pb2.GetAuctionResponse:
         with self.state_lock:

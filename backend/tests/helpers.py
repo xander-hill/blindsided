@@ -11,6 +11,7 @@ from google.protobuf import timestamp_pb2
 from blindsided.auction_service import service as auction_service_module
 from blindsided.auction_service.service import AuctionService
 from blindsided.controller.service import ControllerService
+from blindsided.generated import blindsided_pb2 as pb2
 from blindsided.generated import blindsided_pb2_grpc as pb2_grpc
 from blindsided.storage import service as storage_service_module
 from blindsided.storage.service import StorageReplicaService
@@ -31,6 +32,10 @@ class ChannelContext:
 
 def future_timestamp() -> timestamp_pb2.Timestamp:
     return timestamp_pb2.Timestamp(seconds=4102444800)
+
+
+def active_bid(amount: float, acceptance_order: int = 0) -> pb2.ActiveBid:
+    return pb2.ActiveBid(amount=amount, acceptance_order=acceptance_order)
 
 
 def free_port() -> int:

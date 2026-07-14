@@ -25,8 +25,15 @@ def drop_the_gavel():
                 auction = status_resp.auction
                 # Find the winner from the bids map
                 if auction.bids:
-                    winning_bidder_id = max(auction.bids, key=auction.bids.get)
-                    winning_price = auction.bids[winning_bidder_id]
+                    winning_bidder_id, winning_bid = min(
+                        auction.bids.items(),
+                        key=lambda item: (
+                            -item[1].amount,
+                            item[1].acceptance_order,
+                            item[0],
+                        ),
+                    )
+                    winning_price = winning_bid.amount
                     
                     print("\n--- 📜 FINAL AUCTION LOG ---")
                     print(f"Auction ID:    {auction.auction_id}")

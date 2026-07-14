@@ -85,26 +85,26 @@ Each bidder MAY have no more than one active bid per auction.
 
 Required behavior:
 
-- The system MUST enforce at most one active bid per bidder per auction.
-- A new accepted bid from a bidder with an existing active bid MUST
+- ✅ The system MUST enforce at most one active bid per bidder per auction.
+- ✅ A new accepted bid from a bidder with an existing active bid MUST
   replace that bidder's previous active bid.
-- A replaced bid MUST NOT remain eligible to win.
-- A replaced bid MUST NOT count toward distinct active bidder count.
+- ✅ A replaced bid MUST NOT remain eligible to win.
+- ✅ A replaced bid MUST NOT count toward distinct active bidder count.
 
 ### 3.2 Bid Submission
 
 Required behavior:
 
-- A bidder MAY submit one active bid while the auction is `OPEN`.
-- The system MUST reject bid submissions for auctions that are
+- ✅ A bidder MAY submit one active bid while the auction is `OPEN`.
+- ✅ The system MUST reject bid submissions for auctions that are
   `REVEALED`.
-- The system MUST reject bid submissions after `ends_at`.
-- A bidder MUST NOT lower an active bid directly.
-- A successful bid mutation MUST increment the auction version exactly
+- ✅ The system MUST reject bid submissions after `ends_at`.
+- ✅ A bidder MUST NOT lower an active bid directly.
+- ✅ A successful bid mutation MUST increment the auction version exactly
   once.
-- A rejected bid MUST NOT modify auction state.
-- A rejected bid MUST NOT modify the auction version.
-- Each accepted bid MUST receive a deterministic acceptance order.
+- ✅ A rejected bid MUST NOT modify auction state.
+- ✅ A rejected bid MUST NOT modify the auction version.
+- ✅ Each accepted bid MUST receive a deterministic acceptance order.
 
 ### 3.3 Bid Withdrawal
 
@@ -136,9 +136,9 @@ accepted active bid MUST win.
 
 Required behavior:
 
-- Acceptance order MUST be assigned by the system.
-- Acceptance order MUST be deterministic.
-- Acceptance order MUST remain stable across replication.
+- ✅ Acceptance order MUST be assigned by the system.
+- ✅ Acceptance order MUST be deterministic.
+- ✅ Acceptance order MUST remain stable across replication.
 - Acceptance order MUST remain stable across restart.
 - Acceptance order MUST remain stable across failover.
 - Replaced or withdrawn bids MUST NOT retain winner eligibility through

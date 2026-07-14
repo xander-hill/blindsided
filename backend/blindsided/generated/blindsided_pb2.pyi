@@ -20,14 +20,14 @@ AUCTION_STATE_OPEN: AuctionState
 AUCTION_STATE_REVEALED: AuctionState
 
 class Auction(_message.Message):
-    __slots__ = ("auction_id", "seller_id", "title", "category", "description", "reserve_price", "bids", "state", "version", "reserve_met", "ends_at")
+    __slots__ = ("auction_id", "seller_id", "title", "category", "description", "reserve_price", "bids", "state", "version", "reserve_met", "ends_at", "next_bid_sequence")
     class BidsEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
         VALUE_FIELD_NUMBER: _ClassVar[int]
         key: str
-        value: float
-        def __init__(self, key: _Optional[str] = ..., value: _Optional[float] = ...) -> None: ...
+        value: ActiveBid
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[_Union[ActiveBid, _Mapping]] = ...) -> None: ...
     AUCTION_ID_FIELD_NUMBER: _ClassVar[int]
     SELLER_ID_FIELD_NUMBER: _ClassVar[int]
     TITLE_FIELD_NUMBER: _ClassVar[int]
@@ -39,18 +39,20 @@ class Auction(_message.Message):
     VERSION_FIELD_NUMBER: _ClassVar[int]
     RESERVE_MET_FIELD_NUMBER: _ClassVar[int]
     ENDS_AT_FIELD_NUMBER: _ClassVar[int]
+    NEXT_BID_SEQUENCE_FIELD_NUMBER: _ClassVar[int]
     auction_id: str
     seller_id: str
     title: str
     category: str
     description: str
     reserve_price: float
-    bids: _containers.ScalarMap[str, float]
+    bids: _containers.MessageMap[str, ActiveBid]
     state: AuctionState
     version: int
     reserve_met: bool
     ends_at: _timestamp_pb2.Timestamp
-    def __init__(self, auction_id: _Optional[str] = ..., seller_id: _Optional[str] = ..., title: _Optional[str] = ..., category: _Optional[str] = ..., description: _Optional[str] = ..., reserve_price: _Optional[float] = ..., bids: _Optional[_Mapping[str, float]] = ..., state: _Optional[_Union[AuctionState, str]] = ..., version: _Optional[int] = ..., reserve_met: bool = ..., ends_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+    next_bid_sequence: int
+    def __init__(self, auction_id: _Optional[str] = ..., seller_id: _Optional[str] = ..., title: _Optional[str] = ..., category: _Optional[str] = ..., description: _Optional[str] = ..., reserve_price: _Optional[float] = ..., bids: _Optional[_Mapping[str, ActiveBid]] = ..., state: _Optional[_Union[AuctionState, str]] = ..., version: _Optional[int] = ..., reserve_met: bool = ..., ends_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., next_bid_sequence: _Optional[int] = ...) -> None: ...
 
 class CreateAuctionRequest(_message.Message):
     __slots__ = ("seller_id", "title", "category", "description", "reserve_price", "ends_at")
@@ -311,3 +313,11 @@ class ClusterInfoResponse(_message.Message):
     node_addresses: _containers.RepeatedScalarFieldContainer[str]
     message: str
     def __init__(self, success: bool = ..., node_addresses: _Optional[_Iterable[str]] = ..., message: _Optional[str] = ...) -> None: ...
+
+class ActiveBid(_message.Message):
+    __slots__ = ("amount", "acceptance_order")
+    AMOUNT_FIELD_NUMBER: _ClassVar[int]
+    ACCEPTANCE_ORDER_FIELD_NUMBER: _ClassVar[int]
+    amount: float
+    acceptance_order: int
+    def __init__(self, amount: _Optional[float] = ..., acceptance_order: _Optional[int] = ...) -> None: ...

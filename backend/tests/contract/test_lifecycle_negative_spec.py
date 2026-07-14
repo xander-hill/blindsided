@@ -1,5 +1,5 @@
 from blindsided.generated import blindsided_pb2 as pb2
-from backend.tests.helpers import BackendTestCase, NoopContext, make_judge
+from backend.tests.helpers import BackendTestCase, NoopContext, active_bid, make_judge
 
 
 class AuctionLifecycleNegativeSpecificationTests(BackendTestCase):
@@ -139,7 +139,7 @@ class AuctionLifecycleNegativeSpecificationTests(BackendTestCase):
             title="Forced Terminal",
             version=9,
             state=pb2.AUCTION_STATE_REVEALED,
-            bids={"buyer-a": 900.0},
+            bids={"buyer-a": active_bid(900.0, 1)},
         )
 
         response = judge.ApplyAuctionMutation(
@@ -147,7 +147,7 @@ class AuctionLifecycleNegativeSpecificationTests(BackendTestCase):
                 auction=pb2.Auction(
                     auction_id="negative-forced-terminal",
                     version=9,
-                    bids={"buyer-b": 1000.0},
+                    bids={"buyer-b": active_bid(1000.0)},
                 ),
                 skip_consistency_check=True,
             ),
