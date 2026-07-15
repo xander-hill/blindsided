@@ -19,6 +19,9 @@ services:
       - NODE_PORT=50051
       - POD_IP=storage-primary
       - PEER_ADDRESSES=storage-backup:50051
+      - AUCTION_STORE_PATH=/var/lib/blindsided/auction-state.pb
+    volumes:
+      - storage-primary-state:/var/lib/blindsided
     depends_on:
       - controller
 
@@ -32,6 +35,9 @@ services:
       - NODE_PORT=50051
       - POD_IP=storage-backup
       - PEER_ADDRESSES=storage-primary:50051
+      - AUCTION_STORE_PATH=/var/lib/blindsided/auction-state.pb
+    volumes:
+      - storage-backup-state:/var/lib/blindsided
     depends_on:
       - controller
 
@@ -56,3 +62,7 @@ services:
       - "8080:8080" # This is the port your React app will talk to
     depends_on:
       - service-node
+
+volumes:
+  storage-primary-state:
+  storage-backup-state:

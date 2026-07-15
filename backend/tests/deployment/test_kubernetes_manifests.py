@@ -85,3 +85,16 @@ class KubernetesScalingAndReplicationManifestTests(BackendTestCase):
 
         self.assertRegex(statefulset, r"name:\s*POD_IP\s*\n\s*valueFrom:")
         self.assertRegex(statefulset, r"fieldPath:\s*metadata.name")
+
+    def test_storage_statefulset_persists_local_snapshot_across_restarts(self):
+        statefulset = manifest_doc(
+            "deploy/kubernetes/storage.yaml",
+            kind="StatefulSet",
+            name="storage",
+        )
+
+        self.assertRegex(statefulset, r"name:\s*AUCTION_STORE_PATH")
+        self.assertIn("value: \"/var/lib/blindsided/auction-state.pb\"", statefulset)
+        self.assertRegex(statefulset, r"name:\s*storage-state\s*\n\s*mountPath:\s*/var/lib/blindsided")
+        self.assertRegex(statefulset, r"volumeClaimTemplates:")
+        self.assertRegex(statefulset, r'accessModes:\s*\["ReadWriteOnce"\]')

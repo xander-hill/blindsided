@@ -48,6 +48,21 @@ class TieBreakingSpecificationTests(BackendTestCase):
         self.assertEqual(update.winning_bidder_id, "buyer-a")
         self.assertEqual(update.winning_amount, 500.0)
 
+    def test_duplicate_acceptance_order_is_corrupted_not_bidder_id_tiebreak(self):
+        service = AuctionService()
+        auction = pb2.Auction(
+            auction_id="tie-duplicate-corrupt",
+            reserve_price=1.0,
+            state=pb2.AUCTION_STATE_REVEALED,
+            bids={
+                "buyer-a": active_bid(500.0, 1),
+                "buyer-b": active_bid(500.0, 1),
+            },
+        )
+
+        with self.assertRaisesRegex(ValueError, "duplicate acceptance order"):
+            service._winner_from_active_bids(auction)
+
     def test_replaced_bid_does_not_keep_original_acceptance_order(self):
         service = AuctionService()
         judge = make_judge(role="backup")
@@ -90,6 +105,186 @@ class TieBreakingSpecificationTests(BackendTestCase):
         self.assertTrue(reveal.success)
         self.assertEqual(
             judge.auction_store["tie-replacement-order"]
+            .bids["buyer-a"]
+            .acceptance_order,
+            3,
+        )
+        self.assertEqual(update.winning_bidder_id, "buyer-b")
+
+    def test_acceptance_order_remains_stable_across_restart_full_state_sync(self):
+        service = AuctionService()
+        primary = make_judge(role="primary", address="primary:50051")
+        recovered = make_judge(role="backup", address="recovered:50051")
+        primary.auction_store["tie-restart-stability"] = pb2.Auction(
+            auction_id="tie-restart-stability",
+            reserve_price=1.0,
+            version=7,
+            next_bid_sequence=3,
+            bids={
+                "buyer-a": active_bid(500.0, 1),
+                "buyer-b": active_bid(500.0, 2),
+            },
+        )
+
+        state = primary.SyncFullState(pb2.StateRequest(), NoopContext())
+        for auction in state.auctions:
+            recovered.auction_store[auction.auction_id] = auction
+
+        bid_after_recovery = recovered.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
+                mutation_type=pb2.AUCTION_MUTATION_TYPE_PLACE_BID,
+                auction=pb2.Auction(
+                    auction_id="tie-restart-stability",
+                    bids={"buyer-c": active_bid(500.0)},
+                ),
+                expected_version=7,
+            ),
+            NoopContext(),
+        )
+        reveal = recovered.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
+                mutation_type=pb2.AUCTION_MUTATION_TYPE_REVEAL,
+                auction=pb2.Auction(auction_id="tie-restart-stability"),
+                expected_version=8,
+            ),
+            NoopContext(),
+        )
+        update = service._to_public_auction_update(
+            recovered.auction_store["tie-restart-stability"]
+        )
+
+        self.assertTrue(state.ok)
+        self.assertTrue(bid_after_recovery.success)
+        self.assertTrue(reveal.success)
+        self.assertEqual(
+            recovered.auction_store["tie-restart-stability"]
+            .bids["buyer-a"]
+            .acceptance_order,
+            1,
+        )
+        self.assertEqual(
+            recovered.auction_store["tie-restart-stability"]
+            .bids["buyer-c"]
+            .acceptance_order,
+            3,
+        )
+        self.assertEqual(update.winning_bidder_id, "buyer-a")
+
+    def test_acceptance_order_remains_stable_across_failover(self):
+        service = AuctionService()
+        backup = make_judge(role="backup", address="backup:50051")
+        auction = pb2.Auction(
+            auction_id="tie-failover-stability",
+            reserve_price=1.0,
+            version=7,
+            next_bid_sequence=3,
+            bids={
+                "buyer-a": active_bid(500.0, 1),
+                "buyer-b": active_bid(500.0, 2),
+            },
+        )
+
+        replication = backup.ReplicateAuction(
+            pb2.ReplicationRequest(auction=auction),
+            NoopContext(),
+        )
+        promotion = backup.PromoteToPrimary(
+            pb2.PromotionRequest(new_role="primary"),
+            NoopContext(),
+        )
+        bid_after_failover = backup.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
+                mutation_type=pb2.AUCTION_MUTATION_TYPE_PLACE_BID,
+                auction=pb2.Auction(
+                    auction_id="tie-failover-stability",
+                    bids={"buyer-c": active_bid(500.0)},
+                ),
+                expected_version=7,
+            ),
+            NoopContext(),
+        )
+        reveal = backup.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
+                mutation_type=pb2.AUCTION_MUTATION_TYPE_REVEAL,
+                auction=pb2.Auction(auction_id="tie-failover-stability"),
+                expected_version=8,
+            ),
+            NoopContext(),
+        )
+        update = service._to_public_auction_update(
+            backup.auction_store["tie-failover-stability"]
+        )
+
+        self.assertTrue(replication.success)
+        self.assertTrue(promotion.success)
+        self.assertTrue(bid_after_failover.success)
+        self.assertTrue(reveal.success)
+        self.assertEqual(backup.replica_role, "primary")
+        self.assertEqual(
+            backup.auction_store["tie-failover-stability"]
+            .bids["buyer-b"]
+            .acceptance_order,
+            2,
+        )
+        self.assertEqual(
+            backup.auction_store["tie-failover-stability"]
+            .bids["buyer-c"]
+            .acceptance_order,
+            3,
+        )
+        self.assertEqual(update.winning_bidder_id, "buyer-a")
+
+    def test_withdrawn_bid_does_not_keep_original_acceptance_order(self):
+        service = AuctionService()
+        judge = make_judge(role="backup")
+        judge.auction_store["tie-withdrawal-order"] = pb2.Auction(
+            auction_id="tie-withdrawal-order",
+            reserve_price=1.0,
+            version=1,
+            next_bid_sequence=3,
+            bids={
+                "buyer-a": active_bid(500.0, 1),
+                "buyer-b": active_bid(500.0, 2),
+            },
+        )
+
+        withdraw = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
+                mutation_type=pb2.AUCTION_MUTATION_TYPE_WITHDRAW_BID,
+                auction=pb2.Auction(auction_id="tie-withdrawal-order"),
+                bidder_id="buyer-a",
+                expected_version=1,
+            ),
+            NoopContext(),
+        )
+        rebid = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
+                mutation_type=pb2.AUCTION_MUTATION_TYPE_PLACE_BID,
+                auction=pb2.Auction(
+                    auction_id="tie-withdrawal-order",
+                    bids={"buyer-a": active_bid(500.0)},
+                ),
+                expected_version=2,
+            ),
+            NoopContext(),
+        )
+        reveal = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
+                mutation_type=pb2.AUCTION_MUTATION_TYPE_REVEAL,
+                auction=pb2.Auction(auction_id="tie-withdrawal-order"),
+                expected_version=3,
+            ),
+            NoopContext(),
+        )
+        update = service._to_public_auction_update(
+            judge.auction_store["tie-withdrawal-order"]
+        )
+
+        self.assertTrue(withdraw.success)
+        self.assertTrue(rebid.success)
+        self.assertTrue(reveal.success)
+        self.assertEqual(
+            judge.auction_store["tie-withdrawal-order"]
             .bids["buyer-a"]
             .acceptance_order,
             3,

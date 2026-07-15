@@ -1,3 +1,4 @@
+import tempfile
 from unittest import mock
 
 from google.protobuf import timestamp_pb2
@@ -246,6 +247,125 @@ class StorageServiceTests(BackendTestCase):
         self.assertIn("deadline", response.message)
         self.assertNotIn("buyer-b", judge.auction_store["auction-1"].bids)
         self.assertEqual(judge.auction_store["auction-1"].version, 1)
+
+    def test_withdrawal_repairs_missing_next_sequence_before_rebid(self):
+        judge = make_judge(role="backup")
+        judge.auction_store["auction-1"] = pb2.Auction(
+            auction_id="auction-1",
+            version=1,
+            bids={
+                "buyer-a": active_bid(900.0, 3),
+                "buyer-b": active_bid(400.0, 1),
+            },
+        )
+
+        withdraw = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
+                mutation_type=pb2.AUCTION_MUTATION_TYPE_WITHDRAW_BID,
+                auction=pb2.Auction(auction_id="auction-1"),
+                bidder_id="buyer-a",
+                expected_version=1,
+            ),
+            NoopContext(),
+        )
+        rebid = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
+                mutation_type=pb2.AUCTION_MUTATION_TYPE_PLACE_BID,
+                auction=pb2.Auction(
+                    auction_id="auction-1",
+                    bids={"buyer-a": active_bid(100.0)},
+                ),
+                expected_version=2,
+            ),
+            NoopContext(),
+        )
+
+        self.assertTrue(withdraw.success)
+        self.assertTrue(rebid.success)
+        self.assertEqual(judge.auction_store["auction-1"].next_bid_sequence, 5)
+        self.assertEqual(
+            judge.auction_store["auction-1"].bids["buyer-a"].acceptance_order,
+            4,
+        )
+
+    def test_duplicate_acceptance_order_is_rejected_as_corrupted_state(self):
+        judge = make_judge(role="backup")
+        judge.auction_store["auction-1"] = pb2.Auction(
+            auction_id="auction-1",
+            version=1,
+            next_bid_sequence=3,
+            bids={
+                "buyer-a": active_bid(500.0, 1),
+                "buyer-b": active_bid(500.0, 1),
+            },
+        )
+
+        response = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
+                mutation_type=pb2.AUCTION_MUTATION_TYPE_PLACE_BID,
+                auction=pb2.Auction(
+                    auction_id="auction-1",
+                    bids={"buyer-c": active_bid(600.0)},
+                ),
+                expected_version=1,
+            ),
+            NoopContext(),
+        )
+
+        self.assertFalse(response.success)
+        self.assertIn("duplicate acceptance order", response.message)
+        self.assertNotIn("buyer-c", judge.auction_store["auction-1"].bids)
+
+    def test_stale_next_bid_sequence_is_rejected_as_corrupted_state(self):
+        judge = make_judge(role="backup")
+        judge.auction_store["auction-1"] = pb2.Auction(
+            auction_id="auction-1",
+            version=1,
+            next_bid_sequence=2,
+            bids={"buyer-a": active_bid(500.0, 3)},
+        )
+
+        response = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
+                mutation_type=pb2.AUCTION_MUTATION_TYPE_PLACE_BID,
+                auction=pb2.Auction(
+                    auction_id="auction-1",
+                    bids={"buyer-b": active_bid(600.0)},
+                ),
+                expected_version=1,
+            ),
+            NoopContext(),
+        )
+
+        self.assertFalse(response.success)
+        self.assertIn("next bid sequence is stale", response.message)
+        self.assertNotIn("buyer-b", judge.auction_store["auction-1"].bids)
+
+    def test_committed_state_is_loaded_from_local_snapshot_after_restart(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = f"{temp_dir}/auction-state.pb"
+            judge = make_judge(role="backup", state_file_path=state_path)
+
+            response = judge.ApplyAuctionMutation(
+                pb2.AuctionMutationRequest(
+                    mutation_type=pb2.AUCTION_MUTATION_TYPE_CREATE,
+                    auction=pb2.Auction(
+                        auction_id="auction-1",
+                        seller_id="seller-a",
+                        title="Chronograph",
+                        reserve_price=500.0,
+                        ends_at=future_timestamp(),
+                    ),
+                ),
+                NoopContext(),
+            )
+            recovered = make_judge(role="backup", state_file_path=state_path)
+            recovered._load_state_from_disk()
+
+        self.assertTrue(response.success)
+        self.assertIn("auction-1", recovered.auction_store)
+        self.assertEqual(recovered.auction_store["auction-1"].version, 1)
+        self.assertEqual(recovered.auction_store["auction-1"].next_bid_sequence, 1)
 
     def test_reveal_locks_auction_against_later_bids(self):
         judge = make_judge(role="backup")

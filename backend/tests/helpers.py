@@ -49,6 +49,7 @@ def make_judge(
     role: str = "backup",
     peers: list[str] | None = None,
     address: str = "storage-0.storage-service:50051",
+    state_file_path: str = "",
 ) -> StorageReplicaService:
     judge = StorageReplicaService.__new__(StorageReplicaService)
     judge.state_lock = storage_service_module.threading.Condition()
@@ -57,6 +58,7 @@ def make_judge(
     judge.replica_role = role
     judge.peer_addresses = peers or []
     judge.node_address = address
+    judge.state_file_path = state_file_path
     return judge
 
 

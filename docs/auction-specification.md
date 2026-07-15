@@ -139,9 +139,9 @@ Required behavior:
 - ✅ Acceptance order MUST be assigned by the system.
 - ✅ Acceptance order MUST be deterministic.
 - ✅ Acceptance order MUST remain stable across replication.
-- Acceptance order MUST remain stable across restart.
-- Acceptance order MUST remain stable across failover.
-- Replaced or withdrawn bids MUST NOT retain winner eligibility through
+- ✅ Acceptance order MUST remain stable across restart.
+- ✅ Acceptance order MUST remain stable across failover.
+- ✅ Replaced or withdrawn bids MUST NOT retain winner eligibility through
   their original acceptance order.
 
 ---
