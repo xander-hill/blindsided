@@ -89,7 +89,10 @@ class AuctionServiceTests(BackendTestCase):
         self.assertEqual(dict(stub.mutations[0].auction.bids), {})
         self.assertEqual(stub.mutations[0].auction.version, 0)
         self.assertFalse(stub.mutations[0].auction.reserve_met)
-        self.assertFalse(stub.mutations[0].is_reveal_event)
+        self.assertEqual(
+            stub.mutations[0].mutation_type,
+            pb2.AUCTION_MUTATION_TYPE_CREATE,
+        )
 
     def test_create_auction_generates_unique_uuid_ids(self):
         stub = FakeJudgeStub()
@@ -188,6 +191,11 @@ class AuctionServiceTests(BackendTestCase):
         )
 
         self.assertTrue(response.success)
+        self.assertEqual(
+            stub.mutations[0].mutation_type,
+            pb2.AUCTION_MUTATION_TYPE_PLACE_BID,
+        )
+        self.assertEqual(stub.mutations[0].expected_version, 6)
         self.assertEqual(stub.mutations[0].auction.version, 6)
         self.assertEqual(stub.mutations[0].auction.bids["buyer-a"].amount, 250.0)
         self.assertEqual(
@@ -195,6 +203,39 @@ class AuctionServiceTests(BackendTestCase):
             0,
         )
         self.assertEqual(stub.mutations[1].auction.version, 7)
+        self.assertEqual(stub.mutations[1].expected_version, 7)
+
+    def test_withdraw_bid_retries_with_latest_version_after_stale_conflict(self):
+        stub = FakeJudgeStub()
+        stub.mutation_responses.extend([
+            pb2.AuctionMutationResponse(success=False, message="Fog conflict: Stale version."),
+            pb2.AuctionMutationResponse(success=True, current_version=9, message="ok"),
+        ])
+        stub.get_responses.append(pb2.GetAuctionResponse(
+            ok=True,
+            auction=pb2.Auction(auction_id="auction-1", version=8),
+        ))
+        service = TestableAuctionService(stub)
+
+        response = service.WithdrawBid(
+            pb2.WithdrawBidRequest(
+                auction_id="auction-1",
+                bidder_id="buyer-a",
+                expected_version=7,
+            ),
+            NoopContext(),
+        )
+
+        self.assertTrue(response.success)
+        self.assertEqual(response.final_version, 9)
+        self.assertEqual(
+            stub.mutations[0].mutation_type,
+            pb2.AUCTION_MUTATION_TYPE_WITHDRAW_BID,
+        )
+        self.assertEqual(stub.mutations[0].auction.auction_id, "auction-1")
+        self.assertEqual(stub.mutations[0].bidder_id, "buyer-a")
+        self.assertEqual(stub.mutations[0].expected_version, 7)
+        self.assertEqual(stub.mutations[1].expected_version, 8)
 
     def test_drop_gavel_returns_public_gavel_response(self):
         stub = FakeJudgeStub()
@@ -217,7 +258,10 @@ class AuctionServiceTests(BackendTestCase):
         self.assertIsInstance(response, pb2.RevealAuctionResponse)
         self.assertTrue(response.ok)
         self.assertEqual(response.final_version, 4)
-        self.assertTrue(stub.mutations[0].is_reveal_event)
+        self.assertEqual(
+            stub.mutations[0].mutation_type,
+            pb2.AUCTION_MUTATION_TYPE_REVEAL,
+        )
 
     def test_opaque_update_uses_public_auction_update_fields(self):
         service = TestableAuctionService(FakeJudgeStub())

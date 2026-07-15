@@ -113,20 +113,20 @@ their own active bid.
 
 A successful withdrawal MUST:
 
-- remove the bidder's active bid
-- decrease the distinct active bidder count
-- recalculate internal auction state
-- increment the auction version exactly once
+- ✅ remove the bidder's active bid
+- ✅ decrease the distinct active bidder count
+- ✅ recalculate internal auction state
+- ✅ increment the auction version exactly once
 
 Required behavior:
 
-- The system MUST reject withdrawal requests for auctions that are
+- ✅ The system MUST reject withdrawal requests for auctions that are
   `REVEALED`.
-- The system MUST reject withdrawal requests after `ends_at`.
-- A bidder MUST NOT withdraw another bidder's active bid.
-- A withdrawal request for a bidder with no active bid MUST fail without
+- ✅ The system MUST reject withdrawal requests after `ends_at`.
+- ✅ A bidder MUST NOT withdraw another bidder's active bid.
+- ✅ A withdrawal request for a bidder with no active bid MUST fail without
   changing auction state or version.
-- After a successful withdrawal, the bidder MAY submit a new bid at any
+- ✅ After a successful withdrawal, the bidder MAY submit a new bid at any
   valid amount while the auction remains `OPEN`.
 
 ### 3.4 Tie Breaking

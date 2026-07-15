@@ -54,6 +54,11 @@ class AuctionServiceStub(object):
                 request_serializer=blindsided__pb2.BidRequest.SerializeToString,
                 response_deserializer=blindsided__pb2.BidResponse.FromString,
                 _registered_method=True)
+        self.WithdrawBid = channel.unary_unary(
+                '/blindsided.AuctionService/WithdrawBid',
+                request_serializer=blindsided__pb2.WithdrawBidRequest.SerializeToString,
+                response_deserializer=blindsided__pb2.WithdrawBidResponse.FromString,
+                _registered_method=True)
         self.RevealAuction = channel.unary_unary(
                 '/blindsided.AuctionService/RevealAuction',
                 request_serializer=blindsided__pb2.RevealAuctionRequest.SerializeToString,
@@ -93,6 +98,12 @@ class AuctionServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def WithdrawBid(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def RevealAuction(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -127,6 +138,11 @@ def add_AuctionServiceServicer_to_server(servicer, server):
                     servicer.PlaceBid,
                     request_deserializer=blindsided__pb2.BidRequest.FromString,
                     response_serializer=blindsided__pb2.BidResponse.SerializeToString,
+            ),
+            'WithdrawBid': grpc.unary_unary_rpc_method_handler(
+                    servicer.WithdrawBid,
+                    request_deserializer=blindsided__pb2.WithdrawBidRequest.FromString,
+                    response_serializer=blindsided__pb2.WithdrawBidResponse.SerializeToString,
             ),
             'RevealAuction': grpc.unary_unary_rpc_method_handler(
                     servicer.RevealAuction,
@@ -247,6 +263,33 @@ class AuctionService(object):
             '/blindsided.AuctionService/PlaceBid',
             blindsided__pb2.BidRequest.SerializeToString,
             blindsided__pb2.BidResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def WithdrawBid(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/blindsided.AuctionService/WithdrawBid',
+            blindsided__pb2.WithdrawBidRequest.SerializeToString,
+            blindsided__pb2.WithdrawBidResponse.FromString,
             options,
             channel_credentials,
             insecure,

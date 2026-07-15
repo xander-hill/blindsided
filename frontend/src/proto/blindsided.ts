@@ -244,6 +244,40 @@ export interface BidResponse {
     message: string;
 }
 /**
+ * @generated from protobuf message blindsided.WithdrawBidRequest
+ */
+export interface WithdrawBidRequest {
+    /**
+     * @generated from protobuf field: string auction_id = 1
+     */
+    auctionId: string;
+    /**
+     * @generated from protobuf field: string bidder_id = 2
+     */
+    bidderId: string;
+    /**
+     * @generated from protobuf field: int32 expected_version = 3
+     */
+    expectedVersion: number;
+}
+/**
+ * @generated from protobuf message blindsided.WithdrawBidResponse
+ */
+export interface WithdrawBidResponse {
+    /**
+     * @generated from protobuf field: bool success = 1
+     */
+    success: boolean;
+    /**
+     * @generated from protobuf field: int32 final_version = 2
+     */
+    finalVersion: number;
+    /**
+     * @generated from protobuf field: string message = 3
+     */
+    message: string;
+}
+/**
  * @generated from protobuf message blindsided.AuctionRequest
  */
 export interface AuctionRequest {
@@ -298,17 +332,21 @@ export interface AuctionUpdate {
  */
 export interface AuctionMutationRequest {
     /**
-     * @generated from protobuf field: blindsided.Auction auction = 1
+     * @generated from protobuf field: blindsided.AuctionMutationType mutation_type = 1
+     */
+    mutationType: AuctionMutationType;
+    /**
+     * @generated from protobuf field: blindsided.Auction auction = 2
      */
     auction?: Auction;
     /**
-     * @generated from protobuf field: bool is_reveal_event = 2
+     * @generated from protobuf field: string bidder_id = 3
      */
-    isRevealEvent: boolean;
+    bidderId: string;
     /**
-     * @generated from protobuf field: bool skip_consistency_check = 3
+     * @generated from protobuf field: int32 expected_version = 4
      */
-    skipConsistencyCheck: boolean;
+    expectedVersion: number;
 }
 /**
  * @generated from protobuf message blindsided.AuctionMutationResponse
@@ -534,6 +572,31 @@ export enum AuctionState {
      * @generated from protobuf enum value: AUCTION_STATE_REVEALED = 2;
      */
     REVEALED = 2
+}
+/**
+ * @generated from protobuf enum blindsided.AuctionMutationType
+ */
+export enum AuctionMutationType {
+    /**
+     * @generated from protobuf enum value: AUCTION_MUTATION_TYPE_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: AUCTION_MUTATION_TYPE_CREATE = 1;
+     */
+    CREATE = 1,
+    /**
+     * @generated from protobuf enum value: AUCTION_MUTATION_TYPE_PLACE_BID = 2;
+     */
+    PLACE_BID = 2,
+    /**
+     * @generated from protobuf enum value: AUCTION_MUTATION_TYPE_WITHDRAW_BID = 3;
+     */
+    WITHDRAW_BID = 3,
+    /**
+     * @generated from protobuf enum value: AUCTION_MUTATION_TYPE_REVEAL = 4;
+     */
+    REVEAL = 4
 }
 // @generated message type with reflection information, may provide speed optimized methods
 class Auction$Type extends MessageType<Auction> {
@@ -1326,6 +1389,132 @@ class BidResponse$Type extends MessageType<BidResponse> {
  */
 export const BidResponse = new BidResponse$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class WithdrawBidRequest$Type extends MessageType<WithdrawBidRequest> {
+    constructor() {
+        super("blindsided.WithdrawBidRequest", [
+            { no: 1, name: "auction_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "bidder_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "expected_version", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<WithdrawBidRequest>): WithdrawBidRequest {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.auctionId = "";
+        message.bidderId = "";
+        message.expectedVersion = 0;
+        if (value !== undefined)
+            reflectionMergePartial<WithdrawBidRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: WithdrawBidRequest): WithdrawBidRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string auction_id */ 1:
+                    message.auctionId = reader.string();
+                    break;
+                case /* string bidder_id */ 2:
+                    message.bidderId = reader.string();
+                    break;
+                case /* int32 expected_version */ 3:
+                    message.expectedVersion = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: WithdrawBidRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string auction_id = 1; */
+        if (message.auctionId !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.auctionId);
+        /* string bidder_id = 2; */
+        if (message.bidderId !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.bidderId);
+        /* int32 expected_version = 3; */
+        if (message.expectedVersion !== 0)
+            writer.tag(3, WireType.Varint).int32(message.expectedVersion);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message blindsided.WithdrawBidRequest
+ */
+export const WithdrawBidRequest = new WithdrawBidRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class WithdrawBidResponse$Type extends MessageType<WithdrawBidResponse> {
+    constructor() {
+        super("blindsided.WithdrawBidResponse", [
+            { no: 1, name: "success", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 2, name: "final_version", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 3, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<WithdrawBidResponse>): WithdrawBidResponse {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.success = false;
+        message.finalVersion = 0;
+        message.message = "";
+        if (value !== undefined)
+            reflectionMergePartial<WithdrawBidResponse>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: WithdrawBidResponse): WithdrawBidResponse {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* bool success */ 1:
+                    message.success = reader.bool();
+                    break;
+                case /* int32 final_version */ 2:
+                    message.finalVersion = reader.int32();
+                    break;
+                case /* string message */ 3:
+                    message.message = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: WithdrawBidResponse, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* bool success = 1; */
+        if (message.success !== false)
+            writer.tag(1, WireType.Varint).bool(message.success);
+        /* int32 final_version = 2; */
+        if (message.finalVersion !== 0)
+            writer.tag(2, WireType.Varint).int32(message.finalVersion);
+        /* string message = 3; */
+        if (message.message !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.message);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message blindsided.WithdrawBidResponse
+ */
+export const WithdrawBidResponse = new WithdrawBidResponse$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class AuctionRequest$Type extends MessageType<AuctionRequest> {
     constructor() {
         super("blindsided.AuctionRequest", [
@@ -1487,15 +1676,17 @@ export const AuctionUpdate = new AuctionUpdate$Type();
 class AuctionMutationRequest$Type extends MessageType<AuctionMutationRequest> {
     constructor() {
         super("blindsided.AuctionMutationRequest", [
-            { no: 1, name: "auction", kind: "message", T: () => Auction },
-            { no: 2, name: "is_reveal_event", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
-            { no: 3, name: "skip_consistency_check", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+            { no: 1, name: "mutation_type", kind: "enum", T: () => ["blindsided.AuctionMutationType", AuctionMutationType, "AUCTION_MUTATION_TYPE_"] },
+            { no: 2, name: "auction", kind: "message", T: () => Auction },
+            { no: 3, name: "bidder_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "expected_version", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<AuctionMutationRequest>): AuctionMutationRequest {
         const message = globalThis.Object.create((this.messagePrototype!));
-        message.isRevealEvent = false;
-        message.skipConsistencyCheck = false;
+        message.mutationType = 0;
+        message.bidderId = "";
+        message.expectedVersion = 0;
         if (value !== undefined)
             reflectionMergePartial<AuctionMutationRequest>(this, message, value);
         return message;
@@ -1505,14 +1696,17 @@ class AuctionMutationRequest$Type extends MessageType<AuctionMutationRequest> {
         while (reader.pos < end) {
             let [fieldNo, wireType] = reader.tag();
             switch (fieldNo) {
-                case /* blindsided.Auction auction */ 1:
+                case /* blindsided.AuctionMutationType mutation_type */ 1:
+                    message.mutationType = reader.int32();
+                    break;
+                case /* blindsided.Auction auction */ 2:
                     message.auction = Auction.internalBinaryRead(reader, reader.uint32(), options, message.auction);
                     break;
-                case /* bool is_reveal_event */ 2:
-                    message.isRevealEvent = reader.bool();
+                case /* string bidder_id */ 3:
+                    message.bidderId = reader.string();
                     break;
-                case /* bool skip_consistency_check */ 3:
-                    message.skipConsistencyCheck = reader.bool();
+                case /* int32 expected_version */ 4:
+                    message.expectedVersion = reader.int32();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -1526,15 +1720,18 @@ class AuctionMutationRequest$Type extends MessageType<AuctionMutationRequest> {
         return message;
     }
     internalBinaryWrite(message: AuctionMutationRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
-        /* blindsided.Auction auction = 1; */
+        /* blindsided.AuctionMutationType mutation_type = 1; */
+        if (message.mutationType !== 0)
+            writer.tag(1, WireType.Varint).int32(message.mutationType);
+        /* blindsided.Auction auction = 2; */
         if (message.auction)
-            Auction.internalBinaryWrite(message.auction, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
-        /* bool is_reveal_event = 2; */
-        if (message.isRevealEvent !== false)
-            writer.tag(2, WireType.Varint).bool(message.isRevealEvent);
-        /* bool skip_consistency_check = 3; */
-        if (message.skipConsistencyCheck !== false)
-            writer.tag(3, WireType.Varint).bool(message.skipConsistencyCheck);
+            Auction.internalBinaryWrite(message.auction, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* string bidder_id = 3; */
+        if (message.bidderId !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.bidderId);
+        /* int32 expected_version = 4; */
+        if (message.expectedVersion !== 0)
+            writer.tag(4, WireType.Varint).int32(message.expectedVersion);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -2431,6 +2628,7 @@ export const AuctionService = new ServiceType("blindsided.AuctionService", [
     { name: "GetAuction", options: {}, I: GetAuctionRequest, O: GetAuctionResponse },
     { name: "SearchAuctions", options: {}, I: SearchAuctionsRequest, O: SearchAuctionsResponse },
     { name: "PlaceBid", options: {}, I: BidRequest, O: BidResponse },
+    { name: "WithdrawBid", options: {}, I: WithdrawBidRequest, O: WithdrawBidResponse },
     { name: "RevealAuction", options: {}, I: RevealAuctionRequest, O: RevealAuctionResponse },
     { name: "WatchAuction", serverStreaming: true, options: {}, I: AuctionRequest, O: AuctionUpdate }
 ]);

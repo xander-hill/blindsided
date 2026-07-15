@@ -48,7 +48,7 @@ class AuctionLifecycleSpecificationTests(BackendTestCase):
         response = judge.ApplyAuctionMutation(
             pb2.AuctionMutationRequest(
                 auction=pb2.Auction(auction_id="lifecycle-reveal", version=1),
-                is_reveal_event=True,
+                mutation_type=pb2.AUCTION_MUTATION_TYPE_REVEAL,
             ),
             NoopContext(),
         )
@@ -71,7 +71,7 @@ class AuctionLifecycleSpecificationTests(BackendTestCase):
         response = judge.ApplyAuctionMutation(
             pb2.AuctionMutationRequest(
                 auction=pb2.Auction(auction_id="lifecycle-once", version=3),
-                is_reveal_event=True,
+                mutation_type=pb2.AUCTION_MUTATION_TYPE_REVEAL,
             ),
             NoopContext(),
         )
@@ -122,7 +122,7 @@ class AuctionLifecycleSpecificationTests(BackendTestCase):
                     version=2,
                     state=pb2.AUCTION_STATE_OPEN,
                 ),
-                skip_consistency_check=True,
+                mutation_type=pb2.AUCTION_MUTATION_TYPE_PLACE_BID,
             ),
             NoopContext(),
         )
@@ -140,7 +140,7 @@ class AuctionLifecycleSpecificationTests(BackendTestCase):
         response = judge.ApplyAuctionMutation(
             pb2.AuctionMutationRequest(
                 auction=pb2.Auction(auction_id="missing-auction"),
-                is_reveal_event=True,
+                mutation_type=pb2.AUCTION_MUTATION_TYPE_REVEAL,
             ),
             NoopContext(),
         )

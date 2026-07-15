@@ -27,6 +27,8 @@ import type { AuctionRequest } from "./blindsided";
 import type { ServerStreamingCall } from "@protobuf-ts/runtime-rpc";
 import type { RevealAuctionResponse } from "./blindsided";
 import type { RevealAuctionRequest } from "./blindsided";
+import type { WithdrawBidResponse } from "./blindsided";
+import type { WithdrawBidRequest } from "./blindsided";
 import type { BidResponse } from "./blindsided";
 import type { BidRequest } from "./blindsided";
 import type { SearchAuctionsResponse } from "./blindsided";
@@ -58,6 +60,10 @@ export interface IAuctionServiceClient {
      * @generated from protobuf rpc: PlaceBid
      */
     placeBid(input: BidRequest, options?: RpcOptions): UnaryCall<BidRequest, BidResponse>;
+    /**
+     * @generated from protobuf rpc: WithdrawBid
+     */
+    withdrawBid(input: WithdrawBidRequest, options?: RpcOptions): UnaryCall<WithdrawBidRequest, WithdrawBidResponse>;
     /**
      * @generated from protobuf rpc: RevealAuction
      */
@@ -105,17 +111,24 @@ export class AuctionServiceClient implements IAuctionServiceClient, ServiceInfo 
         return stackIntercept<BidRequest, BidResponse>("unary", this._transport, method, opt, input);
     }
     /**
+     * @generated from protobuf rpc: WithdrawBid
+     */
+    withdrawBid(input: WithdrawBidRequest, options?: RpcOptions): UnaryCall<WithdrawBidRequest, WithdrawBidResponse> {
+        const method = this.methods[4], opt = this._transport.mergeOptions(options);
+        return stackIntercept<WithdrawBidRequest, WithdrawBidResponse>("unary", this._transport, method, opt, input);
+    }
+    /**
      * @generated from protobuf rpc: RevealAuction
      */
     revealAuction(input: RevealAuctionRequest, options?: RpcOptions): UnaryCall<RevealAuctionRequest, RevealAuctionResponse> {
-        const method = this.methods[4], opt = this._transport.mergeOptions(options);
+        const method = this.methods[5], opt = this._transport.mergeOptions(options);
         return stackIntercept<RevealAuctionRequest, RevealAuctionResponse>("unary", this._transport, method, opt, input);
     }
     /**
      * @generated from protobuf rpc: WatchAuction
      */
     watchAuction(input: AuctionRequest, options?: RpcOptions): ServerStreamingCall<AuctionRequest, AuctionUpdate> {
-        const method = this.methods[5], opt = this._transport.mergeOptions(options);
+        const method = this.methods[6], opt = this._transport.mergeOptions(options);
         return stackIntercept<AuctionRequest, AuctionUpdate>("serverStreaming", this._transport, method, opt, input);
     }
 }

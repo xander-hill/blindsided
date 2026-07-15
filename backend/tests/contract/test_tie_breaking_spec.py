@@ -78,7 +78,7 @@ class TieBreakingSpecificationTests(BackendTestCase):
                     auction_id="tie-replacement-order",
                     version=2,
                 ),
-                is_reveal_event=True,
+                mutation_type=pb2.AUCTION_MUTATION_TYPE_REVEAL,
             ),
             NoopContext(),
         )

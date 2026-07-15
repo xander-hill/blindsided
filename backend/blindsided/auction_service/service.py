@@ -69,9 +69,8 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
             stub, channel = self._create_storage_stub(primary_address)
             with channel:
                 response = stub.ApplyAuctionMutation(pb2.AuctionMutationRequest(
+                    mutation_type=pb2.AUCTION_MUTATION_TYPE_CREATE,
                     auction=auction,
-                    is_reveal_event=False,
-                    skip_consistency_check=False
                 ), timeout=5.0)
 
                 if response.success:
@@ -107,8 +106,9 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                     )
 
                     response = stub.ApplyAuctionMutation(pb2.AuctionMutationRequest(
+                        mutation_type=pb2.AUCTION_MUTATION_TYPE_PLACE_BID,
                         auction=bid_mutation,
-                        is_reveal_event=False
+                        expected_version=current_attempt_version,
                     ), timeout=3.0)
 
                     if response.success:
@@ -136,6 +136,61 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
             message=f"Vault write contention too high: {last_error}",
         )
 
+    def WithdrawBid(self, request: pb2.WithdrawBidRequest, context) -> pb2.WithdrawBidResponse:
+        """Withdraw the caller's active bid through the current primary replica."""
+        max_retries = int(os.getenv("BID_MAX_RETRIES", "50"))
+        last_error = "Unknown error"
+        current_attempt_version = request.expected_version
+
+        for attempt in range(max_retries):
+            primary_address = self._get_primary_address()
+            if not primary_address:
+                time.sleep(1.0)
+                continue
+
+            try:
+                stub, channel = self._create_storage_stub(primary_address)
+                with channel:
+                    response = stub.ApplyAuctionMutation(pb2.AuctionMutationRequest(
+                        mutation_type=pb2.AUCTION_MUTATION_TYPE_WITHDRAW_BID,
+                        auction=pb2.Auction(auction_id=request.auction_id),
+                        bidder_id=request.bidder_id,
+                        expected_version=current_attempt_version,
+                    ), timeout=3.0)
+
+                    if response.success:
+                        return pb2.WithdrawBidResponse(
+                            success=True,
+                            final_version=response.current_version,
+                            message="Vault Updated.",
+                        )
+
+                    if "Stale version" in response.message:
+                        query_response = stub.GetAuction(pb2.GetAuctionRequest(auction_id=request.auction_id))
+                        if query_response.ok:
+                            current_attempt_version = query_response.auction.version
+                            print(
+                                "[ServiceNode] Version conflict. "
+                                f"Retrying withdrawal with v{current_attempt_version}"
+                            )
+                            time.sleep(min(0.01 * (attempt + 1), 0.05))
+                            continue
+
+                    return pb2.WithdrawBidResponse(
+                        success=False,
+                        final_version=response.current_version,
+                        message=response.message,
+                    )
+
+            except grpc.RpcError as e:
+                last_error = f"Judge connection failed: {e.details()}"
+                time.sleep(1.0)
+
+        return pb2.WithdrawBidResponse(
+            success=False,
+            message=f"Vault write contention too high: {last_error}",
+        )
+
     def RevealAuction(self, request: pb2.RevealAuctionRequest, context):
         primary_address = self._get_primary_address()
         if not primary_address:
@@ -153,8 +208,9 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
             )
 
             response = stub.ApplyAuctionMutation(pb2.AuctionMutationRequest(
+                mutation_type=pb2.AUCTION_MUTATION_TYPE_REVEAL,
                 auction=reveal_mutation,
-                is_reveal_event=True
+                expected_version=current_version,
             ))
 
             return pb2.RevealAuctionResponse(
