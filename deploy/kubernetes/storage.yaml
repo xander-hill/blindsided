@@ -45,5 +45,18 @@ spec:
               fieldPath: metadata.name
         - name: PEER_ADDRESSES
           value: "storage-0.storage-service:50051,storage-1.storage-service:50051"
+        - name: AUCTION_STORE_PATH
+          value: "/var/lib/blindsided/auction-state.pb"
         ports:
         - containerPort: 50051
+        volumeMounts:
+        - name: storage-state
+          mountPath: /var/lib/blindsided
+  volumeClaimTemplates:
+  - metadata:
+      name: storage-state
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 1Gi

@@ -15,6 +15,11 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
     def __init__(self) -> None:
         self.state_lock = threading.Condition()
         self.auction_store: dict[str, pb2.Auction] = {}
+        self.state_file_path = (
+            os.getenv("AUCTION_STORE_PATH")
+            or os.getenv("STORAGE_STATE_PATH")
+            or ""
+        )
 
         self.port = os.getenv("NODE_PORT", "50051")
         self.replica_role = os.getenv("NODE_ROLE", "backup")
@@ -29,6 +34,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 raw_address if ":" in raw_address else f"{raw_address}:{NODE_PORT}"
             )
 
+        self._load_state_from_disk()
         self._initialize_connection()
 
     def _initialize_connection(self):
@@ -121,6 +127,13 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 )
 
             else:
+                state_error = self._acceptance_order_state_error(existing_auction)
+                if state_error:
+                    return pb2.AuctionMutationResponse(
+                        success=False,
+                        message=state_error,
+                    )
+
                 if self._includes_creation_metadata(incoming_auction):
                     return pb2.AuctionMutationResponse(
                         success=False,
@@ -188,6 +201,9 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                             success=False,
                             message="Bidder has no active bid to withdraw.",
                         )
+                    updated_auction.next_bid_sequence = self._next_bid_sequence(
+                        existing_auction
+                    )
                     del updated_auction.bids[bidder_id]
                 else:
                     return pb2.AuctionMutationResponse(
@@ -211,6 +227,8 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                         success=False,
                         message="Vault replication failed.",
                     )
+
+            self._persist_state_to_disk()
 
             return pb2.AuctionMutationResponse(
                 success=True,
@@ -252,6 +270,20 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
         if not auction.bids:
             return 1
         return max(bid.acceptance_order for bid in auction.bids.values()) + 1
+
+    def _acceptance_order_state_error(self, auction: pb2.Auction) -> str:
+        active_orders = [
+            bid.acceptance_order
+            for bid in auction.bids.values()
+            if bid.acceptance_order > 0
+        ]
+        if len(active_orders) != len(set(active_orders)):
+            return "Corrupted auction state: duplicate acceptance order."
+        if auction.next_bid_sequence > 0 and active_orders:
+            next_required_sequence = max(active_orders) + 1
+            if auction.next_bid_sequence < next_required_sequence:
+                return "Corrupted auction state: next bid sequence is stale."
+        return ""
 
     def _auction_has_ended(self, auction: pb2.Auction) -> bool:
         if not auction.HasField("ends_at"):
@@ -310,7 +342,14 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
 
     def ReplicateAuction(self, request, context):
         with self.state_lock:
+            state_error = self._acceptance_order_state_error(request.auction)
+            if state_error:
+                return pb2.ReplicationResponse(
+                    success=False,
+                    message=state_error,
+                )
             self.auction_store[request.auction.auction_id] = request.auction
+            self._persist_state_to_disk()
             return pb2.ReplicationResponse(
                 success=True,
                 ack_version=request.auction.version,
@@ -345,5 +384,37 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 resp = stub.SyncFullState(pb2.StateRequest(), timeout=10.0)
                 for auction in resp.auctions:
                     self.auction_store[auction.auction_id] = auction
+                self._persist_state_to_disk()
         except Exception as e:
             print(f"[Judge] Sync failed: {e}")
+
+    def _load_state_from_disk(self) -> None:
+        if not self.state_file_path or not os.path.exists(self.state_file_path):
+            return
+        try:
+            snapshot = pb2.StateResponse()
+            with open(self.state_file_path, "rb") as state_file:
+                snapshot.ParseFromString(state_file.read())
+            self.auction_store = {
+                auction.auction_id: auction
+                for auction in snapshot.auctions
+                if not self._acceptance_order_state_error(auction)
+            }
+        except Exception as e:
+            print(f"[Judge] Could not load local state snapshot: {e}")
+
+    def _persist_state_to_disk(self) -> None:
+        if not self.state_file_path:
+            return
+        snapshot = pb2.StateResponse(
+            ok=True,
+            auctions=list(self.auction_store.values()),
+            message="Local storage snapshot",
+        )
+        state_dir = os.path.dirname(self.state_file_path)
+        if state_dir:
+            os.makedirs(state_dir, exist_ok=True)
+        temp_path = f"{self.state_file_path}.tmp"
+        with open(temp_path, "wb") as state_file:
+            state_file.write(snapshot.SerializeToString())
+        os.replace(temp_path, self.state_file_path)

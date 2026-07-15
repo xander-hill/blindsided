@@ -305,6 +305,14 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
         if not auction.bids:
             return 0.0, ""
 
+        acceptance_orders = [
+            bid.acceptance_order
+            for bid in auction.bids.values()
+            if bid.acceptance_order > 0
+        ]
+        if len(acceptance_orders) != len(set(acceptance_orders)):
+            raise ValueError("Corrupted auction state: duplicate acceptance order.")
+
         winning_bidder_id, winning_bid = min(
             auction.bids.items(),
             key=lambda item: (-item[1].amount, item[1].acceptance_order, item[0]),
