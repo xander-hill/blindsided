@@ -162,7 +162,7 @@ class StorageServiceTests(BackendTestCase):
         response = judge.ApplyAuctionMutation(
             pb2.AuctionMutationRequest(
                 auction=pb2.Auction(auction_id="auction-1", version=1),
-                is_reveal_event=True,
+                mutation_type=pb2.AUCTION_MUTATION_TYPE_REVEAL,
             ),
             NoopContext(),
         )
@@ -258,7 +258,7 @@ class StorageServiceTests(BackendTestCase):
         reveal = judge.ApplyAuctionMutation(
             pb2.AuctionMutationRequest(
                 auction=pb2.Auction(auction_id="auction-1", version=4),
-                is_reveal_event=True,
+                mutation_type=pb2.AUCTION_MUTATION_TYPE_REVEAL,
             ),
             NoopContext(),
         )

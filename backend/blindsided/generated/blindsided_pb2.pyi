@@ -15,9 +15,22 @@ class AuctionState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     AUCTION_STATE_UNSPECIFIED: _ClassVar[AuctionState]
     AUCTION_STATE_OPEN: _ClassVar[AuctionState]
     AUCTION_STATE_REVEALED: _ClassVar[AuctionState]
+
+class AuctionMutationType(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    AUCTION_MUTATION_TYPE_UNSPECIFIED: _ClassVar[AuctionMutationType]
+    AUCTION_MUTATION_TYPE_CREATE: _ClassVar[AuctionMutationType]
+    AUCTION_MUTATION_TYPE_PLACE_BID: _ClassVar[AuctionMutationType]
+    AUCTION_MUTATION_TYPE_WITHDRAW_BID: _ClassVar[AuctionMutationType]
+    AUCTION_MUTATION_TYPE_REVEAL: _ClassVar[AuctionMutationType]
 AUCTION_STATE_UNSPECIFIED: AuctionState
 AUCTION_STATE_OPEN: AuctionState
 AUCTION_STATE_REVEALED: AuctionState
+AUCTION_MUTATION_TYPE_UNSPECIFIED: AuctionMutationType
+AUCTION_MUTATION_TYPE_CREATE: AuctionMutationType
+AUCTION_MUTATION_TYPE_PLACE_BID: AuctionMutationType
+AUCTION_MUTATION_TYPE_WITHDRAW_BID: AuctionMutationType
+AUCTION_MUTATION_TYPE_REVEAL: AuctionMutationType
 
 class Auction(_message.Message):
     __slots__ = ("auction_id", "seller_id", "title", "category", "description", "reserve_price", "bids", "state", "version", "reserve_met", "ends_at", "next_bid_sequence")
@@ -156,6 +169,26 @@ class BidResponse(_message.Message):
     message: str
     def __init__(self, success: bool = ..., message: _Optional[str] = ...) -> None: ...
 
+class WithdrawBidRequest(_message.Message):
+    __slots__ = ("auction_id", "bidder_id", "expected_version")
+    AUCTION_ID_FIELD_NUMBER: _ClassVar[int]
+    BIDDER_ID_FIELD_NUMBER: _ClassVar[int]
+    EXPECTED_VERSION_FIELD_NUMBER: _ClassVar[int]
+    auction_id: str
+    bidder_id: str
+    expected_version: int
+    def __init__(self, auction_id: _Optional[str] = ..., bidder_id: _Optional[str] = ..., expected_version: _Optional[int] = ...) -> None: ...
+
+class WithdrawBidResponse(_message.Message):
+    __slots__ = ("success", "final_version", "message")
+    SUCCESS_FIELD_NUMBER: _ClassVar[int]
+    FINAL_VERSION_FIELD_NUMBER: _ClassVar[int]
+    MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    success: bool
+    final_version: int
+    message: str
+    def __init__(self, success: bool = ..., final_version: _Optional[int] = ..., message: _Optional[str] = ...) -> None: ...
+
 class AuctionRequest(_message.Message):
     __slots__ = ("auction_id", "user_id")
     AUCTION_ID_FIELD_NUMBER: _ClassVar[int]
@@ -185,14 +218,16 @@ class AuctionUpdate(_message.Message):
     def __init__(self, state: _Optional[_Union[AuctionState, str]] = ..., message: _Optional[str] = ..., high_range: _Optional[float] = ..., low_range: _Optional[float] = ..., bidder_count: _Optional[int] = ..., reserve_met: bool = ..., winning_amount: _Optional[float] = ..., winning_bidder_id: _Optional[str] = ...) -> None: ...
 
 class AuctionMutationRequest(_message.Message):
-    __slots__ = ("auction", "is_reveal_event", "skip_consistency_check")
+    __slots__ = ("mutation_type", "auction", "bidder_id", "expected_version")
+    MUTATION_TYPE_FIELD_NUMBER: _ClassVar[int]
     AUCTION_FIELD_NUMBER: _ClassVar[int]
-    IS_REVEAL_EVENT_FIELD_NUMBER: _ClassVar[int]
-    SKIP_CONSISTENCY_CHECK_FIELD_NUMBER: _ClassVar[int]
+    BIDDER_ID_FIELD_NUMBER: _ClassVar[int]
+    EXPECTED_VERSION_FIELD_NUMBER: _ClassVar[int]
+    mutation_type: AuctionMutationType
     auction: Auction
-    is_reveal_event: bool
-    skip_consistency_check: bool
-    def __init__(self, auction: _Optional[_Union[Auction, _Mapping]] = ..., is_reveal_event: bool = ..., skip_consistency_check: bool = ...) -> None: ...
+    bidder_id: str
+    expected_version: int
+    def __init__(self, mutation_type: _Optional[_Union[AuctionMutationType, str]] = ..., auction: _Optional[_Union[Auction, _Mapping]] = ..., bidder_id: _Optional[str] = ..., expected_version: _Optional[int] = ...) -> None: ...
 
 class AuctionMutationResponse(_message.Message):
     __slots__ = ("success", "current_version", "message")

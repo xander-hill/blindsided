@@ -93,7 +93,7 @@ class ActiveBidSpecificationTests(BackendTestCase):
                     auction_id="active-replaced-not-winner",
                     version=2,
                 ),
-                is_reveal_event=True,
+                mutation_type=pb2.AUCTION_MUTATION_TYPE_REVEAL,
             ),
             NoopContext(),
         )

@@ -10,6 +10,14 @@ enum AuctionState {
     AUCTION_STATE_REVEALED = 2;
 }
 
+enum AuctionMutationType {
+    AUCTION_MUTATION_TYPE_UNSPECIFIED = 0;
+    AUCTION_MUTATION_TYPE_CREATE = 1;
+    AUCTION_MUTATION_TYPE_PLACE_BID = 2;
+    AUCTION_MUTATION_TYPE_WITHDRAW_BID = 3;
+    AUCTION_MUTATION_TYPE_REVEAL = 4;
+}
+
 message Auction {
     string auction_id = 1;
     string seller_id = 2;
@@ -30,6 +38,7 @@ service AuctionService {
     rpc GetAuction (GetAuctionRequest) returns (GetAuctionResponse);
     rpc SearchAuctions (SearchAuctionsRequest) returns (SearchAuctionsResponse);
     rpc PlaceBid (BidRequest) returns (BidResponse);
+    rpc WithdrawBid(WithdrawBidRequest) returns (WithdrawBidResponse);
     rpc RevealAuction (RevealAuctionRequest) returns (RevealAuctionResponse);
     rpc WatchAuction (AuctionRequest) returns (stream AuctionUpdate);
 }
@@ -83,6 +92,18 @@ message BidRequest {
 }
 message BidResponse { bool success = 1; string message = 2; }
 
+message WithdrawBidRequest {
+    string auction_id = 1;
+    string bidder_id = 2;
+    int32 expected_version = 3;
+}
+
+message WithdrawBidResponse {
+    bool success = 1;
+    int32 final_version = 2;
+    string message = 3;
+}
+
 message AuctionRequest { string auction_id = 1; string user_id = 2; }
 message AuctionUpdate {
     AuctionState state = 1;
@@ -96,9 +117,10 @@ message AuctionUpdate {
 }
 
 message AuctionMutationRequest {
-    Auction auction = 1; 
-    bool is_reveal_event = 2; 
-    bool skip_consistency_check = 3; 
+    AuctionMutationType mutation_type = 1;
+    Auction auction = 2;
+    string bidder_id = 3;
+    int32 expected_version = 4;
 }
 message AuctionMutationResponse { bool success = 1; int32 current_version = 2; string message = 3; }
 

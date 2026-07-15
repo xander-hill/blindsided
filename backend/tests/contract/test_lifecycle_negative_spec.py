@@ -38,7 +38,7 @@ class AuctionLifecycleNegativeSpecificationTests(BackendTestCase):
                     version=5,
                     state=pb2.AUCTION_STATE_REVEALED,
                 ),
-                is_reveal_event=False,
+                mutation_type=pb2.AUCTION_MUTATION_TYPE_PLACE_BID,
             ),
             NoopContext(),
         )
@@ -66,7 +66,7 @@ class AuctionLifecycleNegativeSpecificationTests(BackendTestCase):
                     version=2,
                     state=pb2.AUCTION_STATE_REVEALED,
                 ),
-                skip_consistency_check=True,
+                mutation_type=pb2.AUCTION_MUTATION_TYPE_PLACE_BID,
             ),
             NoopContext(),
         )
@@ -93,7 +93,7 @@ class AuctionLifecycleNegativeSpecificationTests(BackendTestCase):
                     auction_id="negative-stale-reveal",
                     version=7,
                 ),
-                is_reveal_event=True,
+                mutation_type=pb2.AUCTION_MUTATION_TYPE_REVEAL,
             ),
             NoopContext(),
         )
@@ -120,7 +120,7 @@ class AuctionLifecycleNegativeSpecificationTests(BackendTestCase):
                     auction_id="negative-second-reveal",
                     version=3,
                 ),
-                is_reveal_event=True,
+                mutation_type=pb2.AUCTION_MUTATION_TYPE_REVEAL,
             ),
             NoopContext(),
         )
@@ -149,7 +149,7 @@ class AuctionLifecycleNegativeSpecificationTests(BackendTestCase):
                     version=9,
                     bids={"buyer-b": active_bid(1000.0)},
                 ),
-                skip_consistency_check=True,
+                mutation_type=pb2.AUCTION_MUTATION_TYPE_PLACE_BID,
             ),
             NoopContext(),
         )

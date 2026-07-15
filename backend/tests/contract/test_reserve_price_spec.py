@@ -150,7 +150,7 @@ class ReservePriceSpecificationTests(BackendTestCase):
                     auction_id="reserve-finalized-on-reveal",
                     version=2,
                 ),
-                is_reveal_event=True,
+                mutation_type=pb2.AUCTION_MUTATION_TYPE_REVEAL,
             ),
             NoopContext(),
         )
