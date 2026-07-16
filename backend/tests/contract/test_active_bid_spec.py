@@ -97,14 +97,14 @@ class ActiveBidSpecificationTests(BackendTestCase):
             ),
             NoopContext(),
         )
-        public_update = service._to_public_auction_update(
+        winning_amount, winning_bidder_id = service._winner_from_active_bids(
             judge.auction_store["active-replaced-not-winner"]
         )
 
         self.assertTrue(replace.success)
         self.assertTrue(reveal.success)
-        self.assertEqual(public_update.winning_bidder_id, "buyer-a")
-        self.assertEqual(public_update.winning_amount, 200.0)
+        self.assertEqual(winning_bidder_id, "buyer-a")
+        self.assertEqual(winning_amount, 200.0)
 
     def test_replaced_bid_does_not_count_toward_distinct_active_bidder_count(self):
         service = AuctionService()

@@ -372,12 +372,12 @@ class StorageReplicaServiceStub(object):
         self.GetAuction = channel.unary_unary(
                 '/blindsided.StorageReplicaService/GetAuction',
                 request_serializer=blindsided__pb2.GetAuctionRequest.SerializeToString,
-                response_deserializer=blindsided__pb2.GetAuctionResponse.FromString,
+                response_deserializer=blindsided__pb2.GetStoredAuctionResponse.FromString,
                 _registered_method=True)
         self.SearchAuctions = channel.unary_unary(
                 '/blindsided.StorageReplicaService/SearchAuctions',
                 request_serializer=blindsided__pb2.SearchAuctionsRequest.SerializeToString,
-                response_deserializer=blindsided__pb2.SearchAuctionsResponse.FromString,
+                response_deserializer=blindsided__pb2.GetStoredAuctionsResponse.FromString,
                 _registered_method=True)
         self.SyncFullState = channel.unary_unary(
                 '/blindsided.StorageReplicaService/SyncFullState',
@@ -457,12 +457,12 @@ def add_StorageReplicaServiceServicer_to_server(servicer, server):
             'GetAuction': grpc.unary_unary_rpc_method_handler(
                     servicer.GetAuction,
                     request_deserializer=blindsided__pb2.GetAuctionRequest.FromString,
-                    response_serializer=blindsided__pb2.GetAuctionResponse.SerializeToString,
+                    response_serializer=blindsided__pb2.GetStoredAuctionResponse.SerializeToString,
             ),
             'SearchAuctions': grpc.unary_unary_rpc_method_handler(
                     servicer.SearchAuctions,
                     request_deserializer=blindsided__pb2.SearchAuctionsRequest.FromString,
-                    response_serializer=blindsided__pb2.SearchAuctionsResponse.SerializeToString,
+                    response_serializer=blindsided__pb2.GetStoredAuctionsResponse.SerializeToString,
             ),
             'SyncFullState': grpc.unary_unary_rpc_method_handler(
                     servicer.SyncFullState,
@@ -538,7 +538,7 @@ class StorageReplicaService(object):
             target,
             '/blindsided.StorageReplicaService/GetAuction',
             blindsided__pb2.GetAuctionRequest.SerializeToString,
-            blindsided__pb2.GetAuctionResponse.FromString,
+            blindsided__pb2.GetStoredAuctionResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -565,7 +565,7 @@ class StorageReplicaService(object):
             target,
             '/blindsided.StorageReplicaService/SearchAuctions',
             blindsided__pb2.SearchAuctionsRequest.SerializeToString,
-            blindsided__pb2.SearchAuctionsResponse.FromString,
+            blindsided__pb2.GetStoredAuctionsResponse.FromString,
             options,
             channel_credentials,
             insecure,

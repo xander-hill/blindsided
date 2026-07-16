@@ -13,23 +13,12 @@ export const AuctionCard = ({ id }: { id: string }) => {
       
       {data.state === AuctionState.REVEALED ? (
         <div style={{ color: '#00ff00' }}>
-          <h4>🔨 GAVEL FELL</h4>
-          <p>Winner: {data.winningBidderId}</p>
-          <p>Price: ${data.winningAmount}</p>
+          <h4>GAVEL FELL</h4>
+          <p>Bidders: {data.bidderCount}</p>
         </div>
       ) : (
         <div>
           <p>Bidders: {data.bidderCount}</p>
-          <div style={{ background: '#222', height: '10px', width: '100%' }}>
-             {/* Simple visualization of the opaque range */}
-             <div style={{ 
-                marginLeft: `${(data.lowRange / 1000) * 100}%`, 
-                width: `${((data.highRange - data.lowRange) / 1000) * 100}%`,
-                background: 'orange', height: '100%' 
-             }}></div>
-          </div>
-          <p>Opaque Range: ${data.lowRange} - ${data.highRange}</p>
-          {data.reserveMet && <span style={{color: 'gold'}}>Reserve Met</span>}
         </div>
       )}
     </div>

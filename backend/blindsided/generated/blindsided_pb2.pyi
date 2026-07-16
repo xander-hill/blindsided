@@ -67,6 +67,28 @@ class Auction(_message.Message):
     next_bid_sequence: int
     def __init__(self, auction_id: _Optional[str] = ..., seller_id: _Optional[str] = ..., title: _Optional[str] = ..., category: _Optional[str] = ..., description: _Optional[str] = ..., reserve_price: _Optional[float] = ..., bids: _Optional[_Mapping[str, ActiveBid]] = ..., state: _Optional[_Union[AuctionState, str]] = ..., version: _Optional[int] = ..., reserve_met: bool = ..., ends_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., next_bid_sequence: _Optional[int] = ...) -> None: ...
 
+class PublicAuction(_message.Message):
+    __slots__ = ("auction_id", "seller_id", "title", "category", "description", "state", "version", "ends_at", "bidder_count")
+    AUCTION_ID_FIELD_NUMBER: _ClassVar[int]
+    SELLER_ID_FIELD_NUMBER: _ClassVar[int]
+    TITLE_FIELD_NUMBER: _ClassVar[int]
+    CATEGORY_FIELD_NUMBER: _ClassVar[int]
+    DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
+    STATE_FIELD_NUMBER: _ClassVar[int]
+    VERSION_FIELD_NUMBER: _ClassVar[int]
+    ENDS_AT_FIELD_NUMBER: _ClassVar[int]
+    BIDDER_COUNT_FIELD_NUMBER: _ClassVar[int]
+    auction_id: str
+    seller_id: str
+    title: str
+    category: str
+    description: str
+    state: AuctionState
+    version: int
+    ends_at: _timestamp_pb2.Timestamp
+    bidder_count: int
+    def __init__(self, auction_id: _Optional[str] = ..., seller_id: _Optional[str] = ..., title: _Optional[str] = ..., category: _Optional[str] = ..., description: _Optional[str] = ..., state: _Optional[_Union[AuctionState, str]] = ..., version: _Optional[int] = ..., ends_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., bidder_count: _Optional[int] = ...) -> None: ...
+
 class CreateAuctionRequest(_message.Message):
     __slots__ = ("seller_id", "title", "category", "description", "reserve_price", "ends_at")
     SELLER_ID_FIELD_NUMBER: _ClassVar[int]
@@ -105,6 +127,16 @@ class GetAuctionResponse(_message.Message):
     AUCTION_FIELD_NUMBER: _ClassVar[int]
     MESSAGE_FIELD_NUMBER: _ClassVar[int]
     ok: bool
+    auction: PublicAuction
+    message: str
+    def __init__(self, ok: bool = ..., auction: _Optional[_Union[PublicAuction, _Mapping]] = ..., message: _Optional[str] = ...) -> None: ...
+
+class GetStoredAuctionResponse(_message.Message):
+    __slots__ = ("ok", "auction", "message")
+    OK_FIELD_NUMBER: _ClassVar[int]
+    AUCTION_FIELD_NUMBER: _ClassVar[int]
+    MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    ok: bool
     auction: Auction
     message: str
     def __init__(self, ok: bool = ..., auction: _Optional[_Union[Auction, _Mapping]] = ..., message: _Optional[str] = ...) -> None: ...
@@ -118,6 +150,18 @@ class SearchAuctionsRequest(_message.Message):
     def __init__(self, query: _Optional[str] = ..., category: _Optional[str] = ...) -> None: ...
 
 class SearchAuctionsResponse(_message.Message):
+    __slots__ = ("ok", "auctions", "message", "count")
+    OK_FIELD_NUMBER: _ClassVar[int]
+    AUCTIONS_FIELD_NUMBER: _ClassVar[int]
+    MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    COUNT_FIELD_NUMBER: _ClassVar[int]
+    ok: bool
+    auctions: _containers.RepeatedCompositeFieldContainer[PublicAuction]
+    message: str
+    count: int
+    def __init__(self, ok: bool = ..., auctions: _Optional[_Iterable[_Union[PublicAuction, _Mapping]]] = ..., message: _Optional[str] = ..., count: _Optional[int] = ...) -> None: ...
+
+class GetStoredAuctionsResponse(_message.Message):
     __slots__ = ("ok", "auctions", "message", "count")
     OK_FIELD_NUMBER: _ClassVar[int]
     AUCTIONS_FIELD_NUMBER: _ClassVar[int]
@@ -198,24 +242,16 @@ class AuctionRequest(_message.Message):
     def __init__(self, auction_id: _Optional[str] = ..., user_id: _Optional[str] = ...) -> None: ...
 
 class AuctionUpdate(_message.Message):
-    __slots__ = ("state", "message", "high_range", "low_range", "bidder_count", "reserve_met", "winning_amount", "winning_bidder_id")
+    __slots__ = ("state", "message", "bidder_count", "version")
     STATE_FIELD_NUMBER: _ClassVar[int]
     MESSAGE_FIELD_NUMBER: _ClassVar[int]
-    HIGH_RANGE_FIELD_NUMBER: _ClassVar[int]
-    LOW_RANGE_FIELD_NUMBER: _ClassVar[int]
     BIDDER_COUNT_FIELD_NUMBER: _ClassVar[int]
-    RESERVE_MET_FIELD_NUMBER: _ClassVar[int]
-    WINNING_AMOUNT_FIELD_NUMBER: _ClassVar[int]
-    WINNING_BIDDER_ID_FIELD_NUMBER: _ClassVar[int]
+    VERSION_FIELD_NUMBER: _ClassVar[int]
     state: AuctionState
     message: str
-    high_range: float
-    low_range: float
     bidder_count: int
-    reserve_met: bool
-    winning_amount: float
-    winning_bidder_id: str
-    def __init__(self, state: _Optional[_Union[AuctionState, str]] = ..., message: _Optional[str] = ..., high_range: _Optional[float] = ..., low_range: _Optional[float] = ..., bidder_count: _Optional[int] = ..., reserve_met: bool = ..., winning_amount: _Optional[float] = ..., winning_bidder_id: _Optional[str] = ...) -> None: ...
+    version: int
+    def __init__(self, state: _Optional[_Union[AuctionState, str]] = ..., message: _Optional[str] = ..., bidder_count: _Optional[int] = ..., version: _Optional[int] = ...) -> None: ...
 
 class AuctionMutationRequest(_message.Message):
     __slots__ = ("mutation_type", "auction", "bidder_id", "expected_version")

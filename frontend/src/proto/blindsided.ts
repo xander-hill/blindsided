@@ -67,6 +67,47 @@ export interface Auction {
      */
     nextBidSequence: bigint;
 }
+/**
+ * @generated from protobuf message blindsided.PublicAuction
+ */
+export interface PublicAuction {
+    /**
+     * @generated from protobuf field: string auction_id = 1
+     */
+    auctionId: string;
+    /**
+     * @generated from protobuf field: string seller_id = 2
+     */
+    sellerId: string;
+    /**
+     * @generated from protobuf field: string title = 3
+     */
+    title: string;
+    /**
+     * @generated from protobuf field: string category = 4
+     */
+    category: string;
+    /**
+     * @generated from protobuf field: string description = 5
+     */
+    description: string;
+    /**
+     * @generated from protobuf field: blindsided.AuctionState state = 6
+     */
+    state: AuctionState;
+    /**
+     * @generated from protobuf field: int32 version = 7
+     */
+    version: number;
+    /**
+     * @generated from protobuf field: google.protobuf.Timestamp ends_at = 8
+     */
+    endsAt?: Timestamp;
+    /**
+     * @generated from protobuf field: int32 bidder_count = 9
+     */
+    bidderCount: number;
+}
 // --- Requests & Responses ---
 
 /**
@@ -133,6 +174,23 @@ export interface GetAuctionResponse {
      */
     ok: boolean;
     /**
+     * @generated from protobuf field: blindsided.PublicAuction auction = 2
+     */
+    auction?: PublicAuction;
+    /**
+     * @generated from protobuf field: string message = 3
+     */
+    message: string;
+}
+/**
+ * @generated from protobuf message blindsided.GetStoredAuctionResponse
+ */
+export interface GetStoredAuctionResponse {
+    /**
+     * @generated from protobuf field: bool ok = 1
+     */
+    ok: boolean;
+    /**
      * @generated from protobuf field: blindsided.Auction auction = 2
      */
     auction?: Auction;
@@ -158,6 +216,27 @@ export interface SearchAuctionsRequest {
  * @generated from protobuf message blindsided.SearchAuctionsResponse
  */
 export interface SearchAuctionsResponse {
+    /**
+     * @generated from protobuf field: bool ok = 1
+     */
+    ok: boolean;
+    /**
+     * @generated from protobuf field: repeated blindsided.PublicAuction auctions = 2
+     */
+    auctions: PublicAuction[];
+    /**
+     * @generated from protobuf field: string message = 3
+     */
+    message: string;
+    /**
+     * @generated from protobuf field: int32 count = 4
+     */
+    count: number;
+}
+/**
+ * @generated from protobuf message blindsided.GetStoredAuctionsResponse
+ */
+export interface GetStoredAuctionsResponse {
     /**
      * @generated from protobuf field: bool ok = 1
      */
@@ -303,29 +382,13 @@ export interface AuctionUpdate {
      */
     message: string;
     /**
-     * @generated from protobuf field: float high_range = 3
-     */
-    highRange: number;
-    /**
-     * @generated from protobuf field: float low_range = 4
-     */
-    lowRange: number;
-    /**
-     * @generated from protobuf field: int32 bidder_count = 5
+     * @generated from protobuf field: int32 bidder_count = 3
      */
     bidderCount: number;
     /**
-     * @generated from protobuf field: bool reserve_met = 6
+     * @generated from protobuf field: int32 version = 4
      */
-    reserveMet: boolean;
-    /**
-     * @generated from protobuf field: float winning_amount = 7
-     */
-    winningAmount: number;
-    /**
-     * @generated from protobuf field: string winning_bidder_id = 8
-     */
-    winningBidderId: string;
+    version: number;
 }
 /**
  * @generated from protobuf message blindsided.AuctionMutationRequest
@@ -753,6 +816,116 @@ class Auction$Type extends MessageType<Auction> {
  */
 export const Auction = new Auction$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class PublicAuction$Type extends MessageType<PublicAuction> {
+    constructor() {
+        super("blindsided.PublicAuction", [
+            { no: 1, name: "auction_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "seller_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "title", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "category", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "description", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "state", kind: "enum", T: () => ["blindsided.AuctionState", AuctionState, "AUCTION_STATE_"] },
+            { no: 7, name: "version", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 8, name: "ends_at", kind: "message", T: () => Timestamp },
+            { no: 9, name: "bidder_count", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<PublicAuction>): PublicAuction {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.auctionId = "";
+        message.sellerId = "";
+        message.title = "";
+        message.category = "";
+        message.description = "";
+        message.state = 0;
+        message.version = 0;
+        message.bidderCount = 0;
+        if (value !== undefined)
+            reflectionMergePartial<PublicAuction>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: PublicAuction): PublicAuction {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string auction_id */ 1:
+                    message.auctionId = reader.string();
+                    break;
+                case /* string seller_id */ 2:
+                    message.sellerId = reader.string();
+                    break;
+                case /* string title */ 3:
+                    message.title = reader.string();
+                    break;
+                case /* string category */ 4:
+                    message.category = reader.string();
+                    break;
+                case /* string description */ 5:
+                    message.description = reader.string();
+                    break;
+                case /* blindsided.AuctionState state */ 6:
+                    message.state = reader.int32();
+                    break;
+                case /* int32 version */ 7:
+                    message.version = reader.int32();
+                    break;
+                case /* google.protobuf.Timestamp ends_at */ 8:
+                    message.endsAt = Timestamp.internalBinaryRead(reader, reader.uint32(), options, message.endsAt);
+                    break;
+                case /* int32 bidder_count */ 9:
+                    message.bidderCount = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: PublicAuction, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string auction_id = 1; */
+        if (message.auctionId !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.auctionId);
+        /* string seller_id = 2; */
+        if (message.sellerId !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.sellerId);
+        /* string title = 3; */
+        if (message.title !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.title);
+        /* string category = 4; */
+        if (message.category !== "")
+            writer.tag(4, WireType.LengthDelimited).string(message.category);
+        /* string description = 5; */
+        if (message.description !== "")
+            writer.tag(5, WireType.LengthDelimited).string(message.description);
+        /* blindsided.AuctionState state = 6; */
+        if (message.state !== 0)
+            writer.tag(6, WireType.Varint).int32(message.state);
+        /* int32 version = 7; */
+        if (message.version !== 0)
+            writer.tag(7, WireType.Varint).int32(message.version);
+        /* google.protobuf.Timestamp ends_at = 8; */
+        if (message.endsAt)
+            Timestamp.internalBinaryWrite(message.endsAt, writer.tag(8, WireType.LengthDelimited).fork(), options).join();
+        /* int32 bidder_count = 9; */
+        if (message.bidderCount !== 0)
+            writer.tag(9, WireType.Varint).int32(message.bidderCount);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message blindsided.PublicAuction
+ */
+export const PublicAuction = new PublicAuction$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class CreateAuctionRequest$Type extends MessageType<CreateAuctionRequest> {
     constructor() {
         super("blindsided.CreateAuctionRequest", [
@@ -953,7 +1126,7 @@ class GetAuctionResponse$Type extends MessageType<GetAuctionResponse> {
     constructor() {
         super("blindsided.GetAuctionResponse", [
             { no: 1, name: "ok", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
-            { no: 2, name: "auction", kind: "message", T: () => Auction },
+            { no: 2, name: "auction", kind: "message", T: () => PublicAuction },
             { no: 3, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
         ]);
     }
@@ -966,6 +1139,68 @@ class GetAuctionResponse$Type extends MessageType<GetAuctionResponse> {
         return message;
     }
     internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetAuctionResponse): GetAuctionResponse {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* bool ok */ 1:
+                    message.ok = reader.bool();
+                    break;
+                case /* blindsided.PublicAuction auction */ 2:
+                    message.auction = PublicAuction.internalBinaryRead(reader, reader.uint32(), options, message.auction);
+                    break;
+                case /* string message */ 3:
+                    message.message = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetAuctionResponse, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* bool ok = 1; */
+        if (message.ok !== false)
+            writer.tag(1, WireType.Varint).bool(message.ok);
+        /* blindsided.PublicAuction auction = 2; */
+        if (message.auction)
+            PublicAuction.internalBinaryWrite(message.auction, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* string message = 3; */
+        if (message.message !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.message);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message blindsided.GetAuctionResponse
+ */
+export const GetAuctionResponse = new GetAuctionResponse$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetStoredAuctionResponse$Type extends MessageType<GetStoredAuctionResponse> {
+    constructor() {
+        super("blindsided.GetStoredAuctionResponse", [
+            { no: 1, name: "ok", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 2, name: "auction", kind: "message", T: () => Auction },
+            { no: 3, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<GetStoredAuctionResponse>): GetStoredAuctionResponse {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.ok = false;
+        message.message = "";
+        if (value !== undefined)
+            reflectionMergePartial<GetStoredAuctionResponse>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetStoredAuctionResponse): GetStoredAuctionResponse {
         let message = target ?? this.create(), end = reader.pos + length;
         while (reader.pos < end) {
             let [fieldNo, wireType] = reader.tag();
@@ -990,7 +1225,7 @@ class GetAuctionResponse$Type extends MessageType<GetAuctionResponse> {
         }
         return message;
     }
-    internalBinaryWrite(message: GetAuctionResponse, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+    internalBinaryWrite(message: GetStoredAuctionResponse, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
         /* bool ok = 1; */
         if (message.ok !== false)
             writer.tag(1, WireType.Varint).bool(message.ok);
@@ -1007,9 +1242,9 @@ class GetAuctionResponse$Type extends MessageType<GetAuctionResponse> {
     }
 }
 /**
- * @generated MessageType for protobuf message blindsided.GetAuctionResponse
+ * @generated MessageType for protobuf message blindsided.GetStoredAuctionResponse
  */
-export const GetAuctionResponse = new GetAuctionResponse$Type();
+export const GetStoredAuctionResponse = new GetStoredAuctionResponse$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class SearchAuctionsRequest$Type extends MessageType<SearchAuctionsRequest> {
     constructor() {
@@ -1070,7 +1305,7 @@ class SearchAuctionsResponse$Type extends MessageType<SearchAuctionsResponse> {
     constructor() {
         super("blindsided.SearchAuctionsResponse", [
             { no: 1, name: "ok", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
-            { no: 2, name: "auctions", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => Auction },
+            { no: 2, name: "auctions", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => PublicAuction },
             { no: 3, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 4, name: "count", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
         ]);
@@ -1086,6 +1321,77 @@ class SearchAuctionsResponse$Type extends MessageType<SearchAuctionsResponse> {
         return message;
     }
     internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SearchAuctionsResponse): SearchAuctionsResponse {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* bool ok */ 1:
+                    message.ok = reader.bool();
+                    break;
+                case /* repeated blindsided.PublicAuction auctions */ 2:
+                    message.auctions.push(PublicAuction.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* string message */ 3:
+                    message.message = reader.string();
+                    break;
+                case /* int32 count */ 4:
+                    message.count = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SearchAuctionsResponse, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* bool ok = 1; */
+        if (message.ok !== false)
+            writer.tag(1, WireType.Varint).bool(message.ok);
+        /* repeated blindsided.PublicAuction auctions = 2; */
+        for (let i = 0; i < message.auctions.length; i++)
+            PublicAuction.internalBinaryWrite(message.auctions[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* string message = 3; */
+        if (message.message !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.message);
+        /* int32 count = 4; */
+        if (message.count !== 0)
+            writer.tag(4, WireType.Varint).int32(message.count);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message blindsided.SearchAuctionsResponse
+ */
+export const SearchAuctionsResponse = new SearchAuctionsResponse$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetStoredAuctionsResponse$Type extends MessageType<GetStoredAuctionsResponse> {
+    constructor() {
+        super("blindsided.GetStoredAuctionsResponse", [
+            { no: 1, name: "ok", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 2, name: "auctions", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => Auction },
+            { no: 3, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "count", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<GetStoredAuctionsResponse>): GetStoredAuctionsResponse {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.ok = false;
+        message.auctions = [];
+        message.message = "";
+        message.count = 0;
+        if (value !== undefined)
+            reflectionMergePartial<GetStoredAuctionsResponse>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetStoredAuctionsResponse): GetStoredAuctionsResponse {
         let message = target ?? this.create(), end = reader.pos + length;
         while (reader.pos < end) {
             let [fieldNo, wireType] = reader.tag();
@@ -1113,7 +1419,7 @@ class SearchAuctionsResponse$Type extends MessageType<SearchAuctionsResponse> {
         }
         return message;
     }
-    internalBinaryWrite(message: SearchAuctionsResponse, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+    internalBinaryWrite(message: GetStoredAuctionsResponse, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
         /* bool ok = 1; */
         if (message.ok !== false)
             writer.tag(1, WireType.Varint).bool(message.ok);
@@ -1133,9 +1439,9 @@ class SearchAuctionsResponse$Type extends MessageType<SearchAuctionsResponse> {
     }
 }
 /**
- * @generated MessageType for protobuf message blindsided.SearchAuctionsResponse
+ * @generated MessageType for protobuf message blindsided.GetStoredAuctionsResponse
  */
-export const SearchAuctionsResponse = new SearchAuctionsResponse$Type();
+export const GetStoredAuctionsResponse = new GetStoredAuctionsResponse$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class RevealAuctionRequest$Type extends MessageType<RevealAuctionRequest> {
     constructor() {
@@ -1575,24 +1881,16 @@ class AuctionUpdate$Type extends MessageType<AuctionUpdate> {
         super("blindsided.AuctionUpdate", [
             { no: 1, name: "state", kind: "enum", T: () => ["blindsided.AuctionState", AuctionState, "AUCTION_STATE_"] },
             { no: 2, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 3, name: "high_range", kind: "scalar", T: 2 /*ScalarType.FLOAT*/ },
-            { no: 4, name: "low_range", kind: "scalar", T: 2 /*ScalarType.FLOAT*/ },
-            { no: 5, name: "bidder_count", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
-            { no: 6, name: "reserve_met", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
-            { no: 7, name: "winning_amount", kind: "scalar", T: 2 /*ScalarType.FLOAT*/ },
-            { no: 8, name: "winning_bidder_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+            { no: 3, name: "bidder_count", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 4, name: "version", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<AuctionUpdate>): AuctionUpdate {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.state = 0;
         message.message = "";
-        message.highRange = 0;
-        message.lowRange = 0;
         message.bidderCount = 0;
-        message.reserveMet = false;
-        message.winningAmount = 0;
-        message.winningBidderId = "";
+        message.version = 0;
         if (value !== undefined)
             reflectionMergePartial<AuctionUpdate>(this, message, value);
         return message;
@@ -1608,23 +1906,11 @@ class AuctionUpdate$Type extends MessageType<AuctionUpdate> {
                 case /* string message */ 2:
                     message.message = reader.string();
                     break;
-                case /* float high_range */ 3:
-                    message.highRange = reader.float();
-                    break;
-                case /* float low_range */ 4:
-                    message.lowRange = reader.float();
-                    break;
-                case /* int32 bidder_count */ 5:
+                case /* int32 bidder_count */ 3:
                     message.bidderCount = reader.int32();
                     break;
-                case /* bool reserve_met */ 6:
-                    message.reserveMet = reader.bool();
-                    break;
-                case /* float winning_amount */ 7:
-                    message.winningAmount = reader.float();
-                    break;
-                case /* string winning_bidder_id */ 8:
-                    message.winningBidderId = reader.string();
+                case /* int32 version */ 4:
+                    message.version = reader.int32();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -1644,24 +1930,12 @@ class AuctionUpdate$Type extends MessageType<AuctionUpdate> {
         /* string message = 2; */
         if (message.message !== "")
             writer.tag(2, WireType.LengthDelimited).string(message.message);
-        /* float high_range = 3; */
-        if (message.highRange !== 0)
-            writer.tag(3, WireType.Bit32).float(message.highRange);
-        /* float low_range = 4; */
-        if (message.lowRange !== 0)
-            writer.tag(4, WireType.Bit32).float(message.lowRange);
-        /* int32 bidder_count = 5; */
+        /* int32 bidder_count = 3; */
         if (message.bidderCount !== 0)
-            writer.tag(5, WireType.Varint).int32(message.bidderCount);
-        /* bool reserve_met = 6; */
-        if (message.reserveMet !== false)
-            writer.tag(6, WireType.Varint).bool(message.reserveMet);
-        /* float winning_amount = 7; */
-        if (message.winningAmount !== 0)
-            writer.tag(7, WireType.Bit32).float(message.winningAmount);
-        /* string winning_bidder_id = 8; */
-        if (message.winningBidderId !== "")
-            writer.tag(8, WireType.LengthDelimited).string(message.winningBidderId);
+            writer.tag(3, WireType.Varint).int32(message.bidderCount);
+        /* int32 version = 4; */
+        if (message.version !== 0)
+            writer.tag(4, WireType.Varint).int32(message.version);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -2637,8 +2911,8 @@ export const AuctionService = new ServiceType("blindsided.AuctionService", [
  */
 export const StorageReplicaService = new ServiceType("blindsided.StorageReplicaService", [
     { name: "ApplyAuctionMutation", options: {}, I: AuctionMutationRequest, O: AuctionMutationResponse },
-    { name: "GetAuction", options: {}, I: GetAuctionRequest, O: GetAuctionResponse },
-    { name: "SearchAuctions", options: {}, I: SearchAuctionsRequest, O: SearchAuctionsResponse },
+    { name: "GetAuction", options: {}, I: GetAuctionRequest, O: GetStoredAuctionResponse },
+    { name: "SearchAuctions", options: {}, I: SearchAuctionsRequest, O: GetStoredAuctionsResponse },
     { name: "SyncFullState", options: {}, I: StateRequest, O: StateResponse },
     { name: "ReplicateAuction", options: {}, I: ReplicationRequest, O: ReplicationResponse },
     { name: "Heartbeat", options: {}, I: HealthCheckRequest, O: HealthCheckResponse },

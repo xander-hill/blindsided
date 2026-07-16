@@ -94,7 +94,7 @@ def run_chaos_test():
 
     print(f"Final Version in Vault: {final_status.auction.version}")
     print(f"Unique Bidders Found: {opaque_data.bidder_count}")
-    print(f"Final Opaque Range: ${opaque_data.low_range} - ${opaque_data.high_range}")
+    print(f"Final Active Bidder Count: {opaque_data.bidder_count}")
     
     if opaque_data.bidder_count == NUM_BIDDERS:
         print("✅ SUCCESS: Map-merge handled concurrency. No data loss.")

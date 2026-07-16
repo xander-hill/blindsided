@@ -291,14 +291,14 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
         deadline = auction.ends_at.seconds + (auction.ends_at.nanos / 1_000_000_000)
         return time.time() >= deadline
 
-    def GetAuction(self, request: pb2.GetAuctionRequest, context) -> pb2.GetAuctionResponse:
+    def GetAuction(self, request: pb2.GetAuctionRequest, context) -> pb2.GetStoredAuctionResponse:
         with self.state_lock:
             auction = self.auction_store.get(request.auction_id)
             if auction:
-                return pb2.GetAuctionResponse(ok=True, auction=auction)
-            return pb2.GetAuctionResponse(ok=False, message="Auction not found")
+                return pb2.GetStoredAuctionResponse(ok=True, auction=auction)
+            return pb2.GetStoredAuctionResponse(ok=False, message="Auction not found")
 
-    def SearchAuctions(self, request: pb2.SearchAuctionsRequest, context) -> pb2.SearchAuctionsResponse:
+    def SearchAuctions(self, request: pb2.SearchAuctionsRequest, context) -> pb2.GetStoredAuctionsResponse:
         with self.state_lock:
             query = request.query.strip().lower()
             category = request.category.strip().lower()
@@ -310,7 +310,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                     or query in auction.description.lower())
                 and (not category or category == auction.category.lower())
             ]
-            return pb2.SearchAuctionsResponse(
+            return pb2.GetStoredAuctionsResponse(
                 ok=True,
                 auctions=matches,
                 count=len(matches),
