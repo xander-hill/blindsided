@@ -54,6 +54,7 @@ def make_judge(
     judge = StorageReplicaService.__new__(StorageReplicaService)
     judge.state_lock = storage_service_module.threading.Condition()
     judge.auction_store = {}
+    judge.idempotency_records = {}
     judge.port = address.rsplit(":", 1)[-1]
     judge.replica_role = role
     judge.peer_addresses = peers or []

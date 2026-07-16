@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
 import { auctionClient } from '../services/AuctionClient';
 
+const createRequestId = () =>
+  globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+
 export const BidForm = ({ auctionId }: { auctionId: string }) => {
   const [amount, setAmount] = useState(0);
   const [status, setStatus] = useState('');
@@ -14,7 +17,8 @@ export const BidForm = ({ auctionId }: { auctionId: string }) => {
         auctionId,
         bidderId: "bidder_01",
         amount,
-        expectedVersion: 0
+        expectedVersion: 0,
+        requestId: createRequestId()
       });
 
       setStatus(response.success ? "✅ Bid Vaulted" : `⚠️ ${response.message}`);

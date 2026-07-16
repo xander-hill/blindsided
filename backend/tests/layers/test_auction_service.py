@@ -145,6 +145,53 @@ class AuctionServiceTests(BackendTestCase):
         self.assertEqual(str(UUID(first.auction_id)), first.auction_id)
         self.assertEqual(str(UUID(second.auction_id)), second.auction_id)
 
+    def test_create_auction_forwards_client_request_id_and_uses_replayed_auction_id(self):
+        stub = FakeJudgeStub()
+        stub.mutation_responses.extend([
+            pb2.AuctionMutationResponse(
+                success=True,
+                current_version=1,
+                auction_id="original-auction-id",
+                message="Vault updated.",
+            ),
+            pb2.AuctionMutationResponse(
+                success=True,
+                current_version=1,
+                auction_id="original-auction-id",
+                replayed=True,
+                message="Vault updated.",
+            ),
+        ])
+        service = TestableAuctionService(stub)
+
+        first = service.CreateAuction(
+            pb2.CreateAuctionRequest(
+                seller_id="seller-a",
+                title="Watch",
+                reserve_price=100.0,
+                ends_at=future_timestamp(),
+                request_id="client-create-request",
+            ),
+            NoopContext(),
+        )
+        second = service.CreateAuction(
+            pb2.CreateAuctionRequest(
+                seller_id="seller-a",
+                title="Watch",
+                reserve_price=100.0,
+                ends_at=future_timestamp(),
+                request_id="client-create-request",
+            ),
+            NoopContext(),
+        )
+
+        self.assertTrue(first.ok)
+        self.assertTrue(second.ok)
+        self.assertEqual(first.auction_id, "original-auction-id")
+        self.assertEqual(second.auction_id, "original-auction-id")
+        self.assertEqual(stub.mutations[0].request_id, "client-create-request")
+        self.assertEqual(stub.mutations[1].request_id, "client-create-request")
+
     def test_public_auction_projection_preserves_only_allowed_open_fields(self):
         stub = FakeJudgeStub()
         ends_at = future_timestamp()
@@ -424,6 +471,8 @@ class AuctionServiceTests(BackendTestCase):
         )
         self.assertEqual(stub.mutations[0].expected_version, 6)
         self.assertEqual(stub.mutations[0].auction.version, 6)
+        self.assertEqual(stub.mutations[0].request_id, stub.mutations[1].request_id)
+        self.assertTrue(stub.mutations[0].request_id)
         self.assertEqual(stub.mutations[0].auction.bids["buyer-a"].amount, 250.0)
         self.assertEqual(
             stub.mutations[0].auction.bids["buyer-a"].acceptance_order,

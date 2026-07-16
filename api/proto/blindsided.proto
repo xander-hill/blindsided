@@ -31,6 +31,7 @@ enum MutationFailureReason {
     MUTATION_FAILURE_REASON_INVALID_STATE = 2;
     MUTATION_FAILURE_REASON_CONCURRENCY_CONFLICT = 3;
     MUTATION_FAILURE_REASON_REPLICATION_FAILED = 4;
+    MUTATION_FAILURE_REASON_IDEMPOTENCY_CONFLICT = 5;
 }
 
 message Auction {
@@ -103,6 +104,7 @@ message CreateAuctionRequest {
     string description = 4;
     float reserve_price = 5;
     google.protobuf.Timestamp ends_at = 6;
+    string request_id = 7;
 }
 message CreateAuctionResponse { bool ok = 1; string auction_id = 2; string message = 3; }
 
@@ -137,6 +139,7 @@ message RevealAuctionRequest {
     string auction_id = 1; 
     string seller_id = 2; 
     int32 expected_version = 3; 
+    string request_id = 4;
 }
 message RevealAuctionResponse { bool ok = 1; int32 final_version = 2; string message = 3; }
 
@@ -145,6 +148,7 @@ message BidRequest {
     string bidder_id = 2;
     float amount = 3;
     int32 expected_version = 4;
+    string request_id = 5;
 }
 message BidResponse { bool success = 1; string message = 2; }
 
@@ -152,6 +156,7 @@ message WithdrawBidRequest {
     string auction_id = 1;
     string bidder_id = 2;
     int32 expected_version = 3;
+    string request_id = 4;
 }
 
 message WithdrawBidResponse {
@@ -174,13 +179,21 @@ message AuctionMutationRequest {
     Auction auction = 2;
     string bidder_id = 3;
     int32 expected_version = 4;
+    string request_id = 5;
 }
-message AuctionMutationResponse { bool success = 1; int32 current_version = 2; string message = 3; optional MutationFailureReason failure_reason = 4; }
+message AuctionMutationResponse { 
+    bool success = 1; 
+    int32 current_version = 2; 
+    string message = 3; 
+    optional MutationFailureReason failure_reason = 4; 
+    string auction_id = 5;
+    bool replayed = 6;
+}
 
 message StateRequest { string requester_id = 1; }
-message StateResponse { bool ok = 1; repeated Auction auctions = 2; string message = 3; }
+message StateResponse { bool ok = 1; repeated Auction auctions = 2; string message = 3; repeated IdempotencyRecord idempotency_records = 4; }
 
-message ReplicationRequest { Auction auction = 1; string primary_id = 2; }
+message ReplicationRequest { Auction auction = 1; string primary_id = 2; optional IdempotencyRecord idempotency_record = 3; }
 message ReplicationResponse { bool success = 1; int32 ack_version = 2; string message = 3; }
 
 message HealthCheckRequest { string request_source = 1; }
@@ -201,4 +214,10 @@ message ClusterInfoResponse { bool success = 1; repeated string node_addresses =
 message ActiveBid {
     float amount = 1;
     int64 acceptance_order = 2;
+}
+
+message IdempotencyRecord {
+    string request_id = 1;
+    bytes request_fingerprint = 2;
+    AuctionMutationResponse response = 3;
 }
