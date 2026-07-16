@@ -33,6 +33,18 @@ message Auction {
     int64 next_bid_sequence = 12;
 }
 
+message PublicAuction {
+    string auction_id = 1;
+    string seller_id = 2;
+    string title = 3;
+    string category = 4;
+    string description = 5;
+    AuctionState state = 6;
+    int32 version = 7;
+    google.protobuf.Timestamp ends_at = 8;
+    int32 bidder_count = 9;
+}
+
 service AuctionService {
     rpc CreateAuction (CreateAuctionRequest) returns (CreateAuctionResponse);
     rpc GetAuction (GetAuctionRequest) returns (GetAuctionResponse);
@@ -45,8 +57,8 @@ service AuctionService {
 
 service StorageReplicaService {
     rpc ApplyAuctionMutation (AuctionMutationRequest) returns (AuctionMutationResponse);
-    rpc GetAuction (GetAuctionRequest) returns (GetAuctionResponse);
-    rpc SearchAuctions (SearchAuctionsRequest) returns (SearchAuctionsResponse);
+    rpc GetAuction (GetAuctionRequest) returns (GetStoredAuctionResponse);
+    rpc SearchAuctions (SearchAuctionsRequest) returns (GetStoredAuctionsResponse);
     rpc SyncFullState (StateRequest) returns (StateResponse);
     rpc ReplicateAuction (ReplicationRequest) returns (ReplicationResponse);
     rpc Heartbeat (HealthCheckRequest) returns (HealthCheckResponse);
@@ -72,10 +84,31 @@ message CreateAuctionRequest {
 message CreateAuctionResponse { bool ok = 1; string auction_id = 2; string message = 3; }
 
 message GetAuctionRequest { string auction_id = 1; }
-message GetAuctionResponse { bool ok = 1; Auction auction = 2; string message = 3; }
+message GetAuctionResponse {
+    bool ok = 1;
+    PublicAuction auction = 2;
+    string message = 3;
+}
+
+message GetStoredAuctionResponse {
+    bool ok = 1;
+    Auction auction = 2;
+    string message = 3;
+}
 
 message SearchAuctionsRequest { string query = 1; string category = 2; }
-message SearchAuctionsResponse { bool ok = 1; repeated Auction auctions = 2; string message = 3; int32 count = 4; }
+message SearchAuctionsResponse {
+    bool ok = 1;
+    repeated PublicAuction auctions = 2;
+    string message = 3;
+    int32 count = 4;
+}
+message GetStoredAuctionsResponse {
+    bool ok = 1;
+    repeated Auction auctions = 2;
+    string message = 3;
+    int32 count = 4;
+}
 
 message RevealAuctionRequest {
     string auction_id = 1; 
@@ -108,12 +141,8 @@ message AuctionRequest { string auction_id = 1; string user_id = 2; }
 message AuctionUpdate {
     AuctionState state = 1;
     string message = 2;
-    float high_range = 3;
-    float low_range = 4;
-    int32 bidder_count = 5;
-    bool reserve_met = 6;
-    float winning_amount = 7;
-    string winning_bidder_id = 8;
+    int32 bidder_count = 3;
+    int32 version = 4;
 }
 
 message AuctionMutationRequest {

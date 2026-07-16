@@ -237,10 +237,11 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                 stub, channel = self._create_storage_stub(addr)
                 with channel:
                     response = stub.SearchAuctions(query, timeout=5.0)
-                    public_auction = [self._to_public_auction(a) for a in response.auctions]
+                    public_auctions = [self._to_public_auction(a) for a in response.auctions]
                     return pb2.SearchAuctionsResponse(
                         ok=True,
-                        auctions=public_auction,
+                        auctions=public_auctions,
+                        count=response.count or len(public_auctions),
                         message="Results from the Vault",
                     )
             except grpc.RpcError:
@@ -265,40 +266,30 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
         except Exception as e:
             return pb2.GetAuctionResponse(ok=False, message=str(e))
 
-    def _to_public_auction(self, auction: pb2.Auction) -> pb2.Auction:
-        public_auction = pb2.Auction()
-        public_auction.CopyFrom(auction)
-        public_auction.reserve_price = 0.0
-
-        if auction.state != pb2.AUCTION_STATE_REVEALED:
-            public_auction.bids.clear()
-            public_auction.reserve_met = False
+    def _to_public_auction(self, auction: pb2.Auction) -> pb2.PublicAuction:
+        public_auction = pb2.PublicAuction(
+            auction_id=auction.auction_id,
+            seller_id=auction.seller_id,
+            title=auction.title,
+            category=auction.category,
+            description=auction.description,
+            state=auction.state,
+            version=auction.version,
+            bidder_count=len(auction.bids),
+        )
+        if auction.HasField("ends_at"):
+            public_auction.ends_at.CopyFrom(auction.ends_at)
 
         return public_auction
 
     def _to_public_auction_update(self, auction: pb2.Auction) -> pb2.AuctionUpdate:
         """Convert private storage state into the live public stream shape."""
-        if auction.state != pb2.AUCTION_STATE_REVEALED:
-            bid_amounts = [bid.amount for bid in auction.bids.values()]
-
-            return pb2.AuctionUpdate(
-                state=pb2.AUCTION_STATE_OPEN,
-                message="The Fog is active.",
-                low_range=min(bid_amounts) if bid_amounts else 0.0,
-                high_range=max(bid_amounts) if bid_amounts else 0.0,
-                bidder_count=len(bid_amounts),
-                reserve_met=False
-            )
-
-        winning_price, winning_bidder_id = self._winner_from_active_bids(auction)
-
+        public_auction = self._to_public_auction(auction)
         return pb2.AuctionUpdate(
-            state=pb2.AUCTION_STATE_REVEALED,
-            message="GAVEL FELL!",
-            winning_amount=winning_price,
-            winning_bidder_id=winning_bidder_id,
-            bidder_count=len(auction.bids),
-            reserve_met=bool(winning_bidder_id),
+            state=public_auction.state,
+            message="Auction update.",
+            bidder_count=public_auction.bidder_count,
+            version=public_auction.version,
         )
 
     def _winner_from_active_bids(self, auction: pb2.Auction) -> tuple[float, str]:
@@ -347,30 +338,8 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                         if auction.version > last_version:
                             last_version = auction.version
 
-                            if auction.state != pb2.AUCTION_STATE_REVEALED:
-                                bid_amounts = [bid.amount for bid in auction.bids.values()]
-
-                                yield pb2.AuctionUpdate(
-                                    state=pb2.AUCTION_STATE_OPEN,
-                                    message="Vault update detected.",
-                                    low_range=min(bid_amounts) if bid_amounts else 0.0,
-                                    high_range=max(bid_amounts) if bid_amounts else 0.0,
-                                    bidder_count=len(bid_amounts),
-                                    reserve_met=False
-                                )
-                            else:
-                                winning_price, winning_bidder_id = (
-                                    self._winner_from_active_bids(auction)
-                                )
-
-                                yield pb2.AuctionUpdate(
-                                    state=pb2.AUCTION_STATE_REVEALED,
-                                    message="GAVEL FELL: The truth is revealed!",
-                                    winning_amount=winning_price,
-                                    winning_bidder_id=winning_bidder_id,
-                                    bidder_count=len(auction.bids),
-                                    reserve_met=bool(winning_bidder_id)
-                                )
+                            yield self._to_public_auction_update(auction)
+                            if auction.state == pb2.AUCTION_STATE_REVEALED:
                                 return
 
                 time.sleep(1)

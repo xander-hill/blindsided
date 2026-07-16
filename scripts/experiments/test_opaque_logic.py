@@ -33,13 +33,10 @@ def run_test():
     print(f"Generated Auction ID: {auc_id}")
 
     def get_opaque_stats():
-        # Using GetAuction (which we updated to return public_auction data)
         resp = stub.GetAuction(pb2.GetAuctionRequest(auction_id=auc_id))
-        # Note: Depending on your exact GetAuction implementation, 
-        # you might need to check the 'reserve_met' boolean in the returned auction.
         return resp.auction
 
-    # --- SCENARIO 2: Single User Bidding & Opaque Range ---
+    # --- SCENARIO 2: Single User Bidding ---
     print("\n2️⃣  Xander bids $100...")
     stub.PlaceBid(pb2.BidRequest(auction_id=auc_id, bidder_id="Xander", amount=100.0, expected_version=1))
     
@@ -49,21 +46,18 @@ def run_test():
     current_version = stub.GetAuction(pb2.GetAuctionRequest(auction_id=auc_id)).auction.version
     stub.PlaceBid(pb2.BidRequest(auction_id=auc_id, bidder_id="Xander", amount=600.0, expected_version=current_version))
     
-    # --- SCENARIO 4: Multiple Users & Silent Minimum (Pillar #1 & #2) ---
+    # --- SCENARIO 4: Multiple Users ---
     print("4️⃣  Beatz bids $200...")
     current_version = stub.GetAuction(pb2.GetAuctionRequest(auction_id=auc_id)).auction.version
     stub.PlaceBid(pb2.BidRequest(auction_id=auc_id, bidder_id="Beatz", amount=200.0, expected_version=current_version))
 
     # --- FINAL VERIFICATION ---
     print("\n--- 🔎 Final Vault Inspection ---")
-    # We use the live stream logic to see the "Opaque" view
     for update in stub.WatchAuction(pb2.AuctionRequest(auction_id=auc_id)):
         print(f"  [Opaque View] Bidders: {update.bidder_count}")
-        print(f"  [Opaque View] Range: ${update.low_range} - ${update.high_range}")
-        print(f"  [Opaque View] Reserve Met: {update.reserve_met}")
         
-        if update.bidder_count == 2 and update.reserve_met == True:
-            print("✅ Logic Check Passed: Unique bidders counted, High/Low range active, Reserve triggered.")
+        if update.bidder_count == 2:
+            print("✅ Logic Check Passed: Unique bidders counted without exposing bids.")
         else:
             print("❌ Logic Check Failed: Inspect Judge logs.")
         
@@ -74,11 +68,7 @@ def run_test():
 
     for reveal in stub.WatchAuction(pb2.AuctionRequest(auction_id=auc_id)):
         if reveal.state == pb2.AUCTION_STATE_REVEALED:
-            print(f"  [Reveal] Winner: {reveal.winning_bidder_id}")
-            print(f"  [Reveal] Final Price: ${reveal.winning_amount}")
-            
-            if reveal.winning_bidder_id == "Xander" and reveal.winning_amount == 600.0:
-                print("✅ Winner Check Passed: Xander's overwrite was successful.")
+            print(f"  [Reveal] Final bidder count: {reveal.bidder_count}")
             break
 
 if __name__ == "__main__":

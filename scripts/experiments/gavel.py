@@ -17,31 +17,16 @@ def drop_the_gavel():
         if gavel_resp.ok:
             print("✅ The Vault has been opened! Truth revealed.")
             
-            # 2. Fetch the FINAL status to see the winner details
-            # In the 'Revealed' state, the Service Node stops masking the data
+            # 2. Fetch the public final status.
             status_resp = stub.GetAuction(pb2.GetAuctionRequest(auction_id=auction_id))
             
             if status_resp.ok:
                 auction = status_resp.auction
-                # Find the winner from the bids map
-                if auction.bids:
-                    winning_bidder_id, winning_bid = min(
-                        auction.bids.items(),
-                        key=lambda item: (
-                            -item[1].amount,
-                            item[1].acceptance_order,
-                            item[0],
-                        ),
-                    )
-                    winning_price = winning_bid.amount
-                    
-                    print("\n--- 📜 FINAL AUCTION LOG ---")
-                    print(f"Auction ID:    {auction.auction_id}")
-                    print(f"Status:        REVEALED")
-                    print(f"Winner:        {winning_bidder_id}")
-                    print(f"Final Price:   ${winning_price:,.2f}")
-                    print(f"Total Bidders: {len(auction.bids)}")
-                    print("----------------------------\n")
+                print("\n--- FINAL AUCTION STATUS ---")
+                print(f"Auction ID:    {auction.auction_id}")
+                print(f"Status:        REVEALED")
+                print(f"Total Bidders: {auction.bidder_count}")
+                print("----------------------------\n")
         else:
             print(f"❌ Failed to drop gavel: {gavel_resp.message}")
 

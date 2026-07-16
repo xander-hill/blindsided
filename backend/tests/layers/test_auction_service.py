@@ -18,8 +18,8 @@ class FakeJudgeStub:
         self.gets: list[pb2.GetAuctionRequest] = []
         self.searches: list[pb2.SearchAuctionsRequest] = []
         self.mutation_responses: list[pb2.AuctionMutationResponse] = []
-        self.get_responses: list[pb2.GetAuctionResponse] = []
-        self.search_responses: list[pb2.SearchAuctionsResponse] = []
+        self.get_responses: list[pb2.GetStoredAuctionResponse] = []
+        self.search_responses: list[pb2.GetStoredAuctionsResponse] = []
 
     def ApplyAuctionMutation(self, request, timeout=None):
         self.mutations.append(request)
@@ -31,13 +31,13 @@ class FakeJudgeStub:
         self.gets.append(request)
         if self.get_responses:
             return self.get_responses.pop(0)
-        return pb2.GetAuctionResponse(ok=False)
+        return pb2.GetStoredAuctionResponse(ok=False)
 
     def SearchAuctions(self, request, timeout=None):
         self.searches.append(request)
         if self.search_responses:
             return self.search_responses.pop(0)
-        return pb2.SearchAuctionsResponse(ok=True)
+        return pb2.GetStoredAuctionsResponse(ok=True)
 
 
 class TestableAuctionService(AuctionService):
@@ -123,16 +123,26 @@ class AuctionServiceTests(BackendTestCase):
         self.assertEqual(str(UUID(first.auction_id)), first.auction_id)
         self.assertEqual(str(UUID(second.auction_id)), second.auction_id)
 
-    def test_status_masks_private_fields_before_reveal(self):
+    def test_public_auction_projection_preserves_only_allowed_open_fields(self):
         stub = FakeJudgeStub()
-        stub.get_responses.append(pb2.GetAuctionResponse(
+        ends_at = future_timestamp()
+        stub.get_responses.append(pb2.GetStoredAuctionResponse(
             ok=True,
-                auction=pb2.Auction(
-                    auction_id="auction-1",
-                    bids={"buyer-a": active_bid(100.0, 1)},
+            auction=pb2.Auction(
+                auction_id="auction-1",
+                seller_id="seller-a",
+                title="Auction Metadata",
+                category="collectibles",
+                description="Metadata stays visible",
+                bids={
+                    "hidden-bidder-a": active_bid(12345.5, 1),
+                    "hidden-bidder-b": active_bid(67890.0, 2),
+                },
                 reserve_price=500.0,
                 reserve_met=True,
                 state=pb2.AUCTION_STATE_OPEN,
+                version=7,
+                ends_at=ends_at,
             ),
         ))
         service = TestableAuctionService(stub)
@@ -143,30 +153,88 @@ class AuctionServiceTests(BackendTestCase):
         )
 
         self.assertTrue(response.ok)
-        self.assertEqual(response.auction.auction_id, "auction-1")
-        self.assertEqual(dict(response.auction.bids), {})
-        self.assertEqual(response.auction.reserve_price, 0.0)
-        self.assertFalse(response.auction.reserve_met)
+        public_auction = response.auction
+        self.assertEqual(public_auction.auction_id, "auction-1")
+        self.assertEqual(public_auction.seller_id, "seller-a")
+        self.assertEqual(public_auction.title, "Auction Metadata")
+        self.assertEqual(public_auction.category, "collectibles")
+        self.assertEqual(public_auction.description, "Metadata stays visible")
+        self.assertEqual(public_auction.ends_at, ends_at)
+        self.assertEqual(public_auction.version, 7)
+        self.assertEqual(public_auction.state, pb2.AUCTION_STATE_OPEN)
+        self.assertEqual(public_auction.bidder_count, 2)
 
-    def test_status_reveals_bids_after_gavel(self):
+        field_names = {field.name for field in public_auction.DESCRIPTOR.fields}
+        self.assertNotIn("bids", field_names)
+        self.assertNotIn("reserve_price", field_names)
+        self.assertNotIn("reserve_met", field_names)
+        self.assertNotIn("winning_amount", field_names)
+        self.assertNotIn("winning_bidder_id", field_names)
+        self.assertNotIn("has_winner", field_names)
+        self.assertNotIn("hidden-bidder-a", str(public_auction))
+        self.assertNotIn("hidden-bidder-b", str(public_auction))
+        self.assertNotIn("12345.5", str(public_auction))
+        self.assertNotIn("67890", str(public_auction))
+
+    def test_search_results_apply_same_pre_reveal_visibility_restrictions(self):
         stub = FakeJudgeStub()
-        stub.get_responses.append(pb2.GetAuctionResponse(
+        ends_at = future_timestamp()
+        stub.search_responses.append(pb2.GetStoredAuctionsResponse(
             ok=True,
-                auction=pb2.Auction(
+            count=1,
+            auctions=[
+                pb2.Auction(
                     auction_id="auction-1",
-                    bids={"buyer-a": active_bid(100.0, 1)},
-                state=pb2.AUCTION_STATE_REVEALED,
-            ),
+                    seller_id="seller-a",
+                    title="Auction Metadata",
+                    category="collectibles",
+                    description="Metadata stays visible",
+                    bids={
+                        "hidden-bidder-a": active_bid(12345.5, 1),
+                        "hidden-bidder-b": active_bid(67890.0, 2),
+                    },
+                    reserve_price=500.0,
+                    reserve_met=True,
+                    state=pb2.AUCTION_STATE_OPEN,
+                    version=7,
+                    ends_at=ends_at,
+                )
+            ],
         ))
         service = TestableAuctionService(stub)
 
-        response = service.GetAuction(
-            pb2.GetAuctionRequest(auction_id="auction-1"),
+        response = service.SearchAuctions(
+            pb2.SearchAuctionsRequest(query="auction"),
             NoopContext(),
         )
 
         self.assertTrue(response.ok)
-        self.assertEqual(response.auction.bids["buyer-a"].amount, 100.0)
+        self.assertEqual(response.count, 1)
+        self.assertEqual(len(response.auctions), 1)
+        public_auction = response.auctions[0]
+        self.assertEqual(public_auction.auction_id, "auction-1")
+        self.assertEqual(public_auction.seller_id, "seller-a")
+        self.assertEqual(public_auction.title, "Auction Metadata")
+        self.assertEqual(public_auction.category, "collectibles")
+        self.assertEqual(public_auction.description, "Metadata stays visible")
+        self.assertEqual(public_auction.ends_at, ends_at)
+        self.assertEqual(public_auction.version, 7)
+        self.assertEqual(public_auction.state, pb2.AUCTION_STATE_OPEN)
+        self.assertEqual(public_auction.bidder_count, 2)
+
+        field_names = {field.name for field in public_auction.DESCRIPTOR.fields}
+        self.assertNotIn("bids", field_names)
+        self.assertNotIn("reserve_price", field_names)
+        self.assertNotIn("reserve_met", field_names)
+        self.assertNotIn("winning_amount", field_names)
+        self.assertNotIn("winning_bidder_id", field_names)
+        self.assertNotIn("has_winner", field_names)
+        self.assertNotIn("high_range", field_names)
+        self.assertNotIn("low_range", field_names)
+        self.assertNotIn("hidden-bidder-a", str(public_auction))
+        self.assertNotIn("hidden-bidder-b", str(public_auction))
+        self.assertNotIn("12345.5", str(public_auction))
+        self.assertNotIn("67890", str(public_auction))
 
     def test_bid_retries_with_latest_version_after_stale_conflict(self):
         stub = FakeJudgeStub()
@@ -174,7 +242,7 @@ class AuctionServiceTests(BackendTestCase):
             pb2.AuctionMutationResponse(success=False, message="Fog conflict: Stale version."),
             pb2.AuctionMutationResponse(success=True, current_version=8, message="ok"),
         ])
-        stub.get_responses.append(pb2.GetAuctionResponse(
+        stub.get_responses.append(pb2.GetStoredAuctionResponse(
             ok=True,
             auction=pb2.Auction(auction_id="auction-1", version=7),
         ))
@@ -211,7 +279,7 @@ class AuctionServiceTests(BackendTestCase):
             pb2.AuctionMutationResponse(success=False, message="Fog conflict: Stale version."),
             pb2.AuctionMutationResponse(success=True, current_version=9, message="ok"),
         ])
-        stub.get_responses.append(pb2.GetAuctionResponse(
+        stub.get_responses.append(pb2.GetStoredAuctionResponse(
             ok=True,
             auction=pb2.Auction(auction_id="auction-1", version=8),
         ))
@@ -239,7 +307,7 @@ class AuctionServiceTests(BackendTestCase):
 
     def test_drop_gavel_returns_public_gavel_response(self):
         stub = FakeJudgeStub()
-        stub.get_responses.append(pb2.GetAuctionResponse(
+        stub.get_responses.append(pb2.GetStoredAuctionResponse(
             ok=True,
             auction=pb2.Auction(auction_id="auction-1", version=3),
         ))
@@ -267,8 +335,13 @@ class AuctionServiceTests(BackendTestCase):
         service = TestableAuctionService(FakeJudgeStub())
 
         hidden = service._to_public_auction_update(pb2.Auction(
-            bids={"a": active_bid(100.0, 1), "b": active_bid(250.0, 2)},
+            bids={
+                "hidden-bidder-a": active_bid(12345.5, 1),
+                "hidden-bidder-b": active_bid(67890.0, 2),
+            },
             reserve_met=True,
+            state=pb2.AUCTION_STATE_OPEN,
+            version=9,
         ))
         revealed = service._to_public_auction_update(pb2.Auction(
             bids={"a": active_bid(100.0, 1), "b": active_bid(250.0, 2)},
@@ -276,24 +349,22 @@ class AuctionServiceTests(BackendTestCase):
             state=pb2.AUCTION_STATE_REVEALED,
         ))
 
-        self.assertEqual(hidden.low_range, 100.0)
-        self.assertEqual(hidden.high_range, 250.0)
+        self.assertEqual(hidden.state, pb2.AUCTION_STATE_OPEN)
         self.assertEqual(hidden.bidder_count, 2)
-        self.assertFalse(hidden.reserve_met)
+        self.assertEqual(hidden.version, 9)
+        field_names = {field.name for field in hidden.DESCRIPTOR.fields}
+        self.assertNotIn("bids", field_names)
+        self.assertNotIn("bidder_id", field_names)
+        self.assertNotIn("bid_amount", field_names)
+        self.assertNotIn("reserve_price", field_names)
+        self.assertNotIn("reserve_met", field_names)
+        self.assertNotIn("winning_amount", field_names)
+        self.assertNotIn("winning_bidder_id", field_names)
+        self.assertNotIn("high_range", field_names)
+        self.assertNotIn("low_range", field_names)
+        self.assertNotIn("hidden-bidder-a", str(hidden))
+        self.assertNotIn("hidden-bidder-b", str(hidden))
+        self.assertNotIn("12345.5", str(hidden))
+        self.assertNotIn("67890", str(hidden))
         self.assertEqual(revealed.state, pb2.AUCTION_STATE_REVEALED)
-        self.assertEqual(revealed.winning_amount, 250.0)
-        self.assertEqual(revealed.winning_bidder_id, "b")
-
-    def test_revealed_update_publishes_no_winner_when_reserve_not_met(self):
-        service = TestableAuctionService(FakeJudgeStub())
-
-        update = service._to_public_auction_update(pb2.Auction(
-            bids={"buyer-a": active_bid(250.0, 1)},
-            reserve_price=500.0,
-            state=pb2.AUCTION_STATE_REVEALED,
-        ))
-
-        self.assertEqual(update.state, pb2.AUCTION_STATE_REVEALED)
-        self.assertFalse(update.reserve_met)
-        self.assertEqual(update.winning_amount, 0.0)
-        self.assertEqual(update.winning_bidder_id, "")
+        self.assertEqual(revealed.bidder_count, 2)

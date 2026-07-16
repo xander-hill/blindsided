@@ -47,24 +47,22 @@ class BackendLifecycleTests(BackendTestCase):
         self.assertNotEqual(opened.auction_id, "integration-watch")
         self.assertTrue(opening_bid.success)
         self.assertTrue(hidden_status.ok)
-        self.assertEqual(dict(hidden_status.auction.bids), {})
-        self.assertEqual(hidden_status.auction.reserve_price, 0.0)
-        self.assertFalse(hidden_status.auction.reserve_met)
+        self.assertEqual(hidden_status.auction.bidder_count, 1)
         self.assertTrue(bid.success)
-        self.assertEqual(dict(post_bid_status.auction.bids), {})
-        self.assertEqual(post_bid_status.auction.reserve_price, 0.0)
-        self.assertFalse(post_bid_status.auction.reserve_met)
+        self.assertEqual(post_bid_status.auction.bidder_count, 2)
         self.assertTrue(gavel.ok)
         self.assertTrue(revealed_status.ok)
         self.assertEqual(
             revealed_status.auction.state,
             pb2.AUCTION_STATE_REVEALED,
         )
-        self.assertEqual(revealed_status.auction.bids["opening"].amount, 250.0)
-        self.assertEqual(revealed_status.auction.bids["opening"].acceptance_order, 1)
-        self.assertEqual(revealed_status.auction.bids["buyer-a"].amount, 750.0)
-        self.assertEqual(revealed_status.auction.bids["buyer-a"].acceptance_order, 2)
-        self.assertTrue(revealed_status.auction.reserve_met)
+        self.assertEqual(revealed_status.auction.bidder_count, 2)
+        public_fields = {field.name for field in revealed_status.auction.DESCRIPTOR.fields}
+        self.assertNotIn("bids", public_fields)
+        self.assertNotIn("reserve_price", public_fields)
+        self.assertNotIn("reserve_met", public_fields)
+        self.assertNotIn("winning_amount", public_fields)
+        self.assertNotIn("winning_bidder_id", public_fields)
 
     def test_live_stream_reports_opaque_update_then_revealed_update(self):
         with running_backend_stack() as stack:
@@ -102,10 +100,11 @@ class BackendLifecycleTests(BackendTestCase):
 
         self.assertEqual(opaque_update.state, pb2.AUCTION_STATE_OPEN)
         self.assertEqual(opaque_update.bidder_count, 1)
-        self.assertEqual(opaque_update.low_range, 125.0)
-        self.assertEqual(opaque_update.high_range, 125.0)
-        self.assertFalse(opaque_update.reserve_met)
+        update_fields = {field.name for field in opaque_update.DESCRIPTOR.fields}
+        self.assertNotIn("low_range", update_fields)
+        self.assertNotIn("high_range", update_fields)
+        self.assertNotIn("reserve_met", update_fields)
+        self.assertNotIn("winning_amount", update_fields)
+        self.assertNotIn("winning_bidder_id", update_fields)
         self.assertEqual(reveal_update.state, pb2.AUCTION_STATE_REVEALED)
-        self.assertFalse(reveal_update.reserve_met)
-        self.assertEqual(reveal_update.winning_amount, 0.0)
-        self.assertEqual(reveal_update.winning_bidder_id, "")
+        self.assertEqual(reveal_update.bidder_count, 1)

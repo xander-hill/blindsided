@@ -152,26 +152,26 @@ Required behavior:
 
 Before reveal, external users MAY see:
 
-- auction metadata
-- auction state
-- distinct active bidder count
+- ✅ auction metadata
+- ✅ auction state
+- ✅ distinct active bidder count
 
 Before reveal, external users MUST NOT see:
 
-- bid amounts
-- bidder identities
-- reserve price
-- reserve status
-- leading bid
-- winning bidder
-- winning amount
+- ✅ bid amounts
+- ✅ bidder identities
+- ✅ reserve price
+- ✅ reserve status
+- ✅ leading bid
+- ✅ winning bidder
+- ✅ winning amount
 
 Required behavior:
 
-- All externally visible pre-reveal responses MUST apply the same
+- ✅ All externally visible pre-reveal responses MUST apply the same
   visibility restrictions.
-- Live updates MUST NOT reveal information prohibited before reveal.
-- Search and listing responses MUST NOT reveal information prohibited
+- ✅ Live updates MUST NOT reveal information prohibited before reveal.
+- ✅ Search and listing responses MUST NOT reveal information prohibited
   before reveal.
 - Internal services MAY use hidden bid and reserve data only to enforce
   auction rules.
