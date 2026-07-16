@@ -46,17 +46,16 @@ class BidWithdrawalSpecificationTests(BackendTestCase):
         )
         self.assertEqual(update.bidder_count, 1)
 
-    def test_withdrawal_after_deadline_is_rejected_without_mutation(self):
+    def test_withdrawal_after_deadline_triggers_auto_reveal_and_rejects_withdrawal(self):
         judge = make_judge(role="backup")
         judge.auction_store["withdraw-deadline"] = pb2.Auction(
             auction_id="withdraw-deadline",
+            reserve_price=200.0,
             version=4,
             bids={"buyer-a": active_bid(300.0, 1)},
             next_bid_sequence=2,
             ends_at=timestamp_pb2.Timestamp(seconds=1000),
         )
-        original = pb2.Auction()
-        original.CopyFrom(judge.auction_store["withdraw-deadline"])
 
         with mock.patch("blindsided.storage.service.time.time", return_value=1000.0):
             response = judge.ApplyAuctionMutation(
@@ -70,8 +69,17 @@ class BidWithdrawalSpecificationTests(BackendTestCase):
             )
 
         self.assertFalse(response.success)
-        self.assertIn("deadline", response.message)
-        self.assertEqual(judge.auction_store["withdraw-deadline"], original)
+        self.assertIn("Gavel", response.message)
+        self.assertIn("buyer-a", judge.auction_store["withdraw-deadline"].bids)
+        self.assertEqual(
+            judge.auction_store["withdraw-deadline"].state,
+            pb2.AUCTION_STATE_REVEALED,
+        )
+        self.assertEqual(judge.auction_store["withdraw-deadline"].version, 5)
+        self.assertEqual(
+            judge.auction_store["withdraw-deadline"].result.outcome,
+            pb2.AUCTION_OUTCOME_SUCCESSFUL_SALE,
+        )
 
     def test_withdrawal_without_active_bid_fails_without_mutation(self):
         judge = make_judge(role="backup")
@@ -260,6 +268,11 @@ class BidWithdrawalSpecificationTests(BackendTestCase):
         self.assertTrue(withdraw.success)
         self.assertFalse(stale_replace.success)
         self.assertIn("Stale version", stale_replace.message)
+        self.assertEqual(stale_replace.current_version, 5)
+        self.assertEqual(
+            stale_replace.failure_reason,
+            pb2.MUTATION_FAILURE_REASON_CONCURRENCY_CONFLICT,
+        )
         self.assertEqual(judge.auction_store["withdraw-replace-race"].version, 5)
         self.assertEqual(dict(judge.auction_store["withdraw-replace-race"].bids), {})
         self.assertEqual(judge.auction_store["withdraw-replace-race"].next_bid_sequence, 2)
@@ -297,6 +310,11 @@ class BidWithdrawalSpecificationTests(BackendTestCase):
         self.assertTrue(replace.success)
         self.assertFalse(stale_withdraw.success)
         self.assertIn("Stale version", stale_withdraw.message)
+        self.assertEqual(stale_withdraw.current_version, 5)
+        self.assertEqual(
+            stale_withdraw.failure_reason,
+            pb2.MUTATION_FAILURE_REASON_CONCURRENCY_CONFLICT,
+        )
         self.assertEqual(judge.auction_store["replace-withdraw-race"].version, 5)
         self.assertEqual(
             judge.auction_store["replace-withdraw-race"].bids["buyer-a"],

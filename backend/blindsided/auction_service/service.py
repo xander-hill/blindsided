@@ -47,6 +47,16 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
         channel = grpc.insecure_channel(address)
         return pb2_grpc.StorageReplicaServiceStub(channel), channel
 
+    def _mutation_retry_limit(self) -> int:
+        """Bound optimistic-concurrency retries until write idempotency exists."""
+        return int(os.getenv("MUTATION_RETRY_LIMIT", "5"))
+
+    def _is_version_conflict(self, response: pb2.AuctionMutationResponse) -> bool:
+        return (
+            response.failure_reason
+            == pb2.MUTATION_FAILURE_REASON_CONCURRENCY_CONFLICT
+        )
+
     def CreateAuction(self, request: pb2.CreateAuctionRequest, context) -> pb2.CreateAuctionResponse:
         """Persist a new auction through the current primary replica."""
         primary_address = self._get_primary_address()
@@ -86,14 +96,13 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
 
     def PlaceBid(self, request: pb2.BidRequest, context) -> pb2.BidResponse:
         """Retry stale-version bid writes against the latest committed version."""
-        max_retries = int(os.getenv("BID_MAX_RETRIES", "50"))
-        last_error = "Unknown error"
+        mutation_retry_limit = self._mutation_retry_limit()
         current_attempt_version = request.expected_version
 
-        for attempt in range(max_retries):
+        for attempt in range(mutation_retry_limit):
             primary_address = self._get_primary_address()
             if not primary_address:
-                time.sleep(1.0)
+                time.sleep(min(0.01 * (attempt + 1), 0.05))
                 continue
 
             try:
@@ -114,38 +123,41 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                     if response.success:
                         return pb2.BidResponse(success=True, message="Vault Updated.")
 
-                    if "Stale version" in response.message:
-                        query_response = stub.GetAuction(pb2.GetAuctionRequest(auction_id=request.auction_id))
-                        if query_response.ok:
-                            current_attempt_version = query_response.auction.version
-                            print(
-                                "[ServiceNode] Version conflict. "
-                                f"Retrying with v{current_attempt_version}"
-                            )
-                            time.sleep(min(0.01 * (attempt + 1), 0.05))
-                            continue
+                    if (
+                        self._is_version_conflict(response)
+                        and response.current_version
+                        and attempt < mutation_retry_limit - 1
+                    ):
+                        current_attempt_version = response.current_version
+                        print(
+                            "[ServiceNode] Version conflict. "
+                            f"Retrying with v{current_attempt_version}"
+                        )
+                        time.sleep(min(0.01 * (attempt + 1), 0.05))
+                        continue
 
                     return pb2.BidResponse(success=False, message=response.message)
 
             except grpc.RpcError as e:
-                last_error = f"Judge connection failed: {e.details()}"
-                time.sleep(1.0)
+                return pb2.BidResponse(
+                    success=False,
+                    message=f"Judge connection failed: {e.details()}",
+                )
 
         return pb2.BidResponse(
             success=False,
-            message=f"Vault write contention too high: {last_error}",
+            message="Vault write contention too high.",
         )
 
     def WithdrawBid(self, request: pb2.WithdrawBidRequest, context) -> pb2.WithdrawBidResponse:
         """Withdraw the caller's active bid through the current primary replica."""
-        max_retries = int(os.getenv("BID_MAX_RETRIES", "50"))
-        last_error = "Unknown error"
+        mutation_retry_limit = self._mutation_retry_limit()
         current_attempt_version = request.expected_version
 
-        for attempt in range(max_retries):
+        for attempt in range(mutation_retry_limit):
             primary_address = self._get_primary_address()
             if not primary_address:
-                time.sleep(1.0)
+                time.sleep(min(0.01 * (attempt + 1), 0.05))
                 continue
 
             try:
@@ -165,16 +177,18 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                             message="Vault Updated.",
                         )
 
-                    if "Stale version" in response.message:
-                        query_response = stub.GetAuction(pb2.GetAuctionRequest(auction_id=request.auction_id))
-                        if query_response.ok:
-                            current_attempt_version = query_response.auction.version
-                            print(
-                                "[ServiceNode] Version conflict. "
-                                f"Retrying withdrawal with v{current_attempt_version}"
-                            )
-                            time.sleep(min(0.01 * (attempt + 1), 0.05))
-                            continue
+                    if (
+                        self._is_version_conflict(response)
+                        and response.current_version
+                        and attempt < mutation_retry_limit - 1
+                    ):
+                        current_attempt_version = response.current_version
+                        print(
+                            "[ServiceNode] Version conflict. "
+                            f"Retrying withdrawal with v{current_attempt_version}"
+                        )
+                        time.sleep(min(0.01 * (attempt + 1), 0.05))
+                        continue
 
                     return pb2.WithdrawBidResponse(
                         success=False,
@@ -183,41 +197,70 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                     )
 
             except grpc.RpcError as e:
-                last_error = f"Judge connection failed: {e.details()}"
-                time.sleep(1.0)
+                return pb2.WithdrawBidResponse(
+                    success=False,
+                    message=f"Judge connection failed: {e.details()}",
+                )
 
         return pb2.WithdrawBidResponse(
             success=False,
-            message=f"Vault write contention too high: {last_error}",
+            message="Vault write contention too high.",
         )
 
     def RevealAuction(self, request: pb2.RevealAuctionRequest, context):
-        primary_address = self._get_primary_address()
-        if not primary_address:
-            return pb2.RevealAuctionResponse(ok=False, message="Judge unreachable")
+        mutation_retry_limit = self._mutation_retry_limit()
+        current_attempt_version = request.expected_version
 
-        stub, channel = self._create_storage_stub(primary_address)
-        with channel:
-            query_response = stub.GetAuction(pb2.GetAuctionRequest(auction_id=request.auction_id))
-            current_version = query_response.auction.version if query_response.ok else 0
+        for attempt in range(mutation_retry_limit):
+            primary_address = self._get_primary_address()
+            if not primary_address:
+                time.sleep(min(0.01 * (attempt + 1), 0.05))
+                continue
 
-            reveal_mutation = pb2.Auction(
-                auction_id=request.auction_id,
-                state=pb2.AUCTION_STATE_REVEALED,
-                version=current_version
-            )
+            try:
+                stub, channel = self._create_storage_stub(primary_address)
+                with channel:
+                    reveal_mutation = pb2.Auction(
+                        auction_id=request.auction_id,
+                        state=pb2.AUCTION_STATE_REVEALED,
+                        version=current_attempt_version
+                    )
 
-            response = stub.ApplyAuctionMutation(pb2.AuctionMutationRequest(
-                mutation_type=pb2.AUCTION_MUTATION_TYPE_REVEAL,
-                auction=reveal_mutation,
-                expected_version=current_version,
-            ))
+                    response = stub.ApplyAuctionMutation(pb2.AuctionMutationRequest(
+                        mutation_type=pb2.AUCTION_MUTATION_TYPE_REVEAL,
+                        auction=reveal_mutation,
+                        expected_version=current_attempt_version,
+                    ))
 
-            return pb2.RevealAuctionResponse(
-                ok=response.success,
-                final_version=response.current_version,
-                message=response.message,
-            )
+                    if (
+                        not response.success
+                        and self._is_version_conflict(response)
+                        and response.current_version
+                        and attempt < mutation_retry_limit - 1
+                    ):
+                        current_attempt_version = response.current_version
+                        print(
+                            "[ServiceNode] Version conflict. "
+                            f"Retrying reveal with v{current_attempt_version}"
+                        )
+                        time.sleep(min(0.01 * (attempt + 1), 0.05))
+                        continue
+
+                    return pb2.RevealAuctionResponse(
+                        ok=response.success,
+                        final_version=response.current_version,
+                        message=response.message,
+                    )
+            except grpc.RpcError as e:
+                return pb2.RevealAuctionResponse(
+                    ok=False,
+                    message=f"Judge connection failed: {e.details()}",
+                )
+
+        return pb2.RevealAuctionResponse(
+            ok=False,
+            message="Vault write contention too high.",
+        )
 
     def SearchAuctions(self, request: pb2.SearchAuctionsRequest, context) -> pb2.SearchAuctionsResponse:
         """Search available replicas and return only public auction fields."""
@@ -274,7 +317,6 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
             category=auction.category,
             description=auction.description,
             state=auction.state,
-            version=auction.version,
             bidder_count=len(auction.bids),
         )
         if auction.HasField("ends_at"):
@@ -292,7 +334,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
             state=public_auction.state,
             message="Auction update.",
             bidder_count=public_auction.bidder_count,
-            version=public_auction.version,
+            version=auction.version,
         )
         if public_auction.HasField("result"):
             update.result.CopyFrom(public_auction.result)

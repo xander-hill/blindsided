@@ -1,3 +1,7 @@
+from unittest import mock
+
+from google.protobuf import timestamp_pb2
+
 from blindsided.generated import blindsided_pb2 as pb2
 from backend.tests.helpers import (
     BackendTestCase,
@@ -82,6 +86,72 @@ class AuctionLifecycleSpecificationTests(BackendTestCase):
             pb2.AUCTION_STATE_REVEALED,
         )
         self.assertEqual(judge.auction_store["lifecycle-once"].version, 3)
+
+    def test_deadline_read_automatically_reveals_after_prior_mutations_are_accounted(self):
+        judge = make_judge(role="backup")
+        judge.auction_store["lifecycle-auto-reveal"] = pb2.Auction(
+            auction_id="lifecycle-auto-reveal",
+            reserve_price=500.0,
+            version=1,
+            state=pb2.AUCTION_STATE_OPEN,
+            next_bid_sequence=1,
+            ends_at=timestamp_pb2.Timestamp(seconds=1000),
+        )
+
+        with mock.patch("blindsided.storage.service.time.time", return_value=999.1):
+            first_bid = judge.ApplyAuctionMutation(
+                pb2.AuctionMutationRequest(
+                    mutation_type=pb2.AUCTION_MUTATION_TYPE_PLACE_BID,
+                    auction=pb2.Auction(
+                        auction_id="lifecycle-auto-reveal",
+                        bids={"buyer-a": active_bid(700.0)},
+                    ),
+                    expected_version=1,
+                ),
+                NoopContext(),
+            )
+        with mock.patch("blindsided.storage.service.time.time", return_value=999.2):
+            withdrawal = judge.ApplyAuctionMutation(
+                pb2.AuctionMutationRequest(
+                    mutation_type=pb2.AUCTION_MUTATION_TYPE_WITHDRAW_BID,
+                    auction=pb2.Auction(auction_id="lifecycle-auto-reveal"),
+                    bidder_id="buyer-a",
+                    expected_version=2,
+                ),
+                NoopContext(),
+            )
+        with mock.patch("blindsided.storage.service.time.time", return_value=999.3):
+            final_bid = judge.ApplyAuctionMutation(
+                pb2.AuctionMutationRequest(
+                    mutation_type=pb2.AUCTION_MUTATION_TYPE_PLACE_BID,
+                    auction=pb2.Auction(
+                        auction_id="lifecycle-auto-reveal",
+                        bids={"buyer-b": active_bid(800.0)},
+                    ),
+                    expected_version=3,
+                ),
+                NoopContext(),
+            )
+        with mock.patch("blindsided.storage.service.time.time", return_value=1000.0):
+            response = judge.GetAuction(
+                pb2.GetAuctionRequest(auction_id="lifecycle-auto-reveal"),
+                NoopContext(),
+            )
+
+        self.assertTrue(first_bid.success)
+        self.assertTrue(withdrawal.success)
+        self.assertTrue(final_bid.success)
+        self.assertTrue(response.ok)
+        self.assertEqual(response.auction.state, pb2.AUCTION_STATE_REVEALED)
+        self.assertEqual(response.auction.version, 5)
+        self.assertNotIn("buyer-a", response.auction.bids)
+        self.assertEqual(response.auction.bids["buyer-b"], active_bid(800.0, 2))
+        self.assertEqual(
+            response.auction.result.outcome,
+            pb2.AUCTION_OUTCOME_SUCCESSFUL_SALE,
+        )
+        self.assertEqual(response.auction.result.winning_bidder_id, "buyer-b")
+        self.assertEqual(response.auction.result.winning_amount, 800.0)
 
     def test_revealed_is_terminal_and_rejects_later_bid_mutations(self):
         judge = make_judge(role="backup")

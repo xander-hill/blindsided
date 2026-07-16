@@ -33,10 +33,20 @@ Required behavior:
 - ✅ A `REVEALED` auction MUST reject all subsequent state mutations.
 - ✅ The system MUST perform the reveal transition.
 - ✅ The reveal transition MAY be initiated by an authorized request.
-- The reveal transition MAY be initiated automatically when the auction
+- ✅ The reveal transition MAY be initiated automatically when the auction
   deadline is reached.
 - ✅ The system MUST NOT transition an auction from `REVEALED` back to
   `OPEN`.
+
+Test coverage:
+
+- ✅ Lifecycle contract tests cover creation into `OPEN`, explicit reveal
+  transition, single reveal, terminal revealed state, and no reopen.
+- ✅ Negative lifecycle tests cover direct non-reveal state changes, stale
+  reveal attempts, second reveal attempts, and mutations after reveal.
+- ✅ Deadline finalization tests cover automatic reveal on overdue reads
+  and post-deadline mutation attempts, with all accepted pre-deadline bids
+  and withdrawals reflected in the final active bid set.
 
 ### 2.2 Auction Creation
 
@@ -60,6 +70,15 @@ Required behavior:
 - ✅ A creation request that cannot establish every required creation
   property MUST fail without creating a partial auction.
 
+Test coverage:
+
+- ✅ Creation contract tests cover required properties, unique auction id,
+  seller identity, `ends_at`, reserve price, empty bids, `OPEN` state, and
+  system-assigned initial version.
+- ✅ Creation rejection tests cover missing seller, missing `ends_at`,
+  missing reserve price, creation with bids, duplicate id, mutable
+  creation metadata, and partial creation failure.
+
 ### 2.3 Reserve Price
 
 The reserve price is an auction property, not a bid.
@@ -74,6 +93,14 @@ Required behavior:
   reveal.
 - ✅ The reserve price MUST be evaluated only to determine whether the
   auction outcome is a successful sale.
+
+Test coverage:
+
+- ✅ Reserve contract tests cover reserve configuration, no bidder
+  association, no bidder-count contribution, no reserve-as-winner, and
+  pre-reveal public hiding.
+- ✅ Outcome-focused reserve tests cover reserve evaluation only at reveal
+  and only for successful-sale determination.
 
 ---
 
@@ -91,6 +118,12 @@ Required behavior:
 - ✅ A replaced bid MUST NOT remain eligible to win.
 - ✅ A replaced bid MUST NOT count toward distinct active bidder count.
 
+Test coverage:
+
+- ✅ Active-bid contract tests cover one active bid per bidder, accepted
+  replacement, replaced bid ineligibility, and stable distinct bidder
+  count after replacement.
+
 ### 3.2 Bid Submission
 
 Required behavior:
@@ -105,6 +138,13 @@ Required behavior:
 - ✅ A rejected bid MUST NOT modify auction state.
 - ✅ A rejected bid MUST NOT modify the auction version.
 - ✅ Each accepted bid MUST receive a deterministic acceptance order.
+
+Test coverage:
+
+- ✅ Bid-submission contract tests cover accepted open-auction bids,
+  revealed-auction rejection, deadline rejection, direct lowering
+  rejection, exact single version increment, rejected no-op behavior, and
+  deterministic acceptance order.
 
 ### 3.3 Bid Withdrawal
 
@@ -129,6 +169,14 @@ Required behavior:
 - ✅ After a successful withdrawal, the bidder MAY submit a new bid at any
   valid amount while the auction remains `OPEN`.
 
+Test coverage:
+
+- ✅ Withdrawal contract tests cover own-bid withdrawal before deadline,
+  active bidder count decrease, version increment, missing-bid rejection,
+  revealed/deadline rejection, and another-bidder withdrawal rejection.
+- ✅ Rebid and outcome tests cover state recalculation, post-withdrawal
+  rebid, and withdrawn bid ineligibility.
+
 ### 3.4 Tie Breaking
 
 If multiple active bidders share the highest bid amount, the earliest
@@ -143,6 +191,14 @@ Required behavior:
 - ✅ Acceptance order MUST remain stable across failover.
 - ✅ Replaced or withdrawn bids MUST NOT retain winner eligibility through
   their original acceptance order.
+
+Test coverage:
+
+- ✅ Tie-breaking contract tests cover system-assigned order,
+  deterministic earliest-active-bid winner, duplicate-order corruption
+  rejection, and replacement/withdrawal order loss.
+- ✅ Stability tests cover acceptance order across full-state sync,
+  restart-style recovery, replication, and failover promotion.
 
 ---
 
@@ -173,8 +229,18 @@ Required behavior:
 - ✅ Live updates MUST NOT reveal information prohibited before reveal.
 - ✅ Search and listing responses MUST NOT reveal information prohibited
   before reveal.
-- Internal services MAY use hidden bid and reserve data only to enforce
+- ✅ Internal services MAY use hidden bid and reserve data only to enforce
   auction rules.
+
+Test coverage:
+
+- ✅ Public projection tests cover metadata, state, bidder count, and
+  absence of bids, bidder ids, bid amounts, reserve price/status, leading
+  bid, winner, and winning amount before reveal.
+- ✅ Live update and search tests cover the same pre-reveal visibility
+  restrictions across update streams and listing/search responses.
+- ✅ Internal-rule tests cover storage using hidden bid/reserve data for
+  reveal outcome while keeping that data out of public responses.
 
 ### 4.2 After Reveal
 
@@ -201,6 +267,15 @@ Required behavior:
   a winning bidder or winning amount.
 - ✅ Post-reveal responses MUST continue to protect losing bid data.
 
+Test coverage:
+
+- ✅ Revealed public projection tests cover no-bids, reserve-not-met, and
+  successful-sale result shapes, including reserve status, winner status,
+  winning bidder, winning amount, and final bidder count.
+- ✅ Post-reveal visibility tests assert losing bidder identities, losing
+  amounts, and full bid maps/history remain absent from public auction and
+  stream update messages.
+
 ---
 
 ## 5. Auction Outcome
@@ -226,6 +301,14 @@ Required behavior:
 - ✅ If the reserve is not met, no winner MUST be published.
 - ✅ Outcome calculation MUST use only the final active bid set at reveal.
 
+Test coverage:
+
+- ✅ Storage result tests cover internal reveal results for no bids,
+  reserve not met, and successful sale.
+- ✅ Outcome tests cover winner existence only when at least one final
+  active bid meets reserve, no winner when reserve is unmet, and final
+  active bid set selection after replacement or withdrawal.
+
 ---
 
 ## 6. Optimistic Concurrency
@@ -234,17 +317,30 @@ Mutations use optimistic concurrency internally.
 
 Required behavior:
 
-- Each mutation MUST validate against an authoritative auction version.
-- If a mutation encounters a stale version, the service MAY retry the
+- ✅ Each mutation MUST validate against an authoritative auction version.
+- ✅ If a mutation encounters a stale version, the service MAY retry the
   logical request against the latest authoritative state.
-- Each retry MUST revalidate all domain rules.
-- Retries MUST be bounded.
-- If retries are exhausted, the system MUST return a specific
+- ✅ Each retry MUST revalidate all domain rules.
+- ✅ Retries MUST be bounded.
+- ✅ If retries are exhausted, the system MUST return a specific
   concurrency conflict response.
-- A failed concurrency retry sequence MUST NOT partially apply the
+- ✅ A failed concurrency retry sequence MUST NOT partially apply the
   mutation.
-- A successful retry sequence MUST apply the logical request at most
+- ✅ A successful retry sequence MUST apply the logical request at most
   once.
+
+Test coverage:
+
+- ✅ Storage rejects stale bid, withdrawal, and reveal mutations without
+  advancing or partially applying state.
+- ✅ Storage returns the authoritative current version and typed
+  `CONCURRENCY_CONFLICT` failure reason for stale mutations.
+- ✅ Auction service retries bid, withdrawal, and reveal mutations using
+  storage's returned current version.
+- ✅ Auction service retries are bounded and do not retry ambiguous RPC
+  errors.
+- ✅ Concurrent mutation tests cover successful retry sequences without
+  lost updates or duplicate application.
 
 ---
 

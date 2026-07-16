@@ -96,19 +96,15 @@ export interface PublicAuction {
      */
     state: AuctionState;
     /**
-     * @generated from protobuf field: int32 version = 7
-     */
-    version: number;
-    /**
-     * @generated from protobuf field: google.protobuf.Timestamp ends_at = 8
+     * @generated from protobuf field: google.protobuf.Timestamp ends_at = 7
      */
     endsAt?: Timestamp;
     /**
-     * @generated from protobuf field: int32 bidder_count = 9
+     * @generated from protobuf field: int32 bidder_count = 8
      */
     bidderCount: number;
     /**
-     * @generated from protobuf field: optional blindsided.AuctionResult result = 10
+     * @generated from protobuf field: optional blindsided.AuctionResult result = 9
      */
     result?: AuctionResult;
 }
@@ -460,6 +456,10 @@ export interface AuctionMutationResponse {
      * @generated from protobuf field: string message = 3
      */
     message: string;
+    /**
+     * @generated from protobuf field: optional blindsided.MutationFailureReason failure_reason = 4
+     */
+    failureReason?: MutationFailureReason;
 }
 /**
  * @generated from protobuf message blindsided.StateRequest
@@ -715,6 +715,31 @@ export enum AuctionOutcome {
      */
     SUCCESSFUL_SALE = 3
 }
+/**
+ * @generated from protobuf enum blindsided.MutationFailureReason
+ */
+export enum MutationFailureReason {
+    /**
+     * @generated from protobuf enum value: MUTATION_FAILURE_REASON_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: MUTATION_FAILURE_REASON_NOT_FOUND = 1;
+     */
+    NOT_FOUND = 1,
+    /**
+     * @generated from protobuf enum value: MUTATION_FAILURE_REASON_INVALID_STATE = 2;
+     */
+    INVALID_STATE = 2,
+    /**
+     * @generated from protobuf enum value: MUTATION_FAILURE_REASON_CONCURRENCY_CONFLICT = 3;
+     */
+    CONCURRENCY_CONFLICT = 3,
+    /**
+     * @generated from protobuf enum value: MUTATION_FAILURE_REASON_REPLICATION_FAILED = 4;
+     */
+    REPLICATION_FAILED = 4
+}
 // @generated message type with reflection information, may provide speed optimized methods
 class Auction$Type extends MessageType<Auction> {
     constructor() {
@@ -878,10 +903,9 @@ class PublicAuction$Type extends MessageType<PublicAuction> {
             { no: 4, name: "category", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 5, name: "description", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 6, name: "state", kind: "enum", T: () => ["blindsided.AuctionState", AuctionState, "AUCTION_STATE_"] },
-            { no: 7, name: "version", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
-            { no: 8, name: "ends_at", kind: "message", T: () => Timestamp },
-            { no: 9, name: "bidder_count", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
-            { no: 10, name: "result", kind: "message", T: () => AuctionResult }
+            { no: 7, name: "ends_at", kind: "message", T: () => Timestamp },
+            { no: 8, name: "bidder_count", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 9, name: "result", kind: "message", T: () => AuctionResult }
         ]);
     }
     create(value?: PartialMessage<PublicAuction>): PublicAuction {
@@ -892,7 +916,6 @@ class PublicAuction$Type extends MessageType<PublicAuction> {
         message.category = "";
         message.description = "";
         message.state = 0;
-        message.version = 0;
         message.bidderCount = 0;
         if (value !== undefined)
             reflectionMergePartial<PublicAuction>(this, message, value);
@@ -921,16 +944,13 @@ class PublicAuction$Type extends MessageType<PublicAuction> {
                 case /* blindsided.AuctionState state */ 6:
                     message.state = reader.int32();
                     break;
-                case /* int32 version */ 7:
-                    message.version = reader.int32();
-                    break;
-                case /* google.protobuf.Timestamp ends_at */ 8:
+                case /* google.protobuf.Timestamp ends_at */ 7:
                     message.endsAt = Timestamp.internalBinaryRead(reader, reader.uint32(), options, message.endsAt);
                     break;
-                case /* int32 bidder_count */ 9:
+                case /* int32 bidder_count */ 8:
                     message.bidderCount = reader.int32();
                     break;
-                case /* optional blindsided.AuctionResult result */ 10:
+                case /* optional blindsided.AuctionResult result */ 9:
                     message.result = AuctionResult.internalBinaryRead(reader, reader.uint32(), options, message.result);
                     break;
                 default:
@@ -963,18 +983,15 @@ class PublicAuction$Type extends MessageType<PublicAuction> {
         /* blindsided.AuctionState state = 6; */
         if (message.state !== 0)
             writer.tag(6, WireType.Varint).int32(message.state);
-        /* int32 version = 7; */
-        if (message.version !== 0)
-            writer.tag(7, WireType.Varint).int32(message.version);
-        /* google.protobuf.Timestamp ends_at = 8; */
+        /* google.protobuf.Timestamp ends_at = 7; */
         if (message.endsAt)
-            Timestamp.internalBinaryWrite(message.endsAt, writer.tag(8, WireType.LengthDelimited).fork(), options).join();
-        /* int32 bidder_count = 9; */
+            Timestamp.internalBinaryWrite(message.endsAt, writer.tag(7, WireType.LengthDelimited).fork(), options).join();
+        /* int32 bidder_count = 8; */
         if (message.bidderCount !== 0)
-            writer.tag(9, WireType.Varint).int32(message.bidderCount);
-        /* optional blindsided.AuctionResult result = 10; */
+            writer.tag(8, WireType.Varint).int32(message.bidderCount);
+        /* optional blindsided.AuctionResult result = 9; */
         if (message.result)
-            AuctionResult.internalBinaryWrite(message.result, writer.tag(10, WireType.LengthDelimited).fork(), options).join();
+            AuctionResult.internalBinaryWrite(message.result, writer.tag(9, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -2166,7 +2183,8 @@ class AuctionMutationResponse$Type extends MessageType<AuctionMutationResponse> 
         super("blindsided.AuctionMutationResponse", [
             { no: 1, name: "success", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
             { no: 2, name: "current_version", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
-            { no: 3, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+            { no: 3, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "failure_reason", kind: "enum", opt: true, T: () => ["blindsided.MutationFailureReason", MutationFailureReason, "MUTATION_FAILURE_REASON_"] }
         ]);
     }
     create(value?: PartialMessage<AuctionMutationResponse>): AuctionMutationResponse {
@@ -2192,6 +2210,9 @@ class AuctionMutationResponse$Type extends MessageType<AuctionMutationResponse> 
                 case /* string message */ 3:
                     message.message = reader.string();
                     break;
+                case /* optional blindsided.MutationFailureReason failure_reason */ 4:
+                    message.failureReason = reader.int32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -2213,6 +2234,9 @@ class AuctionMutationResponse$Type extends MessageType<AuctionMutationResponse> 
         /* string message = 3; */
         if (message.message !== "")
             writer.tag(3, WireType.LengthDelimited).string(message.message);
+        /* optional blindsided.MutationFailureReason failure_reason = 4; */
+        if (message.failureReason !== undefined)
+            writer.tag(4, WireType.Varint).int32(message.failureReason);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

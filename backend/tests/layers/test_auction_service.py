@@ -1,6 +1,8 @@
 from unittest import mock
 from uuid import UUID
 
+import grpc
+
 from blindsided.auction_service.service import AuctionService
 from blindsided.generated import blindsided_pb2 as pb2
 from backend.tests.helpers import (
@@ -18,11 +20,14 @@ class FakeJudgeStub:
         self.gets: list[pb2.GetAuctionRequest] = []
         self.searches: list[pb2.SearchAuctionsRequest] = []
         self.mutation_responses: list[pb2.AuctionMutationResponse] = []
+        self.mutation_errors: list[grpc.RpcError] = []
         self.get_responses: list[pb2.GetStoredAuctionResponse] = []
         self.search_responses: list[pb2.GetStoredAuctionsResponse] = []
 
     def ApplyAuctionMutation(self, request, timeout=None):
         self.mutations.append(request)
+        if self.mutation_errors:
+            raise self.mutation_errors.pop(0)
         if self.mutation_responses:
             return self.mutation_responses.pop(0)
         return pb2.AuctionMutationResponse(success=True, current_version=1, message="ok")
@@ -53,6 +58,11 @@ class TestableAuctionService(AuctionService):
 
     def _create_storage_stub(self, address: str):
         return self.stub, ChannelContext()
+
+
+class FakeRpcError(grpc.RpcError):
+    def details(self):
+        return "temporary transport failure"
 
 
 class AuctionServiceTests(BackendTestCase):
@@ -171,7 +181,6 @@ class AuctionServiceTests(BackendTestCase):
         self.assertEqual(public_auction.category, "collectibles")
         self.assertEqual(public_auction.description, "Metadata stays visible")
         self.assertEqual(public_auction.ends_at, ends_at)
-        self.assertEqual(public_auction.version, 7)
         self.assertEqual(public_auction.state, pb2.AUCTION_STATE_OPEN)
         self.assertEqual(public_auction.bidder_count, 2)
 
@@ -368,7 +377,6 @@ class AuctionServiceTests(BackendTestCase):
         self.assertEqual(public_auction.category, "collectibles")
         self.assertEqual(public_auction.description, "Metadata stays visible")
         self.assertEqual(public_auction.ends_at, ends_at)
-        self.assertEqual(public_auction.version, 7)
         self.assertEqual(public_auction.state, pb2.AUCTION_STATE_OPEN)
         self.assertEqual(public_auction.bidder_count, 2)
 
@@ -389,13 +397,14 @@ class AuctionServiceTests(BackendTestCase):
     def test_bid_retries_with_latest_version_after_stale_conflict(self):
         stub = FakeJudgeStub()
         stub.mutation_responses.extend([
-            pb2.AuctionMutationResponse(success=False, message="Fog conflict: Stale version."),
+            pb2.AuctionMutationResponse(
+                success=False,
+                current_version=7,
+                failure_reason=pb2.MUTATION_FAILURE_REASON_CONCURRENCY_CONFLICT,
+                message="Fog conflict: Stale version.",
+            ),
             pb2.AuctionMutationResponse(success=True, current_version=8, message="ok"),
         ])
-        stub.get_responses.append(pb2.GetStoredAuctionResponse(
-            ok=True,
-            auction=pb2.Auction(auction_id="auction-1", version=7),
-        ))
         service = TestableAuctionService(stub)
 
         response = service.PlaceBid(
@@ -422,17 +431,19 @@ class AuctionServiceTests(BackendTestCase):
         )
         self.assertEqual(stub.mutations[1].auction.version, 7)
         self.assertEqual(stub.mutations[1].expected_version, 7)
+        self.assertEqual(stub.gets, [])
 
     def test_withdraw_bid_retries_with_latest_version_after_stale_conflict(self):
         stub = FakeJudgeStub()
         stub.mutation_responses.extend([
-            pb2.AuctionMutationResponse(success=False, message="Fog conflict: Stale version."),
+            pb2.AuctionMutationResponse(
+                success=False,
+                current_version=8,
+                failure_reason=pb2.MUTATION_FAILURE_REASON_CONCURRENCY_CONFLICT,
+                message="Fog conflict: Stale version.",
+            ),
             pb2.AuctionMutationResponse(success=True, current_version=9, message="ok"),
         ])
-        stub.get_responses.append(pb2.GetStoredAuctionResponse(
-            ok=True,
-            auction=pb2.Auction(auction_id="auction-1", version=8),
-        ))
         service = TestableAuctionService(stub)
 
         response = service.WithdrawBid(
@@ -454,13 +465,10 @@ class AuctionServiceTests(BackendTestCase):
         self.assertEqual(stub.mutations[0].bidder_id, "buyer-a")
         self.assertEqual(stub.mutations[0].expected_version, 7)
         self.assertEqual(stub.mutations[1].expected_version, 8)
+        self.assertEqual(stub.gets, [])
 
     def test_drop_gavel_returns_public_gavel_response(self):
         stub = FakeJudgeStub()
-        stub.get_responses.append(pb2.GetStoredAuctionResponse(
-            ok=True,
-            auction=pb2.Auction(auction_id="auction-1", version=3),
-        ))
         stub.mutation_responses.append(pb2.AuctionMutationResponse(
             success=True,
             current_version=4,
@@ -480,6 +488,58 @@ class AuctionServiceTests(BackendTestCase):
             stub.mutations[0].mutation_type,
             pb2.AUCTION_MUTATION_TYPE_REVEAL,
         )
+        self.assertEqual(stub.gets, [])
+
+    def test_reveal_retries_with_storage_current_version_after_stale_conflict(self):
+        stub = FakeJudgeStub()
+        stub.mutation_responses.extend([
+            pb2.AuctionMutationResponse(
+                success=False,
+                current_version=3,
+                failure_reason=pb2.MUTATION_FAILURE_REASON_CONCURRENCY_CONFLICT,
+                message="Fog conflict: Stale version.",
+            ),
+            pb2.AuctionMutationResponse(
+                success=True,
+                current_version=4,
+                message="Vault updated.",
+            ),
+        ])
+        service = TestableAuctionService(stub)
+
+        response = service.RevealAuction(
+            pb2.RevealAuctionRequest(
+                auction_id="auction-1",
+                expected_version=2,
+            ),
+            NoopContext(),
+        )
+
+        self.assertTrue(response.ok)
+        self.assertEqual(response.final_version, 4)
+        self.assertEqual(stub.mutations[0].expected_version, 2)
+        self.assertEqual(stub.mutations[1].expected_version, 3)
+        self.assertEqual(stub.mutations[1].auction.version, 3)
+        self.assertEqual(stub.gets, [])
+
+    def test_bid_does_not_retry_ambiguous_rpc_errors(self):
+        stub = FakeJudgeStub()
+        stub.mutation_errors.append(FakeRpcError())
+        service = TestableAuctionService(stub)
+
+        response = service.PlaceBid(
+            pb2.BidRequest(
+                auction_id="auction-1",
+                bidder_id="buyer-a",
+                amount=250.0,
+                expected_version=6,
+            ),
+            NoopContext(),
+        )
+
+        self.assertFalse(response.success)
+        self.assertIn("Judge connection failed", response.message)
+        self.assertEqual(len(stub.mutations), 1)
 
     def test_opaque_update_uses_public_auction_update_fields(self):
         service = TestableAuctionService(FakeJudgeStub())

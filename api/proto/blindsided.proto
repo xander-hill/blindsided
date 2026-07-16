@@ -25,6 +25,14 @@ enum AuctionOutcome {
     AUCTION_OUTCOME_SUCCESSFUL_SALE = 3;
 }
 
+enum MutationFailureReason {
+    MUTATION_FAILURE_REASON_UNSPECIFIED = 0;
+    MUTATION_FAILURE_REASON_NOT_FOUND = 1;
+    MUTATION_FAILURE_REASON_INVALID_STATE = 2;
+    MUTATION_FAILURE_REASON_CONCURRENCY_CONFLICT = 3;
+    MUTATION_FAILURE_REASON_REPLICATION_FAILED = 4;
+}
+
 message Auction {
     string auction_id = 1;
     string seller_id = 2;
@@ -47,10 +55,9 @@ message PublicAuction {
     string category = 4;
     string description = 5;
     AuctionState state = 6;
-    int32 version = 7;
-    google.protobuf.Timestamp ends_at = 8;
-    int32 bidder_count = 9;
-    optional AuctionResult result = 10;
+    google.protobuf.Timestamp ends_at = 7;
+    int32 bidder_count = 8;
+    optional AuctionResult result = 9;
 }
 
 message AuctionResult {
@@ -168,7 +175,7 @@ message AuctionMutationRequest {
     string bidder_id = 3;
     int32 expected_version = 4;
 }
-message AuctionMutationResponse { bool success = 1; int32 current_version = 2; string message = 3; }
+message AuctionMutationResponse { bool success = 1; int32 current_version = 2; string message = 3; optional MutationFailureReason failure_reason = 4; }
 
 message StateRequest { string requester_id = 1; }
 message StateResponse { bool ok = 1; repeated Auction auctions = 2; string message = 3; }

@@ -31,7 +31,7 @@ class BackendLifecycleTests(BackendTestCase):
                     auction_id=auction_id,
                     bidder_id="buyer-a",
                     amount=750.0,
-                    expected_version=hidden_status.auction.version,
+                    expected_version=1,
                 ), timeout=5)
                 post_bid_status = stub.GetAuction(pb2.GetAuctionRequest(
                     auction_id=auction_id,

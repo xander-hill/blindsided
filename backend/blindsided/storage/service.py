@@ -69,41 +69,49 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 if mutation_type == pb2.AUCTION_MUTATION_TYPE_REVEAL:
                     return pb2.AuctionMutationResponse(
                         success=False,
+                        failure_reason=pb2.MUTATION_FAILURE_REASON_NOT_FOUND,
                         message="Cannot reveal an auction that does not exist.",
                     )
                 if mutation_type != pb2.AUCTION_MUTATION_TYPE_CREATE:
                     return pb2.AuctionMutationResponse(
                         success=False,
+                        failure_reason=pb2.MUTATION_FAILURE_REASON_NOT_FOUND,
                         message="Auction does not exist.",
                     )
                 if not auction_id.strip():
                     return pb2.AuctionMutationResponse(
                         success=False,
+                        failure_reason=pb2.MUTATION_FAILURE_REASON_INVALID_STATE,
                         message="Auction creation requires an auction id.",
                     )
                 if not incoming_auction.seller_id.strip():
                     return pb2.AuctionMutationResponse(
                         success=False,
+                        failure_reason=pb2.MUTATION_FAILURE_REASON_INVALID_STATE,
                         message="Auction creation requires a seller id.",
                     )
                 if not incoming_auction.HasField("ends_at"):
                     return pb2.AuctionMutationResponse(
                         success=False,
+                        failure_reason=pb2.MUTATION_FAILURE_REASON_INVALID_STATE,
                         message="Auction creation requires an immutable closing timestamp.",
                     )
                 if incoming_auction.reserve_price <= 0:
                     return pb2.AuctionMutationResponse(
                         success=False,
+                        failure_reason=pb2.MUTATION_FAILURE_REASON_INVALID_STATE,
                         message="Auction creation requires a positive reserve price.",
                     )
                 if incoming_auction.bids:
                     return pb2.AuctionMutationResponse(
                         success=False,
+                        failure_reason=pb2.MUTATION_FAILURE_REASON_INVALID_STATE,
                         message="Auction creation must start with no active bids.",
                     )
                 if incoming_auction.state == pb2.AUCTION_STATE_REVEALED:
                     return pb2.AuctionMutationResponse(
                         success=False,
+                        failure_reason=pb2.MUTATION_FAILURE_REASON_INVALID_STATE,
                         message="Auction creation must begin open.",
                     )
                 incoming_auction.state = pb2.AUCTION_STATE_OPEN
@@ -113,6 +121,8 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             elif existing_auction.state == pb2.AUCTION_STATE_REVEALED:
                 return pb2.AuctionMutationResponse(
                     success=False,
+                    current_version=existing_auction.version,
+                    failure_reason=pb2.MUTATION_FAILURE_REASON_INVALID_STATE,
                     message="The Gavel has already fallen.",
                 )
 
@@ -122,20 +132,36 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             ):
                 return pb2.AuctionMutationResponse(
                     success=False,
+                    current_version=existing_auction.version,
+                    failure_reason=pb2.MUTATION_FAILURE_REASON_INVALID_STATE,
                     message="Reveal requires a reveal event.",
                 )
 
             else:
+                if mutation_type != pb2.AUCTION_MUTATION_TYPE_REVEAL:
+                    existing_auction = self._auto_reveal_if_due(existing_auction)
+                    if existing_auction.state == pb2.AUCTION_STATE_REVEALED:
+                        return pb2.AuctionMutationResponse(
+                            success=False,
+                            current_version=existing_auction.version,
+                            failure_reason=pb2.MUTATION_FAILURE_REASON_INVALID_STATE,
+                            message="The Gavel has already fallen.",
+                        )
+
                 state_error = self._acceptance_order_state_error(existing_auction)
                 if state_error:
                     return pb2.AuctionMutationResponse(
                         success=False,
+                        current_version=existing_auction.version,
+                        failure_reason=pb2.MUTATION_FAILURE_REASON_INVALID_STATE,
                         message=state_error,
                     )
 
                 if self._includes_creation_metadata(incoming_auction):
                     return pb2.AuctionMutationResponse(
                         success=False,
+                        current_version=existing_auction.version,
+                        failure_reason=pb2.MUTATION_FAILURE_REASON_INVALID_STATE,
                         message="Auction creation properties are immutable.",
                     )
 
@@ -143,6 +169,8 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 if expected_version != existing_auction.version:
                     return pb2.AuctionMutationResponse(
                         success=False,
+                        current_version=existing_auction.version,
+                        failure_reason=pb2.MUTATION_FAILURE_REASON_CONCURRENCY_CONFLICT,
                         message="Fog conflict: Stale version.",
                     )
 
@@ -150,19 +178,20 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 updated_auction.CopyFrom(existing_auction)
 
                 if mutation_type == pb2.AUCTION_MUTATION_TYPE_REVEAL:
-                    updated_auction.state = pb2.AUCTION_STATE_REVEALED
-                    updated_auction.result.CopyFrom(
-                        self._build_auction_result(updated_auction)
-                    )
+                    updated_auction = self._revealed_copy(existing_auction)
                 elif mutation_type == pb2.AUCTION_MUTATION_TYPE_PLACE_BID:
                     if not incoming_auction.bids:
                         return pb2.AuctionMutationResponse(
                             success=False,
+                            current_version=existing_auction.version,
+                            failure_reason=pb2.MUTATION_FAILURE_REASON_INVALID_STATE,
                             message="Bid mutation requires at least one bid.",
                         )
                     if self._auction_has_ended(existing_auction):
                         return pb2.AuctionMutationResponse(
                             success=False,
+                            current_version=existing_auction.version,
+                            failure_reason=pb2.MUTATION_FAILURE_REASON_INVALID_STATE,
                             message="Auction deadline has passed.",
                         )
 
@@ -175,6 +204,8 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                         ):
                             return pb2.AuctionMutationResponse(
                                 success=False,
+                                current_version=existing_auction.version,
+                                failure_reason=pb2.MUTATION_FAILURE_REASON_INVALID_STATE,
                                 message="Bid must be higher than bidder's active bid.",
                             )
                         updated_auction.bids[bidder_id].CopyFrom(
@@ -189,17 +220,23 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                     if self._auction_has_ended(existing_auction):
                         return pb2.AuctionMutationResponse(
                             success=False,
+                            current_version=existing_auction.version,
+                            failure_reason=pb2.MUTATION_FAILURE_REASON_INVALID_STATE,
                             message="Auction deadline has passed.",
                         )
                     bidder_id = request.bidder_id.strip()
                     if not bidder_id:
                         return pb2.AuctionMutationResponse(
                             success=False,
+                            current_version=existing_auction.version,
+                            failure_reason=pb2.MUTATION_FAILURE_REASON_INVALID_STATE,
                             message="Withdrawal requires a bidder id.",
                         )
                     if bidder_id not in existing_auction.bids:
                         return pb2.AuctionMutationResponse(
                             success=False,
+                            current_version=existing_auction.version,
+                            failure_reason=pb2.MUTATION_FAILURE_REASON_INVALID_STATE,
                             message="Bidder has no active bid to withdraw.",
                         )
                     updated_auction.next_bid_sequence = self._next_bid_sequence(
@@ -209,6 +246,8 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 else:
                     return pb2.AuctionMutationResponse(
                         success=False,
+                        current_version=existing_auction.version,
+                        failure_reason=pb2.MUTATION_FAILURE_REASON_INVALID_STATE,
                         message="Unsupported auction mutation type.",
                     )
 
@@ -226,6 +265,8 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 
                     return pb2.AuctionMutationResponse(
                         success=False,
+                        current_version=existing_auction.version if existing_auction else 0,
+                        failure_reason=pb2.MUTATION_FAILURE_REASON_REPLICATION_FAILED,
                         message="Vault replication failed.",
                     )
 
@@ -292,6 +333,30 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             winning_amount=winning_amount,
         )
 
+    def _revealed_copy(self, auction: pb2.Auction) -> pb2.Auction:
+        revealed_auction = pb2.Auction()
+        revealed_auction.CopyFrom(auction)
+        revealed_auction.state = pb2.AUCTION_STATE_REVEALED
+        revealed_auction.version = auction.version + 1
+        revealed_auction.result.CopyFrom(self._build_auction_result(revealed_auction))
+        return revealed_auction
+
+    def _auto_reveal_if_due(self, auction: pb2.Auction) -> pb2.Auction:
+        if auction.state == pb2.AUCTION_STATE_REVEALED:
+            return auction
+        if not self._auction_has_ended(auction):
+            return auction
+
+        revealed_auction = self._revealed_copy(auction)
+        self.auction_store[auction.auction_id] = revealed_auction
+
+        if self.replica_role == "primary" and not self._replicate_to_peers(revealed_auction):
+            self.auction_store[auction.auction_id] = auction
+            return auction
+
+        self._persist_state_to_disk()
+        return revealed_auction
+
     def _next_bid_sequence(self, auction: pb2.Auction) -> int:
         if auction.next_bid_sequence > 0:
             return auction.next_bid_sequence
@@ -323,6 +388,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
         with self.state_lock:
             auction = self.auction_store.get(request.auction_id)
             if auction:
+                auction = self._auto_reveal_if_due(auction)
                 return pb2.GetStoredAuctionResponse(ok=True, auction=auction)
             return pb2.GetStoredAuctionResponse(ok=False, message="Auction not found")
 
@@ -330,7 +396,10 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
         with self.state_lock:
             query = request.query.strip().lower()
             category = request.category.strip().lower()
-            auctions = list(self.auction_store.values())
+            auctions = [
+                self._auto_reveal_if_due(auction)
+                for auction in list(self.auction_store.values())
+            ]
             matches = [
                 auction for auction in auctions
                 if (not query or query in auction.auction_id.lower()

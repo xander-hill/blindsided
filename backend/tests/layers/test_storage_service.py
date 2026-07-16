@@ -58,6 +58,11 @@ class StorageServiceTests(BackendTestCase):
 
         self.assertFalse(response.success)
         self.assertIn("Stale version", response.message)
+        self.assertEqual(response.current_version, 3)
+        self.assertEqual(
+            response.failure_reason,
+            pb2.MUTATION_FAILURE_REASON_CONCURRENCY_CONFLICT,
+        )
         self.assertNotIn("buyer-b", judge.auction_store["auction-1"].bids)
 
     def test_commit_merges_bids_and_overwrites_same_buyer(self):
@@ -278,10 +283,11 @@ class StorageServiceTests(BackendTestCase):
         self.assertEqual(judge.auction_store["auction-1"].bids["buyer-a"].acceptance_order, 1)
         self.assertEqual(judge.auction_store["auction-1"].version, 2)
 
-    def test_bid_at_ends_at_is_rejected_without_mutating_state_or_version(self):
+    def test_bid_at_ends_at_triggers_auto_reveal_and_rejects_bid(self):
         judge = make_judge(role="backup")
         judge.auction_store["auction-1"] = pb2.Auction(
             auction_id="auction-1",
+            reserve_price=50.0,
             version=1,
             bids={"buyer-a": active_bid(100.0, 1)},
             ends_at=timestamp_pb2.Timestamp(seconds=1000),
@@ -300,14 +306,23 @@ class StorageServiceTests(BackendTestCase):
             )
 
         self.assertFalse(response.success)
-        self.assertIn("deadline", response.message)
+        self.assertIn("Gavel", response.message)
         self.assertNotIn("buyer-b", judge.auction_store["auction-1"].bids)
-        self.assertEqual(judge.auction_store["auction-1"].version, 1)
+        self.assertEqual(judge.auction_store["auction-1"].version, 2)
+        self.assertEqual(
+            judge.auction_store["auction-1"].state,
+            pb2.AUCTION_STATE_REVEALED,
+        )
+        self.assertEqual(
+            judge.auction_store["auction-1"].result.outcome,
+            pb2.AUCTION_OUTCOME_SUCCESSFUL_SALE,
+        )
 
-    def test_bid_after_ends_at_is_rejected_without_mutating_state_or_version(self):
+    def test_bid_after_ends_at_triggers_auto_reveal_and_rejects_bid(self):
         judge = make_judge(role="backup")
         judge.auction_store["auction-1"] = pb2.Auction(
             auction_id="auction-1",
+            reserve_price=50.0,
             version=1,
             bids={"buyer-a": active_bid(100.0, 1)},
             ends_at=timestamp_pb2.Timestamp(seconds=1000),
@@ -326,9 +341,13 @@ class StorageServiceTests(BackendTestCase):
             )
 
         self.assertFalse(response.success)
-        self.assertIn("deadline", response.message)
+        self.assertIn("Gavel", response.message)
         self.assertNotIn("buyer-b", judge.auction_store["auction-1"].bids)
-        self.assertEqual(judge.auction_store["auction-1"].version, 1)
+        self.assertEqual(judge.auction_store["auction-1"].version, 2)
+        self.assertEqual(
+            judge.auction_store["auction-1"].state,
+            pb2.AUCTION_STATE_REVEALED,
+        )
 
     def test_withdrawal_repairs_missing_next_sequence_before_rebid(self):
         judge = make_judge(role="backup")
@@ -543,3 +562,30 @@ class StorageServiceTests(BackendTestCase):
         self.assertTrue(response.ok)
         self.assertEqual(response.count, 1)
         self.assertEqual(response.auctions[0].auction_id, "a-1")
+
+    def test_search_auto_reveals_overdue_open_auctions_before_returning(self):
+        judge = make_judge(role="backup")
+        judge.auction_store["overdue"] = pb2.Auction(
+            auction_id="overdue",
+            title="Overdue Auction",
+            reserve_price=500.0,
+            version=2,
+            state=pb2.AUCTION_STATE_OPEN,
+            bids={"buyer-a": active_bid(750.0, 1)},
+            ends_at=timestamp_pb2.Timestamp(seconds=1000),
+        )
+
+        with mock.patch("blindsided.storage.service.time.time", return_value=1000.0):
+            response = judge.SearchAuctions(
+                pb2.SearchAuctionsRequest(query="Overdue"),
+                NoopContext(),
+            )
+
+        self.assertTrue(response.ok)
+        self.assertEqual(response.count, 1)
+        self.assertEqual(response.auctions[0].state, pb2.AUCTION_STATE_REVEALED)
+        self.assertEqual(response.auctions[0].version, 3)
+        self.assertEqual(
+            response.auctions[0].result.outcome,
+            pb2.AUCTION_OUTCOME_SUCCESSFUL_SALE,
+        )

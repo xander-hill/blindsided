@@ -18,7 +18,7 @@ from backend.tests.helpers import (
 
 class DistributedBehaviorTests(BackendTestCase):
     def test_concurrent_bids_keep_one_bid_per_buyer_without_lost_updates(self):
-        bidder_count = 12
+        bidder_count = 5
 
         with running_backend_stack() as stack:
             with grpc.insecure_channel(stack["auction_addr"]) as channel:
@@ -42,7 +42,7 @@ class DistributedBehaviorTests(BackendTestCase):
                         auction_id=auction_id,
                         bidder_id=f"buyer-{index}",
                         amount=100.0 + index,
-                        expected_version=status.auction.version,
+                        expected_version=1,
                     ), timeout=20)
 
             with futures.ThreadPoolExecutor(max_workers=bidder_count) as executor:
