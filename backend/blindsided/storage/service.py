@@ -1,3 +1,4 @@
+import json
 import os
 import threading
 import time
@@ -25,6 +26,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
         self.replica_role = os.getenv("NODE_ROLE", "backup")
         raw_peers = os.getenv("PEER_ADDRESSES", "")
         self.peer_addresses = [p.strip() for p in raw_peers.split(",") if p.strip()]
+        self.idempotency_records: dict[str, pb2.IdempotencyRecord] = {}
 
         raw_address = os.getenv("POD_IP", "localhost")
         if "storage-" in raw_address and ".storage-service" not in raw_address:
@@ -64,6 +66,14 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             existing_auction = self.auction_store.get(auction_id)
             incoming_auction = request.auction
             mutation_type = self._effective_mutation_type(request, existing_auction)
+            request_fingerprint = self._request_fingerprint(request, mutation_type)
+            idempotency_response = self._check_idempotency(
+                request.request_id,
+                request_fingerprint,
+                existing_auction,
+            )
+            if idempotency_response:
+                return idempotency_response
 
             if not existing_auction:
                 if mutation_type == pb2.AUCTION_MUTATION_TYPE_REVEAL:
@@ -157,7 +167,10 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                         message=state_error,
                     )
 
-                if self._includes_creation_metadata(incoming_auction):
+                if (
+                    mutation_type != pb2.AUCTION_MUTATION_TYPE_REVEAL
+                    and self._includes_creation_metadata(incoming_auction)
+                ):
                     return pb2.AuctionMutationResponse(
                         success=False,
                         current_version=existing_auction.version,
@@ -255,9 +268,20 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 incoming_auction = updated_auction
 
             self.auction_store[auction_id] = incoming_auction
+            response = pb2.AuctionMutationResponse(
+                success=True,
+                current_version=incoming_auction.version,
+                message="Vault updated.",
+                auction_id=incoming_auction.auction_id,
+            )
+            idempotency_record = self._build_idempotency_record(
+                request.request_id,
+                request_fingerprint,
+                response,
+            )
 
             if self.replica_role == "primary":
-                if not self._replicate_to_peers(incoming_auction):
+                if not self._replicate_to_peers(incoming_auction, idempotency_record):
                     if existing_auction:
                         self.auction_store[auction_id] = existing_auction
                     else:
@@ -270,13 +294,11 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                         message="Vault replication failed.",
                     )
 
+            if idempotency_record:
+                self.idempotency_records[request.request_id] = idempotency_record
             self._persist_state_to_disk()
 
-            return pb2.AuctionMutationResponse(
-                success=True,
-                current_version=incoming_auction.version,
-                message="Vault updated.",
-            )
+            return response
 
     def _includes_creation_metadata(self, auction: pb2.Auction) -> bool:
         return (
@@ -300,6 +322,109 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
         if request.auction.bids:
             return pb2.AUCTION_MUTATION_TYPE_PLACE_BID
         return pb2.AUCTION_MUTATION_TYPE_UNSPECIFIED
+
+    def _request_fingerprint(
+        self,
+        request: pb2.AuctionMutationRequest,
+        mutation_type: pb2.AuctionMutationType,
+    ) -> bytes:
+        auction = request.auction
+        if mutation_type == pb2.AUCTION_MUTATION_TYPE_CREATE:
+            payload = {
+                "mutation_type": "CREATE",
+                "seller_id": auction.seller_id,
+                "title": auction.title,
+                "category": auction.category,
+                "description": auction.description,
+                "reserve_price": auction.reserve_price,
+                "ends_at": self._timestamp_fingerprint(auction.ends_at)
+                if auction.HasField("ends_at")
+                else None,
+            }
+        elif mutation_type == pb2.AUCTION_MUTATION_TYPE_PLACE_BID:
+            bidder_id, amount = self._bid_fingerprint_fields(request)
+            payload = {
+                "mutation_type": "PLACE_BID",
+                "auction_id": auction.auction_id,
+                "bidder_id": bidder_id,
+                "amount": amount,
+            }
+        elif mutation_type == pb2.AUCTION_MUTATION_TYPE_WITHDRAW_BID:
+            payload = {
+                "mutation_type": "WITHDRAW_BID",
+                "auction_id": auction.auction_id,
+                "bidder_id": request.bidder_id,
+            }
+        elif mutation_type == pb2.AUCTION_MUTATION_TYPE_REVEAL:
+            payload = {
+                "mutation_type": "REVEAL",
+                "auction_id": auction.auction_id,
+                "seller_id": auction.seller_id,
+            }
+        else:
+            payload = {
+                "mutation_type": int(mutation_type),
+                "auction_id": auction.auction_id,
+            }
+        return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+
+    def _timestamp_fingerprint(self, timestamp) -> dict[str, int]:
+        return {
+            "seconds": timestamp.seconds,
+            "nanos": timestamp.nanos,
+        }
+
+    def _bid_fingerprint_fields(
+        self,
+        request: pb2.AuctionMutationRequest,
+    ) -> tuple[str, float]:
+        if request.bidder_id:
+            bid = request.auction.bids.get(request.bidder_id)
+            return request.bidder_id, bid.amount if bid is not None else 0.0
+        if len(request.auction.bids) == 1:
+            bidder_id, bid = next(iter(request.auction.bids.items()))
+            return bidder_id, bid.amount
+        return "", 0.0
+
+    def _check_idempotency(
+        self,
+        request_id: str,
+        request_fingerprint: bytes,
+        existing_auction: pb2.Auction | None,
+    ) -> pb2.AuctionMutationResponse | None:
+        if not request_id:
+            return None
+        existing_record = self.idempotency_records.get(request_id)
+        if existing_record is None:
+            return None
+        if existing_record.request_fingerprint != request_fingerprint:
+            return pb2.AuctionMutationResponse(
+                success=False,
+                current_version=existing_auction.version if existing_auction else 0,
+                failure_reason=pb2.MUTATION_FAILURE_REASON_IDEMPOTENCY_CONFLICT,
+                message="Idempotency conflict: request id was already used for different contents.",
+            )
+        response = pb2.AuctionMutationResponse()
+        response.CopyFrom(existing_record.response)
+        response.replayed = True
+        return response
+
+    def _build_idempotency_record(
+        self,
+        request_id: str,
+        request_fingerprint: bytes,
+        response: pb2.AuctionMutationResponse,
+    ) -> pb2.IdempotencyRecord | None:
+        if not request_id or not response.success:
+            return None
+        stored_response = pb2.AuctionMutationResponse()
+        stored_response.CopyFrom(response)
+        stored_response.replayed = False
+        return pb2.IdempotencyRecord(
+            request_id=request_id,
+            request_fingerprint=request_fingerprint,
+            response=stored_response,
+        )
 
     def _build_auction_result(self, auction: pb2.Auction) -> pb2.AuctionResult:
         state_error = self._acceptance_order_state_error(auction)
@@ -414,7 +539,11 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 message="Query successful",
             )
 
-    def _replicate_to_peers(self, auction: pb2.Auction) -> bool:
+    def _replicate_to_peers(
+        self,
+        auction: pb2.Auction,
+        idempotency_record: pb2.IdempotencyRecord | None = None,
+    ) -> bool:
         targets = [peer_address for peer_address in self.peer_addresses if peer_address != self.node_address]
         if not targets:
             return True
@@ -425,8 +554,11 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             try:
                 with grpc.insecure_channel(peer_address) as ch:
                     stub = pb2_grpc.StorageReplicaServiceStub(ch)
+                    request = pb2.ReplicationRequest(auction=auction)
+                    if idempotency_record:
+                        request.idempotency_record.CopyFrom(idempotency_record)
                     resp = stub.ReplicateAuction(
-                        pb2.ReplicationRequest(auction=auction),
+                        request,
                         timeout=1.0,
                     )
                     if not resp.success:
@@ -446,6 +578,10 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                     message=state_error,
                 )
             self.auction_store[request.auction.auction_id] = request.auction
+            if request.HasField("idempotency_record"):
+                self.idempotency_records[
+                    request.idempotency_record.request_id
+                ] = request.idempotency_record
             self._persist_state_to_disk()
             return pb2.ReplicationResponse(
                 success=True,
@@ -458,6 +594,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             return pb2.StateResponse(
                 ok=True,
                 auctions=list(self.auction_store.values()),
+                idempotency_records=list(self.idempotency_records.values()),
                 message="Sync state provided",
             )
 
@@ -481,6 +618,10 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 resp = stub.SyncFullState(pb2.StateRequest(), timeout=10.0)
                 for auction in resp.auctions:
                     self.auction_store[auction.auction_id] = auction
+                self.idempotency_records = {
+                    record.request_id: record
+                    for record in resp.idempotency_records
+                }
                 self._persist_state_to_disk()
         except Exception as e:
             print(f"[Judge] Sync failed: {e}")
@@ -497,6 +638,10 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 for auction in snapshot.auctions
                 if not self._acceptance_order_state_error(auction)
             }
+            self.idempotency_records = {
+                record.request_id: record
+                for record in snapshot.idempotency_records
+            }
         except Exception as e:
             print(f"[Judge] Could not load local state snapshot: {e}")
 
@@ -506,6 +651,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
         snapshot = pb2.StateResponse(
             ok=True,
             auctions=list(self.auction_store.values()),
+            idempotency_records=list(self.idempotency_records.values()),
             message="Local storage snapshot",
         )
         state_dir = os.path.dirname(self.state_file_path)

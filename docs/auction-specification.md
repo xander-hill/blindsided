@@ -350,17 +350,30 @@ Every mutation request carries a unique request identifier.
 
 Required behavior:
 
-- Every mutation request MUST include a unique request identifier.
-- The system MUST guarantee at-most-once application for a given request
+- ✅ Every mutation request MUST include a unique request identifier.
+- ✅ The system MUST guarantee at-most-once application for a given request
   identifier.
-- A repeated request with the same request identifier and same request
+- ✅ A repeated request with the same request identifier and same request
   contents MUST return the original result.
-- A repeated request with the same request identifier MUST NOT apply the
+- ✅ A repeated request with the same request identifier MUST NOT apply the
   mutation again.
-- Reusing a request identifier with different request contents MUST be
+- ✅ Reusing a request identifier with different request contents MUST be
   rejected.
-- Idempotency records MUST survive retry, replication, and failover for
+- ✅ Idempotency records MUST survive retry, replication, and failover for
   committed mutations.
+
+Test coverage:
+
+- ✅ Bid, withdrawal, reveal, and creation tests cover duplicate request
+  replay with the original success response and exactly-once state change.
+- ✅ Conflict tests cover reuse of a committed request id with different
+  meaningful payload fields.
+- ✅ Domain rejection tests verify ordinary validation failures do not
+  permanently reserve request ids.
+- ✅ Service-layer tests verify client-provided request ids are forwarded
+  unchanged and generated ids are reused across retry attempts.
+- ✅ Replication, failover, restart, and full-state-sync tests verify
+  idempotency records move with committed auction state.
 
 ---
 

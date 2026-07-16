@@ -63,6 +63,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
         if not primary_address:
             return pb2.CreateAuctionResponse(ok=False, message="The Vault is unreachable")
 
+        request_id = request.request_id or str(uuid4())
         auction = pb2.Auction(
             auction_id=str(uuid4()),
             seller_id=request.seller_id,
@@ -81,12 +82,13 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                 response = stub.ApplyAuctionMutation(pb2.AuctionMutationRequest(
                     mutation_type=pb2.AUCTION_MUTATION_TYPE_CREATE,
                     auction=auction,
+                    request_id=request_id,
                 ), timeout=5.0)
 
                 if response.success:
                     return pb2.CreateAuctionResponse(
                         ok=True,
-                        auction_id=auction.auction_id,
+                        auction_id=response.auction_id or auction.auction_id,
                         message="Auction opened in the Vault.",
                     )
                 return pb2.CreateAuctionResponse(ok=False, message=response.message)
@@ -98,6 +100,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
         """Retry stale-version bid writes against the latest committed version."""
         mutation_retry_limit = self._mutation_retry_limit()
         current_attempt_version = request.expected_version
+        request_id = request.request_id or str(uuid4())
 
         for attempt in range(mutation_retry_limit):
             primary_address = self._get_primary_address()
@@ -117,7 +120,9 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                     response = stub.ApplyAuctionMutation(pb2.AuctionMutationRequest(
                         mutation_type=pb2.AUCTION_MUTATION_TYPE_PLACE_BID,
                         auction=bid_mutation,
+                        bidder_id=request.bidder_id,
                         expected_version=current_attempt_version,
+                        request_id=request_id,
                     ), timeout=3.0)
 
                     if response.success:
@@ -153,6 +158,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
         """Withdraw the caller's active bid through the current primary replica."""
         mutation_retry_limit = self._mutation_retry_limit()
         current_attempt_version = request.expected_version
+        request_id = request.request_id or str(uuid4())
 
         for attempt in range(mutation_retry_limit):
             primary_address = self._get_primary_address()
@@ -168,6 +174,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                         auction=pb2.Auction(auction_id=request.auction_id),
                         bidder_id=request.bidder_id,
                         expected_version=current_attempt_version,
+                        request_id=request_id,
                     ), timeout=3.0)
 
                     if response.success:
@@ -210,6 +217,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
     def RevealAuction(self, request: pb2.RevealAuctionRequest, context):
         mutation_retry_limit = self._mutation_retry_limit()
         current_attempt_version = request.expected_version
+        request_id = request.request_id or str(uuid4())
 
         for attempt in range(mutation_retry_limit):
             primary_address = self._get_primary_address()
@@ -222,6 +230,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                 with channel:
                     reveal_mutation = pb2.Auction(
                         auction_id=request.auction_id,
+                        seller_id=request.seller_id,
                         state=pb2.AUCTION_STATE_REVEALED,
                         version=current_attempt_version
                     )
@@ -230,6 +239,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                         mutation_type=pb2.AUCTION_MUTATION_TYPE_REVEAL,
                         auction=reveal_mutation,
                         expected_version=current_attempt_version,
+                        request_id=request_id,
                     ))
 
                     if (

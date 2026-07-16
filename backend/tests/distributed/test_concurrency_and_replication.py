@@ -1,4 +1,5 @@
 from concurrent import futures
+import tempfile
 from unittest import mock
 
 import grpc
@@ -17,6 +18,15 @@ from backend.tests.helpers import (
 
 
 class DistributedBehaviorTests(BackendTestCase):
+    def _replicate_to_backup(self, backup):
+        def replicate(auction, idempotency_record=None):
+            request = pb2.ReplicationRequest(auction=auction)
+            if idempotency_record:
+                request.idempotency_record.CopyFrom(idempotency_record)
+            return backup.ReplicateAuction(request, NoopContext()).success
+
+        return replicate
+
     def test_concurrent_bids_keep_one_bid_per_buyer_without_lost_updates(self):
         bidder_count = 5
 
@@ -114,6 +124,162 @@ class DistributedBehaviorTests(BackendTestCase):
         )
         self.assertTrue(state.ok)
         self.assertEqual(state.auctions[0].auction_id, "replicated-auction")
+
+    def test_retry_after_backup_acknowledgement_replays_on_promoted_backup(self):
+        primary = make_judge(role="primary", address="primary:50051")
+        backup = make_judge(role="backup", address="backup:50051")
+        primary.auction_store["idem-failover"] = pb2.Auction(
+            auction_id="idem-failover",
+            version=1,
+            next_bid_sequence=1,
+        )
+        request = pb2.AuctionMutationRequest(
+            mutation_type=pb2.AUCTION_MUTATION_TYPE_PLACE_BID,
+            auction=pb2.Auction(
+                auction_id="idem-failover",
+                bids={"buyer-a": active_bid(250.0)},
+            ),
+            bidder_id="buyer-a",
+            expected_version=1,
+            request_id="request-after-backup-ack",
+        )
+
+        with mock.patch.object(
+            primary,
+            "_replicate_to_peers",
+            side_effect=self._replicate_to_backup(backup),
+        ):
+            original = primary.ApplyAuctionMutation(request, NoopContext())
+        backup.PromoteToPrimary(pb2.PromotionRequest(new_role="primary"), NoopContext())
+        replay = backup.ApplyAuctionMutation(request, NoopContext())
+
+        self.assertTrue(original.success)
+        self.assertTrue(replay.success)
+        self.assertTrue(replay.replayed)
+        self.assertEqual(backup.auction_store["idem-failover"].version, 2)
+        self.assertEqual(backup.auction_store["idem-failover"].next_bid_sequence, 2)
+        self.assertEqual(
+            backup.auction_store["idem-failover"].bids["buyer-a"],
+            active_bid(250.0, 1),
+        )
+
+    def test_restart_and_retry_uses_persisted_idempotency_state(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = f"{temp_dir}/auction-state.pb"
+            judge = make_judge(role="backup", state_file_path=state_path)
+            judge.auction_store["idem-restart-distributed"] = pb2.Auction(
+                auction_id="idem-restart-distributed",
+                version=1,
+                next_bid_sequence=1,
+            )
+            request = pb2.AuctionMutationRequest(
+                mutation_type=pb2.AUCTION_MUTATION_TYPE_PLACE_BID,
+                auction=pb2.Auction(
+                    auction_id="idem-restart-distributed",
+                    bids={"buyer-a": active_bid(250.0)},
+                ),
+                bidder_id="buyer-a",
+                expected_version=1,
+                request_id="request-persisted-retry",
+            )
+
+            original = judge.ApplyAuctionMutation(request, NoopContext())
+            recovered = make_judge(role="backup", state_file_path=state_path)
+            recovered._load_state_from_disk()
+            replay = recovered.ApplyAuctionMutation(request, NoopContext())
+
+        self.assertTrue(original.success)
+        self.assertTrue(replay.success)
+        self.assertTrue(replay.replayed)
+        self.assertEqual(
+            recovered.auction_store["idem-restart-distributed"].version,
+            2,
+        )
+
+    def test_full_state_synchronization_transfers_idempotency_records(self):
+        primary = make_judge(role="backup", address="primary:50051")
+        backup = make_judge(role="backup", address="backup:50051")
+        primary.auction_store["idem-sync"] = pb2.Auction(
+            auction_id="idem-sync",
+            version=1,
+            next_bid_sequence=1,
+        )
+        request = pb2.AuctionMutationRequest(
+            mutation_type=pb2.AUCTION_MUTATION_TYPE_PLACE_BID,
+            auction=pb2.Auction(
+                auction_id="idem-sync",
+                bids={"buyer-a": active_bid(250.0)},
+            ),
+            bidder_id="buyer-a",
+            expected_version=1,
+            request_id="request-sync-record",
+        )
+
+        original = primary.ApplyAuctionMutation(request, NoopContext())
+        state = primary.SyncFullState(pb2.StateRequest(), NoopContext())
+        for auction in state.auctions:
+            backup.auction_store[auction.auction_id] = auction
+        backup.idempotency_records = {
+            record.request_id: record
+            for record in state.idempotency_records
+        }
+        replay = backup.ApplyAuctionMutation(request, NoopContext())
+
+        self.assertTrue(original.success)
+        self.assertEqual(len(state.idempotency_records), 1)
+        self.assertTrue(replay.success)
+        self.assertTrue(replay.replayed)
+        self.assertEqual(backup.auction_store["idem-sync"].version, 2)
+
+    def test_different_payload_with_committed_request_id_is_rejected_after_failover(self):
+        primary = make_judge(role="primary", address="primary:50051")
+        backup = make_judge(role="backup", address="backup:50051")
+        primary.auction_store["idem-failover-conflict"] = pb2.Auction(
+            auction_id="idem-failover-conflict",
+            version=1,
+            next_bid_sequence=1,
+        )
+        original_request = pb2.AuctionMutationRequest(
+            mutation_type=pb2.AUCTION_MUTATION_TYPE_PLACE_BID,
+            auction=pb2.Auction(
+                auction_id="idem-failover-conflict",
+                bids={"buyer-a": active_bid(250.0)},
+            ),
+            bidder_id="buyer-a",
+            expected_version=1,
+            request_id="request-failover-conflict",
+        )
+        conflicting_request = pb2.AuctionMutationRequest(
+            mutation_type=pb2.AUCTION_MUTATION_TYPE_PLACE_BID,
+            auction=pb2.Auction(
+                auction_id="idem-failover-conflict",
+                bids={"buyer-a": active_bid(300.0)},
+            ),
+            bidder_id="buyer-a",
+            expected_version=2,
+            request_id="request-failover-conflict",
+        )
+
+        with mock.patch.object(
+            primary,
+            "_replicate_to_peers",
+            side_effect=self._replicate_to_backup(backup),
+        ):
+            original = primary.ApplyAuctionMutation(original_request, NoopContext())
+        backup.PromoteToPrimary(pb2.PromotionRequest(new_role="primary"), NoopContext())
+        conflict = backup.ApplyAuctionMutation(conflicting_request, NoopContext())
+
+        self.assertTrue(original.success)
+        self.assertFalse(conflict.success)
+        self.assertEqual(
+            conflict.failure_reason,
+            pb2.MUTATION_FAILURE_REASON_IDEMPOTENCY_CONFLICT,
+        )
+        self.assertEqual(backup.auction_store["idem-failover-conflict"].version, 2)
+        self.assertEqual(
+            backup.auction_store["idem-failover-conflict"].bids["buyer-a"],
+            active_bid(250.0, 1),
+        )
 
     def test_controller_elects_new_primary_after_current_primary_removed(self):
         controller = ControllerService()
