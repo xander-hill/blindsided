@@ -28,7 +28,6 @@ class AuctionCreationSpecificationTests(BackendTestCase):
                     reserve_price=100.0,
                     state=pb2.AUCTION_STATE_OPEN,
                     version=99,
-                    reserve_met=True,
                     ends_at=future_timestamp(),
                 )
             ),
@@ -44,7 +43,8 @@ class AuctionCreationSpecificationTests(BackendTestCase):
         self.assertEqual(dict(created.bids), {})
         self.assertEqual(created.state, pb2.AUCTION_STATE_OPEN)
         self.assertEqual(created.version, 1)
-        self.assertFalse(created.reserve_met)
+        self.assertFalse(created.HasField("result"))
+        self.assertNotIn("reserve_met", pb2.Auction.DESCRIPTOR.fields_by_name)
         self.assertEqual(response.current_version, 1)
 
     def test_creation_requires_seller_identity(self):

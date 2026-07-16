@@ -207,24 +207,24 @@ Required behavior:
 
 An auction has a winner if and only if:
 
-- at least one valid bid was accepted
-- the highest accepted active bid meets or exceeds the reserve price
+- ✅ at least one valid bid was accepted
+- ✅ the highest accepted active bid meets or exceeds the reserve price
 
 Possible outcomes:
 
-- No bids received
-- Reserve not met
-- Successful sale
+- ✅ No bids received
+- ✅ Reserve not met
+- ✅ Successful sale
 
 Required behavior:
 
-- If no bids were received, the outcome MUST be `No bids received`.
-- If at least one bid was received but the highest accepted active bid
+- ✅ If no bids were received, the outcome MUST be `No bids received`.
+- ✅ If at least one bid was received but the highest accepted active bid
   is below the reserve price, the outcome MUST be `Reserve not met`.
-- If the highest accepted active bid meets or exceeds the reserve price,
+- ✅ If the highest accepted active bid meets or exceeds the reserve price,
   the outcome MUST be `Successful sale`.
-- If the reserve is not met, no winner MUST be published.
-- Outcome calculation MUST use only the final active bid set at reveal.
+- ✅ If the reserve is not met, no winner MUST be published.
+- ✅ Outcome calculation MUST use only the final active bid set at reveal.
 
 ---
 

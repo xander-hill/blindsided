@@ -55,19 +55,15 @@ export interface Auction {
      */
     version: number;
     /**
-     * @generated from protobuf field: bool reserve_met = 10
-     */
-    reserveMet: boolean;
-    /**
-     * @generated from protobuf field: google.protobuf.Timestamp ends_at = 11
+     * @generated from protobuf field: google.protobuf.Timestamp ends_at = 10
      */
     endsAt?: Timestamp;
     /**
-     * @generated from protobuf field: int64 next_bid_sequence = 12
+     * @generated from protobuf field: int64 next_bid_sequence = 11
      */
     nextBidSequence: bigint;
     /**
-     * @generated from protobuf field: optional blindsided.AuctionResult result = 13
+     * @generated from protobuf field: optional blindsided.AuctionResult result = 12
      */
     result?: AuctionResult;
 }
@@ -732,10 +728,9 @@ class Auction$Type extends MessageType<Auction> {
             { no: 7, name: "bids", kind: "map", K: 9 /*ScalarType.STRING*/, V: { kind: "message", T: () => ActiveBid } },
             { no: 8, name: "state", kind: "enum", T: () => ["blindsided.AuctionState", AuctionState, "AUCTION_STATE_"] },
             { no: 9, name: "version", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
-            { no: 10, name: "reserve_met", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
-            { no: 11, name: "ends_at", kind: "message", T: () => Timestamp },
-            { no: 12, name: "next_bid_sequence", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 13, name: "result", kind: "message", T: () => AuctionResult }
+            { no: 10, name: "ends_at", kind: "message", T: () => Timestamp },
+            { no: 11, name: "next_bid_sequence", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 12, name: "result", kind: "message", T: () => AuctionResult }
         ]);
     }
     create(value?: PartialMessage<Auction>): Auction {
@@ -749,7 +744,6 @@ class Auction$Type extends MessageType<Auction> {
         message.bids = {};
         message.state = 0;
         message.version = 0;
-        message.reserveMet = false;
         message.nextBidSequence = 0n;
         if (value !== undefined)
             reflectionMergePartial<Auction>(this, message, value);
@@ -787,16 +781,13 @@ class Auction$Type extends MessageType<Auction> {
                 case /* int32 version */ 9:
                     message.version = reader.int32();
                     break;
-                case /* bool reserve_met */ 10:
-                    message.reserveMet = reader.bool();
-                    break;
-                case /* google.protobuf.Timestamp ends_at */ 11:
+                case /* google.protobuf.Timestamp ends_at */ 10:
                     message.endsAt = Timestamp.internalBinaryRead(reader, reader.uint32(), options, message.endsAt);
                     break;
-                case /* int64 next_bid_sequence */ 12:
+                case /* int64 next_bid_sequence */ 11:
                     message.nextBidSequence = reader.int64().toBigInt();
                     break;
-                case /* optional blindsided.AuctionResult result */ 13:
+                case /* optional blindsided.AuctionResult result */ 12:
                     message.result = AuctionResult.internalBinaryRead(reader, reader.uint32(), options, message.result);
                     break;
                 default:
@@ -858,18 +849,15 @@ class Auction$Type extends MessageType<Auction> {
         /* int32 version = 9; */
         if (message.version !== 0)
             writer.tag(9, WireType.Varint).int32(message.version);
-        /* bool reserve_met = 10; */
-        if (message.reserveMet !== false)
-            writer.tag(10, WireType.Varint).bool(message.reserveMet);
-        /* google.protobuf.Timestamp ends_at = 11; */
+        /* google.protobuf.Timestamp ends_at = 10; */
         if (message.endsAt)
-            Timestamp.internalBinaryWrite(message.endsAt, writer.tag(11, WireType.LengthDelimited).fork(), options).join();
-        /* int64 next_bid_sequence = 12; */
+            Timestamp.internalBinaryWrite(message.endsAt, writer.tag(10, WireType.LengthDelimited).fork(), options).join();
+        /* int64 next_bid_sequence = 11; */
         if (message.nextBidSequence !== 0n)
-            writer.tag(12, WireType.Varint).int64(message.nextBidSequence);
-        /* optional blindsided.AuctionResult result = 13; */
+            writer.tag(11, WireType.Varint).int64(message.nextBidSequence);
+        /* optional blindsided.AuctionResult result = 12; */
         if (message.result)
-            AuctionResult.internalBinaryWrite(message.result, writer.tag(13, WireType.LengthDelimited).fork(), options).join();
+            AuctionResult.internalBinaryWrite(message.result, writer.tag(12, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

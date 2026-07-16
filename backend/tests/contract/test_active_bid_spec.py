@@ -67,7 +67,6 @@ class ActiveBidSpecificationTests(BackendTestCase):
         )
 
     def test_replaced_bid_does_not_remain_eligible_to_win(self):
-        service = AuctionService()
         judge = make_judge(role="backup")
         judge.auction_store["active-replaced-not-winner"] = pb2.Auction(
             auction_id="active-replaced-not-winner",
@@ -97,14 +96,12 @@ class ActiveBidSpecificationTests(BackendTestCase):
             ),
             NoopContext(),
         )
-        winning_amount, winning_bidder_id = service._winner_from_active_bids(
-            judge.auction_store["active-replaced-not-winner"]
-        )
+        result = judge.auction_store["active-replaced-not-winner"].result
 
         self.assertTrue(replace.success)
         self.assertTrue(reveal.success)
-        self.assertEqual(winning_bidder_id, "buyer-a")
-        self.assertEqual(winning_amount, 200.0)
+        self.assertEqual(result.winning_bidder_id, "buyer-a")
+        self.assertEqual(result.winning_amount, 200.0)
 
     def test_replaced_bid_does_not_count_toward_distinct_active_bidder_count(self):
         service = AuctionService()

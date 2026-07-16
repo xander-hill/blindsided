@@ -101,7 +101,6 @@ class AuctionServiceTests(BackendTestCase):
         self.assertEqual(stub.mutations[0].auction.state, pb2.AUCTION_STATE_OPEN)
         self.assertEqual(dict(stub.mutations[0].auction.bids), {})
         self.assertEqual(stub.mutations[0].auction.version, 0)
-        self.assertFalse(stub.mutations[0].auction.reserve_met)
         self.assertEqual(
             stub.mutations[0].mutation_type,
             pb2.AUCTION_MUTATION_TYPE_CREATE,
@@ -152,7 +151,6 @@ class AuctionServiceTests(BackendTestCase):
                     "hidden-bidder-b": active_bid(67890.0, 2),
                 },
                 reserve_price=500.0,
-                reserve_met=True,
                 state=pb2.AUCTION_STATE_OPEN,
                 version=7,
                 ends_at=ends_at,
@@ -196,14 +194,22 @@ class AuctionServiceTests(BackendTestCase):
             state=pb2.AUCTION_STATE_REVEALED,
             version=3,
             reserve_price=20000.0,
-            reserve_met=True,
+            result=pb2.AuctionResult(
+                outcome=pb2.AUCTION_OUTCOME_NO_BIDS,
+                reserve_met=False,
+                has_winner=False,
+            ),
         ))
         update = service._to_public_auction_update(pb2.Auction(
             auction_id="auction-1",
             state=pb2.AUCTION_STATE_REVEALED,
             version=3,
             reserve_price=20000.0,
-            reserve_met=True,
+            result=pb2.AuctionResult(
+                outcome=pb2.AUCTION_OUTCOME_NO_BIDS,
+                reserve_met=False,
+                has_winner=False,
+            ),
         ))
 
         self.assertEqual(public_auction.state, pb2.AUCTION_STATE_REVEALED)
@@ -222,6 +228,25 @@ class AuctionServiceTests(BackendTestCase):
         self.assertEqual(update.bidder_count, 0)
         self._assert_no_bid_data_exposed(update)
 
+    def test_public_mapper_does_not_build_missing_storage_result(self):
+        service = TestableAuctionService(FakeJudgeStub())
+        auction = pb2.Auction(
+            auction_id="legacy-revealed-without-result",
+            state=pb2.AUCTION_STATE_REVEALED,
+            version=3,
+            reserve_price=500.0,
+            bids={"winning-bidder": active_bid(750.0, 1)},
+        )
+
+        public_auction = service._to_public_auction(auction)
+        update = service._to_public_auction_update(auction)
+
+        self.assertEqual(public_auction.state, pb2.AUCTION_STATE_REVEALED)
+        self.assertFalse(public_auction.HasField("result"))
+        self.assertFalse(update.HasField("result"))
+        self._assert_no_bid_data_exposed(public_auction)
+        self._assert_no_bid_data_exposed(update)
+
     def test_revealed_reserve_not_met_public_result_hides_losing_bid_data(self):
         service = TestableAuctionService(FakeJudgeStub())
         auction = pb2.Auction(
@@ -233,6 +258,11 @@ class AuctionServiceTests(BackendTestCase):
                 "losing-bidder-a": active_bid(12345.5, 1),
                 "losing-bidder-b": active_bid(250.0, 2),
             },
+            result=pb2.AuctionResult(
+                outcome=pb2.AUCTION_OUTCOME_RESERVE_NOT_MET,
+                reserve_met=False,
+                has_winner=False,
+            ),
         )
 
         public_auction = service._to_public_auction(auction)
@@ -266,6 +296,13 @@ class AuctionServiceTests(BackendTestCase):
                 "winning-bidder": active_bid(750.0, 2),
                 "losing-bidder": active_bid(600.0, 1),
             },
+            result=pb2.AuctionResult(
+                outcome=pb2.AUCTION_OUTCOME_SUCCESSFUL_SALE,
+                reserve_met=True,
+                has_winner=True,
+                winning_bidder_id="winning-bidder",
+                winning_amount=750.0,
+            ),
         )
 
         public_auction = service._to_public_auction(auction)
@@ -308,7 +345,6 @@ class AuctionServiceTests(BackendTestCase):
                         "hidden-bidder-b": active_bid(67890.0, 2),
                     },
                     reserve_price=500.0,
-                    reserve_met=True,
                     state=pb2.AUCTION_STATE_OPEN,
                     version=7,
                     ends_at=ends_at,
@@ -453,7 +489,6 @@ class AuctionServiceTests(BackendTestCase):
                 "hidden-bidder-a": active_bid(12345.5, 1),
                 "hidden-bidder-b": active_bid(67890.0, 2),
             },
-            reserve_met=True,
             state=pb2.AUCTION_STATE_OPEN,
             version=9,
         ))
@@ -461,6 +496,13 @@ class AuctionServiceTests(BackendTestCase):
             bids={"a": active_bid(100.0, 1), "b": active_bid(250.0, 2)},
             reserve_price=200.0,
             state=pb2.AUCTION_STATE_REVEALED,
+            result=pb2.AuctionResult(
+                outcome=pb2.AUCTION_OUTCOME_SUCCESSFUL_SALE,
+                reserve_met=True,
+                has_winner=True,
+                winning_bidder_id="b",
+                winning_amount=250.0,
+            ),
         ))
 
         self.assertEqual(hidden.state, pb2.AUCTION_STATE_OPEN)

@@ -61,17 +61,18 @@ class ReservePriceSpecificationTests(BackendTestCase):
         self.assertEqual(update.bidder_count, 1)
 
     def test_reserve_price_does_not_become_winning_bid(self):
-        service = AuctionService()
+        judge = make_judge(role="backup")
 
-        winning_amount, winning_bidder_id = service._winner_from_active_bids(
+        result = judge._build_auction_result(
             pb2.Auction(
                 reserve_price=500.0,
                 state=pb2.AUCTION_STATE_REVEALED,
             )
         )
 
-        self.assertEqual(winning_amount, 0.0)
-        self.assertEqual(winning_bidder_id, "")
+        self.assertEqual(result.outcome, pb2.AUCTION_OUTCOME_NO_BIDS)
+        self.assertFalse(result.HasField("winning_amount"))
+        self.assertFalse(result.HasField("winning_bidder_id"))
 
     def test_reserve_price_is_not_exposed_before_reveal(self):
         service = AuctionService()
@@ -79,7 +80,6 @@ class ReservePriceSpecificationTests(BackendTestCase):
         public_auction = service._to_public_auction(
             pb2.Auction(
                 reserve_price=500.0,
-                reserve_met=True,
                 bids={"buyer-a": active_bid(750.0, 1)},
                 state=pb2.AUCTION_STATE_OPEN,
             )
@@ -87,7 +87,6 @@ class ReservePriceSpecificationTests(BackendTestCase):
         public_update = service._to_public_auction_update(
             pb2.Auction(
                 reserve_price=500.0,
-                reserve_met=True,
                 bids={"buyer-a": active_bid(750.0, 1)},
                 state=pb2.AUCTION_STATE_OPEN,
             )
@@ -102,16 +101,16 @@ class ReservePriceSpecificationTests(BackendTestCase):
         self.assertNotIn("reserve_met", update_fields)
 
     def test_reserve_price_only_determines_successful_sale(self):
-        service = AuctionService()
+        judge = make_judge(role="backup")
 
-        below_reserve_amount, below_reserve_bidder_id = service._winner_from_active_bids(
+        below_reserve = judge._build_auction_result(
             pb2.Auction(
                 bids={"buyer-a": active_bid(499.0, 1)},
                 reserve_price=500.0,
                 state=pb2.AUCTION_STATE_REVEALED,
             )
         )
-        meeting_reserve_amount, meeting_reserve_bidder_id = service._winner_from_active_bids(
+        meeting_reserve = judge._build_auction_result(
             pb2.Auction(
                 bids={"buyer-a": active_bid(500.0, 1)},
                 reserve_price=500.0,
@@ -119,10 +118,16 @@ class ReservePriceSpecificationTests(BackendTestCase):
             )
         )
 
-        self.assertEqual(below_reserve_amount, 0.0)
-        self.assertEqual(below_reserve_bidder_id, "")
-        self.assertEqual(meeting_reserve_amount, 500.0)
-        self.assertEqual(meeting_reserve_bidder_id, "buyer-a")
+        self.assertEqual(below_reserve.outcome, pb2.AUCTION_OUTCOME_RESERVE_NOT_MET)
+        self.assertFalse(below_reserve.reserve_met)
+        self.assertFalse(below_reserve.has_winner)
+        self.assertFalse(below_reserve.HasField("winning_amount"))
+        self.assertFalse(below_reserve.HasField("winning_bidder_id"))
+        self.assertEqual(meeting_reserve.outcome, pb2.AUCTION_OUTCOME_SUCCESSFUL_SALE)
+        self.assertTrue(meeting_reserve.reserve_met)
+        self.assertTrue(meeting_reserve.has_winner)
+        self.assertEqual(meeting_reserve.winning_amount, 500.0)
+        self.assertEqual(meeting_reserve.winning_bidder_id, "buyer-a")
 
     def test_reserve_met_is_calculated_only_when_auction_is_revealed(self):
         judge = make_judge(role="backup")
@@ -142,9 +147,9 @@ class ReservePriceSpecificationTests(BackendTestCase):
             ),
             NoopContext(),
         )
-        reserve_met_after_bid = (
-            judge.auction_store["reserve-finalized-on-reveal"].reserve_met
-        )
+        result_after_bid = judge.auction_store[
+            "reserve-finalized-on-reveal"
+        ].HasField("result")
         reveal_response = judge.ApplyAuctionMutation(
             pb2.AuctionMutationRequest(
                 auction=pb2.Auction(
@@ -157,8 +162,8 @@ class ReservePriceSpecificationTests(BackendTestCase):
         )
 
         self.assertTrue(bid_response.success)
-        self.assertFalse(reserve_met_after_bid)
+        self.assertFalse(result_after_bid)
         self.assertTrue(reveal_response.success)
         self.assertTrue(
-            judge.auction_store["reserve-finalized-on-reveal"].reserve_met
+            judge.auction_store["reserve-finalized-on-reveal"].result.reserve_met
         )
