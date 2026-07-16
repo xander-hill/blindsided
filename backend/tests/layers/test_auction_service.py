@@ -56,6 +56,19 @@ class TestableAuctionService(AuctionService):
 
 
 class AuctionServiceTests(BackendTestCase):
+    def _public_field_names(self, message):
+        return {field.name for field in message.DESCRIPTOR.fields}
+
+    def _assert_no_bid_data_exposed(self, message):
+        field_names = self._public_field_names(message)
+        self.assertNotIn("bids", field_names)
+        self.assertNotIn("reserve_price", field_names)
+        rendered = str(message)
+        self.assertNotIn("losing-bidder", rendered)
+        self.assertNotIn("hidden-bidder", rendered)
+        self.assertNotIn("12345.5", rendered)
+        self.assertNotIn("67890", rendered)
+
     def test_open_auction_mutations_to_primary_vault(self):
         stub = FakeJudgeStub()
         service = TestableAuctionService(stub)
@@ -175,6 +188,107 @@ class AuctionServiceTests(BackendTestCase):
         self.assertNotIn("hidden-bidder-b", str(public_auction))
         self.assertNotIn("12345.5", str(public_auction))
         self.assertNotIn("67890", str(public_auction))
+
+    def test_revealed_no_bids_public_result_exposes_no_bids(self):
+        service = TestableAuctionService(FakeJudgeStub())
+        public_auction = service._to_public_auction(pb2.Auction(
+            auction_id="auction-1",
+            state=pb2.AUCTION_STATE_REVEALED,
+            version=3,
+            reserve_price=20000.0,
+            reserve_met=True,
+        ))
+        update = service._to_public_auction_update(pb2.Auction(
+            auction_id="auction-1",
+            state=pb2.AUCTION_STATE_REVEALED,
+            version=3,
+            reserve_price=20000.0,
+            reserve_met=True,
+        ))
+
+        self.assertEqual(public_auction.state, pb2.AUCTION_STATE_REVEALED)
+        self.assertTrue(public_auction.HasField("result"))
+        self.assertEqual(public_auction.result.outcome, pb2.AUCTION_OUTCOME_NO_BIDS)
+        self.assertFalse(public_auction.result.reserve_met)
+        self.assertFalse(public_auction.result.has_winner)
+        self.assertFalse(public_auction.result.HasField("winning_bidder_id"))
+        self.assertFalse(public_auction.result.HasField("winning_amount"))
+        self.assertEqual(public_auction.bidder_count, 0)
+        self._assert_no_bid_data_exposed(public_auction)
+
+        self.assertEqual(update.state, pb2.AUCTION_STATE_REVEALED)
+        self.assertTrue(update.HasField("result"))
+        self.assertEqual(update.result.outcome, pb2.AUCTION_OUTCOME_NO_BIDS)
+        self.assertEqual(update.bidder_count, 0)
+        self._assert_no_bid_data_exposed(update)
+
+    def test_revealed_reserve_not_met_public_result_hides_losing_bid_data(self):
+        service = TestableAuctionService(FakeJudgeStub())
+        auction = pb2.Auction(
+            auction_id="auction-1",
+            state=pb2.AUCTION_STATE_REVEALED,
+            version=3,
+            reserve_price=20000.0,
+            bids={
+                "losing-bidder-a": active_bid(12345.5, 1),
+                "losing-bidder-b": active_bid(250.0, 2),
+            },
+        )
+
+        public_auction = service._to_public_auction(auction)
+        update = service._to_public_auction_update(auction)
+
+        self.assertEqual(public_auction.state, pb2.AUCTION_STATE_REVEALED)
+        self.assertEqual(
+            public_auction.result.outcome,
+            pb2.AUCTION_OUTCOME_RESERVE_NOT_MET,
+        )
+        self.assertFalse(public_auction.result.reserve_met)
+        self.assertFalse(public_auction.result.has_winner)
+        self.assertFalse(public_auction.result.HasField("winning_bidder_id"))
+        self.assertFalse(public_auction.result.HasField("winning_amount"))
+        self.assertEqual(public_auction.bidder_count, 2)
+        self._assert_no_bid_data_exposed(public_auction)
+
+        self.assertEqual(update.state, pb2.AUCTION_STATE_REVEALED)
+        self.assertEqual(update.result.outcome, pb2.AUCTION_OUTCOME_RESERVE_NOT_MET)
+        self.assertEqual(update.bidder_count, 2)
+        self._assert_no_bid_data_exposed(update)
+
+    def test_revealed_successful_sale_public_result_exposes_only_winner(self):
+        service = TestableAuctionService(FakeJudgeStub())
+        auction = pb2.Auction(
+            auction_id="auction-1",
+            state=pb2.AUCTION_STATE_REVEALED,
+            version=3,
+            reserve_price=500.0,
+            bids={
+                "winning-bidder": active_bid(750.0, 2),
+                "losing-bidder": active_bid(600.0, 1),
+            },
+        )
+
+        public_auction = service._to_public_auction(auction)
+        update = service._to_public_auction_update(auction)
+
+        self.assertEqual(public_auction.state, pb2.AUCTION_STATE_REVEALED)
+        self.assertEqual(
+            public_auction.result.outcome,
+            pb2.AUCTION_OUTCOME_SUCCESSFUL_SALE,
+        )
+        self.assertTrue(public_auction.result.reserve_met)
+        self.assertTrue(public_auction.result.has_winner)
+        self.assertEqual(public_auction.result.winning_bidder_id, "winning-bidder")
+        self.assertEqual(public_auction.result.winning_amount, 750.0)
+        self.assertEqual(public_auction.bidder_count, 2)
+        self._assert_no_bid_data_exposed(public_auction)
+
+        self.assertEqual(update.state, pb2.AUCTION_STATE_REVEALED)
+        self.assertEqual(update.result.outcome, pb2.AUCTION_OUTCOME_SUCCESSFUL_SALE)
+        self.assertEqual(update.result.winning_bidder_id, "winning-bidder")
+        self.assertEqual(update.result.winning_amount, 750.0)
+        self.assertEqual(update.bidder_count, 2)
+        self._assert_no_bid_data_exposed(update)
 
     def test_search_results_apply_same_pre_reveal_visibility_restrictions(self):
         stub = FakeJudgeStub()

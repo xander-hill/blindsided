@@ -66,6 +66,10 @@ export interface Auction {
      * @generated from protobuf field: int64 next_bid_sequence = 12
      */
     nextBidSequence: bigint;
+    /**
+     * @generated from protobuf field: optional blindsided.AuctionResult result = 13
+     */
+    result?: AuctionResult;
 }
 /**
  * @generated from protobuf message blindsided.PublicAuction
@@ -107,6 +111,35 @@ export interface PublicAuction {
      * @generated from protobuf field: int32 bidder_count = 9
      */
     bidderCount: number;
+    /**
+     * @generated from protobuf field: optional blindsided.AuctionResult result = 10
+     */
+    result?: AuctionResult;
+}
+/**
+ * @generated from protobuf message blindsided.AuctionResult
+ */
+export interface AuctionResult {
+    /**
+     * @generated from protobuf field: blindsided.AuctionOutcome outcome = 1
+     */
+    outcome: AuctionOutcome;
+    /**
+     * @generated from protobuf field: bool reserve_met = 2
+     */
+    reserveMet: boolean;
+    /**
+     * @generated from protobuf field: bool has_winner = 3
+     */
+    hasWinner: boolean;
+    /**
+     * @generated from protobuf field: optional string winning_bidder_id = 4
+     */
+    winningBidderId?: string;
+    /**
+     * @generated from protobuf field: optional double winning_amount = 5
+     */
+    winningAmount?: number;
 }
 // --- Requests & Responses ---
 
@@ -389,6 +422,10 @@ export interface AuctionUpdate {
      * @generated from protobuf field: int32 version = 4
      */
     version: number;
+    /**
+     * @generated from protobuf field: optional blindsided.AuctionResult result = 5
+     */
+    result?: AuctionResult;
 }
 /**
  * @generated from protobuf message blindsided.AuctionMutationRequest
@@ -661,6 +698,27 @@ export enum AuctionMutationType {
      */
     REVEAL = 4
 }
+/**
+ * @generated from protobuf enum blindsided.AuctionOutcome
+ */
+export enum AuctionOutcome {
+    /**
+     * @generated from protobuf enum value: AUCTION_OUTCOME_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: AUCTION_OUTCOME_NO_BIDS = 1;
+     */
+    NO_BIDS = 1,
+    /**
+     * @generated from protobuf enum value: AUCTION_OUTCOME_RESERVE_NOT_MET = 2;
+     */
+    RESERVE_NOT_MET = 2,
+    /**
+     * @generated from protobuf enum value: AUCTION_OUTCOME_SUCCESSFUL_SALE = 3;
+     */
+    SUCCESSFUL_SALE = 3
+}
 // @generated message type with reflection information, may provide speed optimized methods
 class Auction$Type extends MessageType<Auction> {
     constructor() {
@@ -676,7 +734,8 @@ class Auction$Type extends MessageType<Auction> {
             { no: 9, name: "version", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 10, name: "reserve_met", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
             { no: 11, name: "ends_at", kind: "message", T: () => Timestamp },
-            { no: 12, name: "next_bid_sequence", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 12, name: "next_bid_sequence", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 13, name: "result", kind: "message", T: () => AuctionResult }
         ]);
     }
     create(value?: PartialMessage<Auction>): Auction {
@@ -736,6 +795,9 @@ class Auction$Type extends MessageType<Auction> {
                     break;
                 case /* int64 next_bid_sequence */ 12:
                     message.nextBidSequence = reader.int64().toBigInt();
+                    break;
+                case /* optional blindsided.AuctionResult result */ 13:
+                    message.result = AuctionResult.internalBinaryRead(reader, reader.uint32(), options, message.result);
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -805,6 +867,9 @@ class Auction$Type extends MessageType<Auction> {
         /* int64 next_bid_sequence = 12; */
         if (message.nextBidSequence !== 0n)
             writer.tag(12, WireType.Varint).int64(message.nextBidSequence);
+        /* optional blindsided.AuctionResult result = 13; */
+        if (message.result)
+            AuctionResult.internalBinaryWrite(message.result, writer.tag(13, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -827,7 +892,8 @@ class PublicAuction$Type extends MessageType<PublicAuction> {
             { no: 6, name: "state", kind: "enum", T: () => ["blindsided.AuctionState", AuctionState, "AUCTION_STATE_"] },
             { no: 7, name: "version", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 8, name: "ends_at", kind: "message", T: () => Timestamp },
-            { no: 9, name: "bidder_count", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
+            { no: 9, name: "bidder_count", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 10, name: "result", kind: "message", T: () => AuctionResult }
         ]);
     }
     create(value?: PartialMessage<PublicAuction>): PublicAuction {
@@ -876,6 +942,9 @@ class PublicAuction$Type extends MessageType<PublicAuction> {
                 case /* int32 bidder_count */ 9:
                     message.bidderCount = reader.int32();
                     break;
+                case /* optional blindsided.AuctionResult result */ 10:
+                    message.result = AuctionResult.internalBinaryRead(reader, reader.uint32(), options, message.result);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -915,6 +984,9 @@ class PublicAuction$Type extends MessageType<PublicAuction> {
         /* int32 bidder_count = 9; */
         if (message.bidderCount !== 0)
             writer.tag(9, WireType.Varint).int32(message.bidderCount);
+        /* optional blindsided.AuctionResult result = 10; */
+        if (message.result)
+            AuctionResult.internalBinaryWrite(message.result, writer.tag(10, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -925,6 +997,83 @@ class PublicAuction$Type extends MessageType<PublicAuction> {
  * @generated MessageType for protobuf message blindsided.PublicAuction
  */
 export const PublicAuction = new PublicAuction$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AuctionResult$Type extends MessageType<AuctionResult> {
+    constructor() {
+        super("blindsided.AuctionResult", [
+            { no: 1, name: "outcome", kind: "enum", T: () => ["blindsided.AuctionOutcome", AuctionOutcome, "AUCTION_OUTCOME_"] },
+            { no: 2, name: "reserve_met", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 3, name: "has_winner", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 4, name: "winning_bidder_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "winning_amount", kind: "scalar", opt: true, T: 1 /*ScalarType.DOUBLE*/ }
+        ]);
+    }
+    create(value?: PartialMessage<AuctionResult>): AuctionResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.outcome = 0;
+        message.reserveMet = false;
+        message.hasWinner = false;
+        if (value !== undefined)
+            reflectionMergePartial<AuctionResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AuctionResult): AuctionResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* blindsided.AuctionOutcome outcome */ 1:
+                    message.outcome = reader.int32();
+                    break;
+                case /* bool reserve_met */ 2:
+                    message.reserveMet = reader.bool();
+                    break;
+                case /* bool has_winner */ 3:
+                    message.hasWinner = reader.bool();
+                    break;
+                case /* optional string winning_bidder_id */ 4:
+                    message.winningBidderId = reader.string();
+                    break;
+                case /* optional double winning_amount */ 5:
+                    message.winningAmount = reader.double();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AuctionResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* blindsided.AuctionOutcome outcome = 1; */
+        if (message.outcome !== 0)
+            writer.tag(1, WireType.Varint).int32(message.outcome);
+        /* bool reserve_met = 2; */
+        if (message.reserveMet !== false)
+            writer.tag(2, WireType.Varint).bool(message.reserveMet);
+        /* bool has_winner = 3; */
+        if (message.hasWinner !== false)
+            writer.tag(3, WireType.Varint).bool(message.hasWinner);
+        /* optional string winning_bidder_id = 4; */
+        if (message.winningBidderId !== undefined)
+            writer.tag(4, WireType.LengthDelimited).string(message.winningBidderId);
+        /* optional double winning_amount = 5; */
+        if (message.winningAmount !== undefined)
+            writer.tag(5, WireType.Bit64).double(message.winningAmount);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message blindsided.AuctionResult
+ */
+export const AuctionResult = new AuctionResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class CreateAuctionRequest$Type extends MessageType<CreateAuctionRequest> {
     constructor() {
@@ -1882,7 +2031,8 @@ class AuctionUpdate$Type extends MessageType<AuctionUpdate> {
             { no: 1, name: "state", kind: "enum", T: () => ["blindsided.AuctionState", AuctionState, "AUCTION_STATE_"] },
             { no: 2, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 3, name: "bidder_count", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
-            { no: 4, name: "version", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
+            { no: 4, name: "version", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 5, name: "result", kind: "message", T: () => AuctionResult }
         ]);
     }
     create(value?: PartialMessage<AuctionUpdate>): AuctionUpdate {
@@ -1912,6 +2062,9 @@ class AuctionUpdate$Type extends MessageType<AuctionUpdate> {
                 case /* int32 version */ 4:
                     message.version = reader.int32();
                     break;
+                case /* optional blindsided.AuctionResult result */ 5:
+                    message.result = AuctionResult.internalBinaryRead(reader, reader.uint32(), options, message.result);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -1936,6 +2089,9 @@ class AuctionUpdate$Type extends MessageType<AuctionUpdate> {
         /* int32 version = 4; */
         if (message.version !== 0)
             writer.tag(4, WireType.Varint).int32(message.version);
+        /* optional blindsided.AuctionResult result = 5; */
+        if (message.result)
+            AuctionResult.internalBinaryWrite(message.result, writer.tag(5, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

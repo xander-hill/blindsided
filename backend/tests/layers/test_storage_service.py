@@ -171,6 +171,90 @@ class StorageServiceTests(BackendTestCase):
         self.assertTrue(response.success)
         self.assertTrue(judge.auction_store["auction-1"].reserve_met)
 
+    def test_reveal_stores_no_bids_internal_result(self):
+        judge = make_judge(role="backup")
+        judge.auction_store["auction-1"] = pb2.Auction(
+            auction_id="auction-1",
+            reserve_price=500.0,
+            version=1,
+            reserve_met=True,
+        )
+
+        response = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
+                auction=pb2.Auction(auction_id="auction-1", version=1),
+                mutation_type=pb2.AUCTION_MUTATION_TYPE_REVEAL,
+            ),
+            NoopContext(),
+        )
+
+        result = judge.auction_store["auction-1"].result
+        self.assertTrue(response.success)
+        self.assertEqual(judge.auction_store["auction-1"].state, pb2.AUCTION_STATE_REVEALED)
+        self.assertTrue(judge.auction_store["auction-1"].HasField("result"))
+        self.assertEqual(result.outcome, pb2.AUCTION_OUTCOME_NO_BIDS)
+        self.assertFalse(result.reserve_met)
+        self.assertFalse(result.has_winner)
+        self.assertFalse(result.HasField("winning_bidder_id"))
+        self.assertFalse(result.HasField("winning_amount"))
+        self.assertEqual(len(judge.auction_store["auction-1"].bids), 0)
+
+    def test_reveal_stores_reserve_not_met_internal_result(self):
+        judge = make_judge(role="backup")
+        judge.auction_store["auction-1"] = pb2.Auction(
+            auction_id="auction-1",
+            reserve_price=500.0,
+            version=1,
+            bids={
+                "buyer-a": active_bid(250.0, 1),
+                "buyer-b": active_bid(300.0, 2),
+            },
+        )
+
+        response = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
+                auction=pb2.Auction(auction_id="auction-1", version=1),
+                mutation_type=pb2.AUCTION_MUTATION_TYPE_REVEAL,
+            ),
+            NoopContext(),
+        )
+
+        result = judge.auction_store["auction-1"].result
+        self.assertTrue(response.success)
+        self.assertEqual(result.outcome, pb2.AUCTION_OUTCOME_RESERVE_NOT_MET)
+        self.assertFalse(result.reserve_met)
+        self.assertFalse(result.has_winner)
+        self.assertFalse(result.HasField("winning_bidder_id"))
+        self.assertFalse(result.HasField("winning_amount"))
+
+    def test_reveal_stores_successful_sale_internal_result(self):
+        judge = make_judge(role="backup")
+        judge.auction_store["auction-1"] = pb2.Auction(
+            auction_id="auction-1",
+            reserve_price=500.0,
+            version=1,
+            bids={
+                "buyer-a": active_bid(750.0, 2),
+                "buyer-b": active_bid(600.0, 1),
+            },
+        )
+
+        response = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
+                auction=pb2.Auction(auction_id="auction-1", version=1),
+                mutation_type=pb2.AUCTION_MUTATION_TYPE_REVEAL,
+            ),
+            NoopContext(),
+        )
+
+        result = judge.auction_store["auction-1"].result
+        self.assertTrue(response.success)
+        self.assertEqual(result.outcome, pb2.AUCTION_OUTCOME_SUCCESSFUL_SALE)
+        self.assertTrue(result.reserve_met)
+        self.assertTrue(result.has_winner)
+        self.assertEqual(result.winning_bidder_id, "buyer-a")
+        self.assertEqual(result.winning_amount, 750.0)
+
     def test_bid_before_ends_at_is_accepted(self):
         judge = make_judge(role="backup")
         judge.auction_store["auction-1"] = pb2.Auction(

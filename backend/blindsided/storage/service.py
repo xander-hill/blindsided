@@ -153,6 +153,9 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 if mutation_type == pb2.AUCTION_MUTATION_TYPE_REVEAL:
                     updated_auction.state = pb2.AUCTION_STATE_REVEALED
                     updated_auction.reserve_met = self._reserve_met(updated_auction)
+                    updated_auction.result.CopyFrom(
+                        self._build_auction_result(updated_auction)
+                    )
                 elif mutation_type == pb2.AUCTION_MUTATION_TYPE_PLACE_BID:
                     if not incoming_auction.bids:
                         return pb2.AuctionMutationResponse(
@@ -263,6 +266,34 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
         if not auction.bids:
             return False
         return max(bid.amount for bid in auction.bids.values()) >= auction.reserve_price
+
+    def _build_auction_result(self, auction: pb2.Auction) -> pb2.AuctionResult:
+        if not auction.bids:
+            return pb2.AuctionResult(
+                outcome=pb2.AUCTION_OUTCOME_NO_BIDS,
+                reserve_met=False,
+                has_winner=False,
+            )
+
+        winning_bidder_id, winning_bid = min(
+            auction.bids.items(),
+            key=lambda item: (-item[1].amount, item[1].acceptance_order, item[0]),
+        )
+        winning_amount = winning_bid.amount
+        if winning_amount < auction.reserve_price:
+            return pb2.AuctionResult(
+                outcome=pb2.AUCTION_OUTCOME_RESERVE_NOT_MET,
+                reserve_met=False,
+                has_winner=False,
+            )
+
+        return pb2.AuctionResult(
+            outcome=pb2.AUCTION_OUTCOME_SUCCESSFUL_SALE,
+            reserve_met=True,
+            has_winner=True,
+            winning_bidder_id=winning_bidder_id,
+            winning_amount=winning_amount,
+        )
 
     def _next_bid_sequence(self, auction: pb2.Auction) -> int:
         if auction.next_bid_sequence > 0:
