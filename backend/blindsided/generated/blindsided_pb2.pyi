@@ -30,6 +30,14 @@ class AuctionOutcome(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     AUCTION_OUTCOME_NO_BIDS: _ClassVar[AuctionOutcome]
     AUCTION_OUTCOME_RESERVE_NOT_MET: _ClassVar[AuctionOutcome]
     AUCTION_OUTCOME_SUCCESSFUL_SALE: _ClassVar[AuctionOutcome]
+
+class MutationFailureReason(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    MUTATION_FAILURE_REASON_UNSPECIFIED: _ClassVar[MutationFailureReason]
+    MUTATION_FAILURE_REASON_NOT_FOUND: _ClassVar[MutationFailureReason]
+    MUTATION_FAILURE_REASON_INVALID_STATE: _ClassVar[MutationFailureReason]
+    MUTATION_FAILURE_REASON_CONCURRENCY_CONFLICT: _ClassVar[MutationFailureReason]
+    MUTATION_FAILURE_REASON_REPLICATION_FAILED: _ClassVar[MutationFailureReason]
 AUCTION_STATE_UNSPECIFIED: AuctionState
 AUCTION_STATE_OPEN: AuctionState
 AUCTION_STATE_REVEALED: AuctionState
@@ -42,6 +50,11 @@ AUCTION_OUTCOME_UNSPECIFIED: AuctionOutcome
 AUCTION_OUTCOME_NO_BIDS: AuctionOutcome
 AUCTION_OUTCOME_RESERVE_NOT_MET: AuctionOutcome
 AUCTION_OUTCOME_SUCCESSFUL_SALE: AuctionOutcome
+MUTATION_FAILURE_REASON_UNSPECIFIED: MutationFailureReason
+MUTATION_FAILURE_REASON_NOT_FOUND: MutationFailureReason
+MUTATION_FAILURE_REASON_INVALID_STATE: MutationFailureReason
+MUTATION_FAILURE_REASON_CONCURRENCY_CONFLICT: MutationFailureReason
+MUTATION_FAILURE_REASON_REPLICATION_FAILED: MutationFailureReason
 
 class Auction(_message.Message):
     __slots__ = ("auction_id", "seller_id", "title", "category", "description", "reserve_price", "bids", "state", "version", "ends_at", "next_bid_sequence", "result")
@@ -79,14 +92,13 @@ class Auction(_message.Message):
     def __init__(self, auction_id: _Optional[str] = ..., seller_id: _Optional[str] = ..., title: _Optional[str] = ..., category: _Optional[str] = ..., description: _Optional[str] = ..., reserve_price: _Optional[float] = ..., bids: _Optional[_Mapping[str, ActiveBid]] = ..., state: _Optional[_Union[AuctionState, str]] = ..., version: _Optional[int] = ..., ends_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., next_bid_sequence: _Optional[int] = ..., result: _Optional[_Union[AuctionResult, _Mapping]] = ...) -> None: ...
 
 class PublicAuction(_message.Message):
-    __slots__ = ("auction_id", "seller_id", "title", "category", "description", "state", "version", "ends_at", "bidder_count", "result")
+    __slots__ = ("auction_id", "seller_id", "title", "category", "description", "state", "ends_at", "bidder_count", "result")
     AUCTION_ID_FIELD_NUMBER: _ClassVar[int]
     SELLER_ID_FIELD_NUMBER: _ClassVar[int]
     TITLE_FIELD_NUMBER: _ClassVar[int]
     CATEGORY_FIELD_NUMBER: _ClassVar[int]
     DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
     STATE_FIELD_NUMBER: _ClassVar[int]
-    VERSION_FIELD_NUMBER: _ClassVar[int]
     ENDS_AT_FIELD_NUMBER: _ClassVar[int]
     BIDDER_COUNT_FIELD_NUMBER: _ClassVar[int]
     RESULT_FIELD_NUMBER: _ClassVar[int]
@@ -96,11 +108,10 @@ class PublicAuction(_message.Message):
     category: str
     description: str
     state: AuctionState
-    version: int
     ends_at: _timestamp_pb2.Timestamp
     bidder_count: int
     result: AuctionResult
-    def __init__(self, auction_id: _Optional[str] = ..., seller_id: _Optional[str] = ..., title: _Optional[str] = ..., category: _Optional[str] = ..., description: _Optional[str] = ..., state: _Optional[_Union[AuctionState, str]] = ..., version: _Optional[int] = ..., ends_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., bidder_count: _Optional[int] = ..., result: _Optional[_Union[AuctionResult, _Mapping]] = ...) -> None: ...
+    def __init__(self, auction_id: _Optional[str] = ..., seller_id: _Optional[str] = ..., title: _Optional[str] = ..., category: _Optional[str] = ..., description: _Optional[str] = ..., state: _Optional[_Union[AuctionState, str]] = ..., ends_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., bidder_count: _Optional[int] = ..., result: _Optional[_Union[AuctionResult, _Mapping]] = ...) -> None: ...
 
 class AuctionResult(_message.Message):
     __slots__ = ("outcome", "reserve_met", "has_winner", "winning_bidder_id", "winning_amount")
@@ -295,14 +306,16 @@ class AuctionMutationRequest(_message.Message):
     def __init__(self, mutation_type: _Optional[_Union[AuctionMutationType, str]] = ..., auction: _Optional[_Union[Auction, _Mapping]] = ..., bidder_id: _Optional[str] = ..., expected_version: _Optional[int] = ...) -> None: ...
 
 class AuctionMutationResponse(_message.Message):
-    __slots__ = ("success", "current_version", "message")
+    __slots__ = ("success", "current_version", "message", "failure_reason")
     SUCCESS_FIELD_NUMBER: _ClassVar[int]
     CURRENT_VERSION_FIELD_NUMBER: _ClassVar[int]
     MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    FAILURE_REASON_FIELD_NUMBER: _ClassVar[int]
     success: bool
     current_version: int
     message: str
-    def __init__(self, success: bool = ..., current_version: _Optional[int] = ..., message: _Optional[str] = ...) -> None: ...
+    failure_reason: MutationFailureReason
+    def __init__(self, success: bool = ..., current_version: _Optional[int] = ..., message: _Optional[str] = ..., failure_reason: _Optional[_Union[MutationFailureReason, str]] = ...) -> None: ...
 
 class StateRequest(_message.Message):
     __slots__ = ("requester_id",)

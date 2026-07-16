@@ -167,3 +167,50 @@ class ReservePriceSpecificationTests(BackendTestCase):
         self.assertTrue(
             judge.auction_store["reserve-finalized-on-reveal"].result.reserve_met
         )
+
+    def test_internal_services_use_hidden_bid_and_reserve_data_only_for_rules(self):
+        judge = make_judge(role="backup")
+        service = AuctionService()
+        judge.auction_store["reserve-hidden-rule-data"] = pb2.Auction(
+            auction_id="reserve-hidden-rule-data",
+            seller_id="seller-a",
+            title="Hidden Rule Data",
+            reserve_price=500.0,
+            state=pb2.AUCTION_STATE_OPEN,
+            version=1,
+            bids={
+                "buyer-a": active_bid(750.0, 1),
+                "buyer-b": active_bid(600.0, 2),
+            },
+        )
+
+        public_before_reveal = service._to_public_auction(
+            judge.auction_store["reserve-hidden-rule-data"]
+        )
+        reveal = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
+                mutation_type=pb2.AUCTION_MUTATION_TYPE_REVEAL,
+                auction=pb2.Auction(auction_id="reserve-hidden-rule-data"),
+                expected_version=1,
+            ),
+            NoopContext(),
+        )
+        public_after_reveal = service._to_public_auction(
+            judge.auction_store["reserve-hidden-rule-data"]
+        )
+
+        self.assertEqual(public_before_reveal.bidder_count, 2)
+        self.assertNotIn("reserve_price", public_before_reveal.DESCRIPTOR.fields_by_name)
+        self.assertNotIn("bids", public_before_reveal.DESCRIPTOR.fields_by_name)
+        self.assertNotIn("buyer-a", str(public_before_reveal))
+        self.assertNotIn("750", str(public_before_reveal))
+        self.assertTrue(reveal.success)
+        self.assertEqual(
+            public_after_reveal.result.outcome,
+            pb2.AUCTION_OUTCOME_SUCCESSFUL_SALE,
+        )
+        self.assertTrue(public_after_reveal.result.reserve_met)
+        self.assertEqual(public_after_reveal.result.winning_bidder_id, "buyer-a")
+        self.assertEqual(public_after_reveal.result.winning_amount, 750.0)
+        self.assertNotIn("buyer-b", str(public_after_reveal))
+        self.assertNotIn("600", str(public_after_reveal))
