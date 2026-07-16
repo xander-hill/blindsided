@@ -180,26 +180,26 @@ Required behavior:
 
 After reveal, external users MAY see:
 
-- whether the reserve was met
-- whether the auction produced a winner
-- winning bidder
-- winning amount
-- final bidder count
+- ✅ whether the reserve was met
+- ✅ whether the auction produced a winner
+- ✅ winning bidder
+- ✅ winning amount
+- ✅ final bidder count
 
 After reveal, external users MUST NOT see:
 
-- losing bidder identities
-- losing bid amounts
-- complete bid history
+- ✅ losing bidder identities
+- ✅ losing bid amounts
+- ✅ complete bid history
 
 Required behavior:
 
-- The published winner MUST be derived from the final active bid set.
-- The published winning amount MUST be the winning bidder's final active
+- ✅ The published winner MUST be derived from the final active bid set.
+- ✅ The published winning amount MUST be the winning bidder's final active
   bid amount.
-- If the auction does not produce a winner, the system MUST NOT publish
+- ✅ If the auction does not produce a winner, the system MUST NOT publish
   a winning bidder or winning amount.
-- Post-reveal responses MUST continue to protect losing bid data.
+- ✅ Post-reveal responses MUST continue to protect losing bid data.
 
 ---
 

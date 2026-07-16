@@ -18,6 +18,13 @@ enum AuctionMutationType {
     AUCTION_MUTATION_TYPE_REVEAL = 4;
 }
 
+enum AuctionOutcome {
+    AUCTION_OUTCOME_UNSPECIFIED = 0;
+    AUCTION_OUTCOME_NO_BIDS = 1;
+    AUCTION_OUTCOME_RESERVE_NOT_MET = 2;
+    AUCTION_OUTCOME_SUCCESSFUL_SALE = 3;
+}
+
 message Auction {
     string auction_id = 1;
     string seller_id = 2;
@@ -31,6 +38,7 @@ message Auction {
     bool reserve_met = 10;
     google.protobuf.Timestamp ends_at = 11;
     int64 next_bid_sequence = 12;
+    optional AuctionResult result = 13;
 }
 
 message PublicAuction {
@@ -43,6 +51,15 @@ message PublicAuction {
     int32 version = 7;
     google.protobuf.Timestamp ends_at = 8;
     int32 bidder_count = 9;
+    optional AuctionResult result = 10;
+}
+
+message AuctionResult {
+    AuctionOutcome outcome = 1;
+    bool reserve_met = 2;
+    bool has_winner = 3;
+    optional string winning_bidder_id = 4;
+    optional double winning_amount = 5;
 }
 
 service AuctionService {
@@ -143,6 +160,7 @@ message AuctionUpdate {
     string message = 2;
     int32 bidder_count = 3;
     int32 version = 4;
+    optional AuctionResult result = 5;
 }
 
 message AuctionMutationRequest {

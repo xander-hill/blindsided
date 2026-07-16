@@ -280,16 +280,55 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
         if auction.HasField("ends_at"):
             public_auction.ends_at.CopyFrom(auction.ends_at)
 
+        if auction.state == pb2.AUCTION_STATE_REVEALED:
+            public_auction.result.CopyFrom(self._public_auction_result(auction))
+
         return public_auction
 
     def _to_public_auction_update(self, auction: pb2.Auction) -> pb2.AuctionUpdate:
         """Convert private storage state into the live public stream shape."""
         public_auction = self._to_public_auction(auction)
-        return pb2.AuctionUpdate(
+        update = pb2.AuctionUpdate(
             state=public_auction.state,
             message="Auction update.",
             bidder_count=public_auction.bidder_count,
             version=public_auction.version,
+        )
+        if public_auction.HasField("result"):
+            update.result.CopyFrom(public_auction.result)
+        return update
+
+    def _public_auction_result(self, auction: pb2.Auction) -> pb2.AuctionResult:
+        if auction.HasField("result"):
+            result = pb2.AuctionResult()
+            result.CopyFrom(auction.result)
+            return result
+
+        return self._build_auction_result(auction)
+
+    def _build_auction_result(self, auction: pb2.Auction) -> pb2.AuctionResult:
+        winning_amount, winning_bidder_id = self._winner_from_active_bids(auction)
+
+        if not auction.bids:
+            return pb2.AuctionResult(
+                outcome=pb2.AUCTION_OUTCOME_NO_BIDS,
+                reserve_met=False,
+                has_winner=False,
+            )
+
+        if not winning_bidder_id:
+            return pb2.AuctionResult(
+                outcome=pb2.AUCTION_OUTCOME_RESERVE_NOT_MET,
+                reserve_met=False,
+                has_winner=False,
+            )
+
+        return pb2.AuctionResult(
+            outcome=pb2.AUCTION_OUTCOME_SUCCESSFUL_SALE,
+            reserve_met=True,
+            has_winner=True,
+            winning_bidder_id=winning_bidder_id,
+            winning_amount=winning_amount,
         )
 
     def _winner_from_active_bids(self, auction: pb2.Auction) -> tuple[float, str]:
