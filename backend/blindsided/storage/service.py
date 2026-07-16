@@ -108,7 +108,6 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                     )
                 incoming_auction.state = pb2.AUCTION_STATE_OPEN
                 incoming_auction.version = 1
-                incoming_auction.reserve_met = False
                 incoming_auction.next_bid_sequence = 1
 
             elif existing_auction.state == pb2.AUCTION_STATE_REVEALED:
@@ -152,7 +151,6 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
 
                 if mutation_type == pb2.AUCTION_MUTATION_TYPE_REVEAL:
                     updated_auction.state = pb2.AUCTION_STATE_REVEALED
-                    updated_auction.reserve_met = self._reserve_met(updated_auction)
                     updated_auction.result.CopyFrom(
                         self._build_auction_result(updated_auction)
                     )
@@ -262,12 +260,11 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             return pb2.AUCTION_MUTATION_TYPE_PLACE_BID
         return pb2.AUCTION_MUTATION_TYPE_UNSPECIFIED
 
-    def _reserve_met(self, auction: pb2.Auction) -> bool:
-        if not auction.bids:
-            return False
-        return max(bid.amount for bid in auction.bids.values()) >= auction.reserve_price
-
     def _build_auction_result(self, auction: pb2.Auction) -> pb2.AuctionResult:
+        state_error = self._acceptance_order_state_error(auction)
+        if state_error:
+            raise ValueError(state_error)
+
         if not auction.bids:
             return pb2.AuctionResult(
                 outcome=pb2.AUCTION_OUTCOME_NO_BIDS,

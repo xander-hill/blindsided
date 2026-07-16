@@ -1,4 +1,3 @@
-from blindsided.auction_service.service import AuctionService
 from blindsided.generated import blindsided_pb2 as pb2
 from backend.tests.helpers import BackendTestCase, NoopContext, active_bid, make_judge
 
@@ -32,7 +31,7 @@ class TieBreakingSpecificationTests(BackendTestCase):
         self.assertEqual(judge.auction_store["tie-order-system"].next_bid_sequence, 2)
 
     def test_earliest_accepted_active_bid_wins_tied_highest_amount(self):
-        service = AuctionService()
+        judge = make_judge(role="backup")
         auction = pb2.Auction(
             auction_id="tie-earliest-wins",
             reserve_price=1.0,
@@ -43,13 +42,13 @@ class TieBreakingSpecificationTests(BackendTestCase):
             },
         )
 
-        winning_amount, winning_bidder_id = service._winner_from_active_bids(auction)
+        result = judge._build_auction_result(auction)
 
-        self.assertEqual(winning_bidder_id, "buyer-a")
-        self.assertEqual(winning_amount, 500.0)
+        self.assertEqual(result.winning_bidder_id, "buyer-a")
+        self.assertEqual(result.winning_amount, 500.0)
 
     def test_duplicate_acceptance_order_is_corrupted_not_bidder_id_tiebreak(self):
-        service = AuctionService()
+        judge = make_judge(role="backup")
         auction = pb2.Auction(
             auction_id="tie-duplicate-corrupt",
             reserve_price=1.0,
@@ -61,10 +60,9 @@ class TieBreakingSpecificationTests(BackendTestCase):
         )
 
         with self.assertRaisesRegex(ValueError, "duplicate acceptance order"):
-            service._winner_from_active_bids(auction)
+            judge._build_auction_result(auction)
 
     def test_replaced_bid_does_not_keep_original_acceptance_order(self):
-        service = AuctionService()
         judge = make_judge(role="backup")
         judge.auction_store["tie-replacement-order"] = pb2.Auction(
             auction_id="tie-replacement-order",
@@ -97,9 +95,7 @@ class TieBreakingSpecificationTests(BackendTestCase):
             ),
             NoopContext(),
         )
-        winning_amount, winning_bidder_id = service._winner_from_active_bids(
-            judge.auction_store["tie-replacement-order"]
-        )
+        result = judge.auction_store["tie-replacement-order"].result
 
         self.assertTrue(replace.success)
         self.assertTrue(reveal.success)
@@ -109,11 +105,10 @@ class TieBreakingSpecificationTests(BackendTestCase):
             .acceptance_order,
             3,
         )
-        self.assertEqual(winning_bidder_id, "buyer-b")
-        self.assertEqual(winning_amount, 200.0)
+        self.assertEqual(result.winning_bidder_id, "buyer-b")
+        self.assertEqual(result.winning_amount, 200.0)
 
     def test_acceptance_order_remains_stable_across_restart_full_state_sync(self):
-        service = AuctionService()
         primary = make_judge(role="primary", address="primary:50051")
         recovered = make_judge(role="backup", address="recovered:50051")
         primary.auction_store["tie-restart-stability"] = pb2.Auction(
@@ -150,9 +145,7 @@ class TieBreakingSpecificationTests(BackendTestCase):
             ),
             NoopContext(),
         )
-        winning_amount, winning_bidder_id = service._winner_from_active_bids(
-            recovered.auction_store["tie-restart-stability"]
-        )
+        result = recovered.auction_store["tie-restart-stability"].result
 
         self.assertTrue(state.ok)
         self.assertTrue(bid_after_recovery.success)
@@ -169,11 +162,10 @@ class TieBreakingSpecificationTests(BackendTestCase):
             .acceptance_order,
             3,
         )
-        self.assertEqual(winning_bidder_id, "buyer-a")
-        self.assertEqual(winning_amount, 500.0)
+        self.assertEqual(result.winning_bidder_id, "buyer-a")
+        self.assertEqual(result.winning_amount, 500.0)
 
     def test_acceptance_order_remains_stable_across_failover(self):
-        service = AuctionService()
         backup = make_judge(role="backup", address="backup:50051")
         auction = pb2.Auction(
             auction_id="tie-failover-stability",
@@ -213,9 +205,7 @@ class TieBreakingSpecificationTests(BackendTestCase):
             ),
             NoopContext(),
         )
-        winning_amount, winning_bidder_id = service._winner_from_active_bids(
-            backup.auction_store["tie-failover-stability"]
-        )
+        result = backup.auction_store["tie-failover-stability"].result
 
         self.assertTrue(replication.success)
         self.assertTrue(promotion.success)
@@ -234,11 +224,10 @@ class TieBreakingSpecificationTests(BackendTestCase):
             .acceptance_order,
             3,
         )
-        self.assertEqual(winning_bidder_id, "buyer-a")
-        self.assertEqual(winning_amount, 500.0)
+        self.assertEqual(result.winning_bidder_id, "buyer-a")
+        self.assertEqual(result.winning_amount, 500.0)
 
     def test_withdrawn_bid_does_not_keep_original_acceptance_order(self):
-        service = AuctionService()
         judge = make_judge(role="backup")
         judge.auction_store["tie-withdrawal-order"] = pb2.Auction(
             auction_id="tie-withdrawal-order",
@@ -279,9 +268,7 @@ class TieBreakingSpecificationTests(BackendTestCase):
             ),
             NoopContext(),
         )
-        winning_amount, winning_bidder_id = service._winner_from_active_bids(
-            judge.auction_store["tie-withdrawal-order"]
-        )
+        result = judge.auction_store["tie-withdrawal-order"].result
 
         self.assertTrue(withdraw.success)
         self.assertTrue(rebid.success)
@@ -292,5 +279,5 @@ class TieBreakingSpecificationTests(BackendTestCase):
             .acceptance_order,
             3,
         )
-        self.assertEqual(winning_bidder_id, "buyer-b")
-        self.assertEqual(winning_amount, 500.0)
+        self.assertEqual(result.winning_bidder_id, "buyer-b")
+        self.assertEqual(result.winning_amount, 500.0)

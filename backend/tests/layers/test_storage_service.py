@@ -34,7 +34,7 @@ class StorageServiceTests(BackendTestCase):
         self.assertEqual(response.current_version, 1)
         self.assertEqual(judge.auction_store["auction-1"].version, 1)
         self.assertEqual(dict(judge.auction_store["auction-1"].bids), {})
-        self.assertFalse(judge.auction_store["auction-1"].reserve_met)
+        self.assertNotIn("reserve_met", pb2.Auction.DESCRIPTOR.fields_by_name)
 
     def test_commit_rejects_stale_versions_and_preserves_existing_state(self):
         judge = make_judge(role="backup")
@@ -100,7 +100,7 @@ class StorageServiceTests(BackendTestCase):
         self.assertEqual(judge.auction_store["auction-1"].bids["buyer-b"].amount, 450.0)
         self.assertEqual(judge.auction_store["auction-1"].bids["buyer-b"].acceptance_order, 2)
         self.assertEqual(judge.auction_store["auction-1"].next_bid_sequence, 4)
-        self.assertFalse(judge.auction_store["auction-1"].reserve_met)
+        self.assertFalse(judge.auction_store["auction-1"].HasField("result"))
 
     def test_commit_rejects_same_buyer_lower_bid_and_preserves_state(self):
         judge = make_judge(role="backup")
@@ -150,14 +150,13 @@ class StorageServiceTests(BackendTestCase):
         self.assertEqual(judge.auction_store["auction-1"].bids["buyer-a"].amount, 300.0)
         self.assertEqual(judge.auction_store["auction-1"].version, 1)
 
-    def test_reveal_calculates_reserve_met_from_final_active_bids(self):
+    def test_reveal_calculates_result_reserve_met_from_final_active_bids(self):
         judge = make_judge(role="backup")
         judge.auction_store["auction-1"] = pb2.Auction(
             auction_id="auction-1",
             reserve_price=500.0,
             version=1,
             bids={"buyer-a": active_bid(700.0, 1)},
-            reserve_met=False,
         )
 
         response = judge.ApplyAuctionMutation(
@@ -169,7 +168,7 @@ class StorageServiceTests(BackendTestCase):
         )
 
         self.assertTrue(response.success)
-        self.assertTrue(judge.auction_store["auction-1"].reserve_met)
+        self.assertTrue(judge.auction_store["auction-1"].result.reserve_met)
 
     def test_reveal_stores_no_bids_internal_result(self):
         judge = make_judge(role="backup")
@@ -177,7 +176,6 @@ class StorageServiceTests(BackendTestCase):
             auction_id="auction-1",
             reserve_price=500.0,
             version=1,
-            reserve_met=True,
         )
 
         response = judge.ApplyAuctionMutation(

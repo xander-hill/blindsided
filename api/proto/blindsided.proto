@@ -35,10 +35,9 @@ message Auction {
     map<string, ActiveBid> bids = 7;
     AuctionState state = 8;
     int32 version = 9;
-    bool reserve_met = 10;
-    google.protobuf.Timestamp ends_at = 11;
-    int64 next_bid_sequence = 12;
-    optional AuctionResult result = 13;
+    google.protobuf.Timestamp ends_at = 10;
+    int64 next_bid_sequence = 11;
+    optional AuctionResult result = 12;
 }
 
 message PublicAuction {
