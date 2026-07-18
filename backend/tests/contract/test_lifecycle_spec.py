@@ -16,7 +16,7 @@ class AuctionLifecycleSpecificationTests(BackendTestCase):
     """Contract tests for docs/auction-specification.md section 2.1."""
 
     def test_auction_begins_open(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
 
         response = judge.ApplyAuctionMutation(
             pb2.AuctionMutationRequest(
@@ -35,7 +35,7 @@ class AuctionLifecycleSpecificationTests(BackendTestCase):
         self.assertEqual(judge.auction_store["lifecycle-open"].state, pb2.AUCTION_STATE_OPEN)
 
     def test_system_performs_reveal_transition_from_open_to_revealed(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
         judge.ApplyAuctionMutation(
             pb2.AuctionMutationRequest(
                 auction=pb2.Auction(
@@ -65,7 +65,7 @@ class AuctionLifecycleSpecificationTests(BackendTestCase):
         self.assertEqual(judge.auction_store["lifecycle-reveal"].version, 2)
 
     def test_reveal_transition_happens_at_most_once(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
         judge.auction_store["lifecycle-once"] = pb2.Auction(
             auction_id="lifecycle-once",
             version=3,
@@ -87,8 +87,8 @@ class AuctionLifecycleSpecificationTests(BackendTestCase):
         )
         self.assertEqual(judge.auction_store["lifecycle-once"].version, 3)
 
-    def test_deadline_read_automatically_reveals_after_prior_mutations_are_accounted(self):
-        judge = make_judge(role="backup")
+    def test_deadline_read_stays_open_until_reveal_is_committed(self):
+        judge = make_judge(role="primary")
         judge.auction_store["lifecycle-auto-reveal"] = pb2.Auction(
             auction_id="lifecycle-auto-reveal",
             reserve_price=500.0,
@@ -137,24 +137,39 @@ class AuctionLifecycleSpecificationTests(BackendTestCase):
                 pb2.GetAuctionRequest(auction_id="lifecycle-auto-reveal"),
                 NoopContext(),
             )
+            reveal = judge.ApplyAuctionMutation(
+                pb2.AuctionMutationRequest(
+                    mutation_type=pb2.AUCTION_MUTATION_TYPE_REVEAL,
+                    auction=pb2.Auction(
+                        auction_id="lifecycle-auto-reveal",
+                        version=4,
+                    ),
+                ),
+                NoopContext(),
+            )
 
         self.assertTrue(first_bid.success)
         self.assertTrue(withdrawal.success)
         self.assertTrue(final_bid.success)
         self.assertTrue(response.ok)
-        self.assertEqual(response.auction.state, pb2.AUCTION_STATE_REVEALED)
-        self.assertEqual(response.auction.version, 5)
-        self.assertNotIn("buyer-a", response.auction.bids)
-        self.assertEqual(response.auction.bids["buyer-b"], active_bid(800.0, 2))
+        self.assertEqual(response.auction.state, pb2.AUCTION_STATE_OPEN)
+        self.assertEqual(response.auction.version, 4)
+        self.assertFalse(response.auction.HasField("result"))
+        self.assertTrue(reveal.success)
+        committed = judge.auction_store["lifecycle-auto-reveal"]
+        self.assertEqual(committed.state, pb2.AUCTION_STATE_REVEALED)
+        self.assertEqual(committed.version, 5)
+        self.assertNotIn("buyer-a", committed.bids)
+        self.assertEqual(committed.bids["buyer-b"], active_bid(800.0, 2))
         self.assertEqual(
-            response.auction.result.outcome,
+            committed.result.outcome,
             pb2.AUCTION_OUTCOME_SUCCESSFUL_SALE,
         )
-        self.assertEqual(response.auction.result.winning_bidder_id, "buyer-b")
-        self.assertEqual(response.auction.result.winning_amount, 800.0)
+        self.assertEqual(committed.result.winning_bidder_id, "buyer-b")
+        self.assertEqual(committed.result.winning_amount, 800.0)
 
     def test_revealed_is_terminal_and_rejects_later_bid_mutations(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
         judge.auction_store["lifecycle-terminal"] = pb2.Auction(
             auction_id="lifecycle-terminal",
             version=4,
@@ -178,7 +193,7 @@ class AuctionLifecycleSpecificationTests(BackendTestCase):
         self.assertEqual(judge.auction_store["lifecycle-terminal"].version, 4)
 
     def test_revealed_auction_cannot_transition_back_to_open(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
         judge.auction_store["lifecycle-no-reopen"] = pb2.Auction(
             auction_id="lifecycle-no-reopen",
             version=2,
@@ -205,7 +220,7 @@ class AuctionLifecycleSpecificationTests(BackendTestCase):
         self.assertEqual(judge.auction_store["lifecycle-no-reopen"].version, 2)
 
     def test_reveal_requires_an_existing_open_auction(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
 
         response = judge.ApplyAuctionMutation(
             pb2.AuctionMutationRequest(

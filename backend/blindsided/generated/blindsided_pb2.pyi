@@ -158,20 +158,24 @@ class CreateAuctionResponse(_message.Message):
     def __init__(self, ok: bool = ..., auction_id: _Optional[str] = ..., message: _Optional[str] = ...) -> None: ...
 
 class GetAuctionRequest(_message.Message):
-    __slots__ = ("auction_id",)
+    __slots__ = ("auction_id", "bidder_id")
     AUCTION_ID_FIELD_NUMBER: _ClassVar[int]
+    BIDDER_ID_FIELD_NUMBER: _ClassVar[int]
     auction_id: str
-    def __init__(self, auction_id: _Optional[str] = ...) -> None: ...
+    bidder_id: str
+    def __init__(self, auction_id: _Optional[str] = ..., bidder_id: _Optional[str] = ...) -> None: ...
 
 class GetAuctionResponse(_message.Message):
-    __slots__ = ("ok", "auction", "message")
+    __slots__ = ("ok", "auction", "message", "own_active_bid_amount")
     OK_FIELD_NUMBER: _ClassVar[int]
     AUCTION_FIELD_NUMBER: _ClassVar[int]
     MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    OWN_ACTIVE_BID_AMOUNT_FIELD_NUMBER: _ClassVar[int]
     ok: bool
     auction: PublicAuction
     message: str
-    def __init__(self, ok: bool = ..., auction: _Optional[_Union[PublicAuction, _Mapping]] = ..., message: _Optional[str] = ...) -> None: ...
+    own_active_bid_amount: float
+    def __init__(self, ok: bool = ..., auction: _Optional[_Union[PublicAuction, _Mapping]] = ..., message: _Optional[str] = ..., own_active_bid_amount: _Optional[float] = ...) -> None: ...
 
 class GetStoredAuctionResponse(_message.Message):
     __slots__ = ("ok", "auction", "message")

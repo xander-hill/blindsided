@@ -14,7 +14,7 @@ class IdempotencySpecificationTests(BackendTestCase):
     """Contract tests for docs/auction-specification.md section 7."""
 
     def test_duplicate_bid_with_same_request_id_replays_success_once(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
         judge.auction_store["idem-bid"] = pb2.Auction(
             auction_id="idem-bid",
             version=1,
@@ -46,7 +46,7 @@ class IdempotencySpecificationTests(BackendTestCase):
         )
 
     def test_same_request_id_with_different_bid_amount_is_rejected_as_conflict(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
         judge.auction_store["idem-bid-conflict"] = pb2.Auction(
             auction_id="idem-bid-conflict",
             version=1,
@@ -93,7 +93,7 @@ class IdempotencySpecificationTests(BackendTestCase):
         )
 
     def test_duplicate_withdrawal_replays_success_without_missing_bid_error(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
         judge.auction_store["idem-withdraw"] = pb2.Auction(
             auction_id="idem-withdraw",
             version=4,
@@ -119,7 +119,7 @@ class IdempotencySpecificationTests(BackendTestCase):
         self.assertEqual(dict(judge.auction_store["idem-withdraw"].bids), {})
 
     def test_duplicate_reveal_replays_success_once_with_identical_outcome(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
         judge.auction_store["idem-reveal"] = pb2.Auction(
             auction_id="idem-reveal",
             seller_id="seller-a",
@@ -149,7 +149,7 @@ class IdempotencySpecificationTests(BackendTestCase):
         self.assertEqual(judge.auction_store["idem-reveal"].result, first_result)
 
     def test_duplicate_creation_replays_original_auction_id_and_creates_once(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
         first = judge.ApplyAuctionMutation(
             pb2.AuctionMutationRequest(
                 mutation_type=pb2.AUCTION_MUTATION_TYPE_CREATE,
@@ -191,7 +191,7 @@ class IdempotencySpecificationTests(BackendTestCase):
         self.assertEqual(list(judge.auction_store), ["created-a"])
 
     def test_domain_rejections_do_not_create_permanent_idempotency_record(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
         judge.auction_store["idem-reject"] = pb2.Auction(
             auction_id="idem-reject",
             version=1,
@@ -233,7 +233,7 @@ class IdempotencySpecificationTests(BackendTestCase):
     def test_persisted_idempotency_state_survives_restart_and_replays(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             state_path = f"{temp_dir}/auction-state.pb"
-            judge = make_judge(role="backup", state_file_path=state_path)
+            judge = make_judge(role="primary", state_file_path=state_path)
             judge.auction_store["idem-restart"] = pb2.Auction(
                 auction_id="idem-restart",
                 version=1,
@@ -251,7 +251,7 @@ class IdempotencySpecificationTests(BackendTestCase):
             )
 
             first = judge.ApplyAuctionMutation(request, NoopContext())
-            recovered = make_judge(role="backup", state_file_path=state_path)
+            recovered = make_judge(role="primary", state_file_path=state_path)
             recovered._load_state_from_disk()
             second = recovered.ApplyAuctionMutation(request, NoopContext())
 

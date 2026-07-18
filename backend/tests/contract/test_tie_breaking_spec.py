@@ -6,7 +6,7 @@ class TieBreakingSpecificationTests(BackendTestCase):
     """Contract tests for docs/auction-specification.md section 3.4."""
 
     def test_acceptance_order_is_assigned_by_the_system(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
         judge.auction_store["tie-order-system"] = pb2.Auction(
             auction_id="tie-order-system",
             version=1,
@@ -31,7 +31,7 @@ class TieBreakingSpecificationTests(BackendTestCase):
         self.assertEqual(judge.auction_store["tie-order-system"].next_bid_sequence, 2)
 
     def test_earliest_accepted_active_bid_wins_tied_highest_amount(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
         auction = pb2.Auction(
             auction_id="tie-earliest-wins",
             reserve_price=1.0,
@@ -48,7 +48,7 @@ class TieBreakingSpecificationTests(BackendTestCase):
         self.assertEqual(result.winning_amount, 500.0)
 
     def test_duplicate_acceptance_order_is_corrupted_not_bidder_id_tiebreak(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
         auction = pb2.Auction(
             auction_id="tie-duplicate-corrupt",
             reserve_price=1.0,
@@ -63,7 +63,7 @@ class TieBreakingSpecificationTests(BackendTestCase):
             judge._build_auction_result(auction)
 
     def test_replaced_bid_does_not_keep_original_acceptance_order(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
         judge.auction_store["tie-replacement-order"] = pb2.Auction(
             auction_id="tie-replacement-order",
             reserve_price=1.0,
@@ -110,7 +110,7 @@ class TieBreakingSpecificationTests(BackendTestCase):
 
     def test_acceptance_order_remains_stable_across_restart_full_state_sync(self):
         primary = make_judge(role="primary", address="primary:50051")
-        recovered = make_judge(role="backup", address="recovered:50051")
+        recovered = make_judge(role="primary", address="recovered:50051")
         primary.auction_store["tie-restart-stability"] = pb2.Auction(
             auction_id="tie-restart-stability",
             reserve_price=1.0,
@@ -228,7 +228,7 @@ class TieBreakingSpecificationTests(BackendTestCase):
         self.assertEqual(result.winning_amount, 500.0)
 
     def test_withdrawn_bid_does_not_keep_original_acceptance_order(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
         judge.auction_store["tie-withdrawal-order"] = pb2.Auction(
             auction_id="tie-withdrawal-order",
             reserve_price=1.0,

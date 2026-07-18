@@ -13,7 +13,7 @@ class ReservePriceSpecificationTests(BackendTestCase):
     """Contract tests for docs/auction-specification.md section 2.3."""
 
     def test_seller_configures_reserve_price_during_creation(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
 
         response = judge.ApplyAuctionMutation(
             pb2.AuctionMutationRequest(
@@ -31,7 +31,7 @@ class ReservePriceSpecificationTests(BackendTestCase):
         self.assertEqual(judge.auction_store["reserve-configured"].reserve_price, 500.0)
 
     def test_reserve_price_is_not_associated_with_any_bidder(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
 
         judge.ApplyAuctionMutation(
             pb2.AuctionMutationRequest(
@@ -61,7 +61,7 @@ class ReservePriceSpecificationTests(BackendTestCase):
         self.assertEqual(update.bidder_count, 1)
 
     def test_reserve_price_does_not_become_winning_bid(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
 
         result = judge._build_auction_result(
             pb2.Auction(
@@ -101,7 +101,7 @@ class ReservePriceSpecificationTests(BackendTestCase):
         self.assertNotIn("reserve_met", update_fields)
 
     def test_reserve_price_only_determines_successful_sale(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
 
         below_reserve = judge._build_auction_result(
             pb2.Auction(
@@ -130,7 +130,7 @@ class ReservePriceSpecificationTests(BackendTestCase):
         self.assertEqual(meeting_reserve.winning_bidder_id, "buyer-a")
 
     def test_reserve_met_is_calculated_only_when_auction_is_revealed(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
         judge.auction_store["reserve-finalized-on-reveal"] = pb2.Auction(
             auction_id="reserve-finalized-on-reveal",
             reserve_price=500.0,
@@ -169,7 +169,7 @@ class ReservePriceSpecificationTests(BackendTestCase):
         )
 
     def test_internal_services_use_hidden_bid_and_reserve_data_only_for_rules(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
         service = AuctionService()
         judge.auction_store["reserve-hidden-rule-data"] = pb2.Auction(
             auction_id="reserve-hidden-rule-data",

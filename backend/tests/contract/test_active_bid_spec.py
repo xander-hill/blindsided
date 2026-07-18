@@ -7,7 +7,7 @@ class ActiveBidSpecificationTests(BackendTestCase):
     """Contract tests for docs/auction-specification.md section 3.1."""
 
     def test_system_enforces_at_most_one_active_bid_per_bidder_per_auction(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
         judge.auction_store["active-one-per-bidder"] = pb2.Auction(
             auction_id="active-one-per-bidder",
             version=1,
@@ -42,7 +42,7 @@ class ActiveBidSpecificationTests(BackendTestCase):
         )
 
     def test_new_accepted_bid_replaces_same_bidder_previous_bid(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
         judge.auction_store["active-replacement"] = pb2.Auction(
             auction_id="active-replacement",
             version=1,
@@ -67,7 +67,7 @@ class ActiveBidSpecificationTests(BackendTestCase):
         )
 
     def test_replaced_bid_does_not_remain_eligible_to_win(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
         judge.auction_store["active-replaced-not-winner"] = pb2.Auction(
             auction_id="active-replaced-not-winner",
             reserve_price=1.0,

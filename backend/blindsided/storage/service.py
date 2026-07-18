@@ -62,6 +62,12 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
 
     def ApplyAuctionMutation(self, request: pb2.AuctionMutationRequest, context) -> pb2.AuctionMutationResponse:
         with self.state_lock:
+            if self.replica_role != "primary":
+                return pb2.AuctionMutationResponse(
+                    success=False,
+                    failure_reason=pb2.MUTATION_FAILURE_REASON_INVALID_STATE,
+                    message="Auction mutations require the primary replica.",
+                )
             auction_id = request.auction.auction_id
             existing_auction = self.auction_store.get(auction_id)
             incoming_auction = request.auction
@@ -124,6 +130,12 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                         failure_reason=pb2.MUTATION_FAILURE_REASON_INVALID_STATE,
                         message="Auction creation must begin open.",
                     )
+                if incoming_auction.HasField("result"):
+                    return pb2.AuctionMutationResponse(
+                        success=False,
+                        failure_reason=pb2.MUTATION_FAILURE_REASON_INVALID_STATE,
+                        message="An open auction cannot have a committed result.",
+                    )
                 incoming_auction.state = pb2.AUCTION_STATE_OPEN
                 incoming_auction.version = 1
                 incoming_auction.next_bid_sequence = 1
@@ -148,16 +160,6 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 )
 
             else:
-                if mutation_type != pb2.AUCTION_MUTATION_TYPE_REVEAL:
-                    existing_auction = self._auto_reveal_if_due(existing_auction)
-                    if existing_auction.state == pb2.AUCTION_STATE_REVEALED:
-                        return pb2.AuctionMutationResponse(
-                            success=False,
-                            current_version=existing_auction.version,
-                            failure_reason=pb2.MUTATION_FAILURE_REASON_INVALID_STATE,
-                            message="The Gavel has already fallen.",
-                        )
-
                 state_error = self._acceptance_order_state_error(existing_auction)
                 if state_error:
                     return pb2.AuctionMutationResponse(
@@ -466,22 +468,6 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
         revealed_auction.result.CopyFrom(self._build_auction_result(revealed_auction))
         return revealed_auction
 
-    def _auto_reveal_if_due(self, auction: pb2.Auction) -> pb2.Auction:
-        if auction.state == pb2.AUCTION_STATE_REVEALED:
-            return auction
-        if not self._auction_has_ended(auction):
-            return auction
-
-        revealed_auction = self._revealed_copy(auction)
-        self.auction_store[auction.auction_id] = revealed_auction
-
-        if self.replica_role == "primary" and not self._replicate_to_peers(revealed_auction):
-            self.auction_store[auction.auction_id] = auction
-            return auction
-
-        self._persist_state_to_disk()
-        return revealed_auction
-
     def _next_bid_sequence(self, auction: pb2.Auction) -> int:
         if auction.next_bid_sequence > 0:
             return auction.next_bid_sequence
@@ -503,6 +489,20 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 return "Corrupted auction state: next bid sequence is stale."
         return ""
 
+    def _committed_state_error(self, auction: pb2.Auction) -> str:
+        state_error = self._acceptance_order_state_error(auction)
+        if state_error:
+            return state_error
+        if auction.state != pb2.AUCTION_STATE_REVEALED:
+            if auction.HasField("result"):
+                return "An open auction cannot have a committed result."
+            return ""
+        if not auction.HasField("result"):
+            return "A revealed auction must have a committed result."
+        if auction.result != self._build_auction_result(auction):
+            return "A revealed auction result does not match its committed bids."
+        return ""
+
     def _auction_has_ended(self, auction: pb2.Auction) -> bool:
         if not auction.HasField("ends_at"):
             return False
@@ -511,9 +511,13 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
 
     def GetAuction(self, request: pb2.GetAuctionRequest, context) -> pb2.GetStoredAuctionResponse:
         with self.state_lock:
+            if self.replica_role != "primary":
+                return pb2.GetStoredAuctionResponse(
+                    ok=False,
+                    message="Authoritative auction reads require the primary replica.",
+                )
             auction = self.auction_store.get(request.auction_id)
             if auction:
-                auction = self._auto_reveal_if_due(auction)
                 return pb2.GetStoredAuctionResponse(ok=True, auction=auction)
             return pb2.GetStoredAuctionResponse(ok=False, message="Auction not found")
 
@@ -521,10 +525,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
         with self.state_lock:
             query = request.query.strip().lower()
             category = request.category.strip().lower()
-            auctions = [
-                self._auto_reveal_if_due(auction)
-                for auction in list(self.auction_store.values())
-            ]
+            auctions = list(self.auction_store.values())
             matches = [
                 auction for auction in auctions
                 if (not query or query in auction.auction_id.lower()
@@ -571,7 +572,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
 
     def ReplicateAuction(self, request, context):
         with self.state_lock:
-            state_error = self._acceptance_order_state_error(request.auction)
+            state_error = self._committed_state_error(request.auction)
             if state_error:
                 return pb2.ReplicationResponse(
                     success=False,
@@ -617,7 +618,8 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 stub = pb2_grpc.StorageReplicaServiceStub(ch)
                 resp = stub.SyncFullState(pb2.StateRequest(), timeout=10.0)
                 for auction in resp.auctions:
-                    self.auction_store[auction.auction_id] = auction
+                    if not self._committed_state_error(auction):
+                        self.auction_store[auction.auction_id] = auction
                 self.idempotency_records = {
                     record.request_id: record
                     for record in resp.idempotency_records
@@ -636,7 +638,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             self.auction_store = {
                 auction.auction_id: auction
                 for auction in snapshot.auctions
-                if not self._acceptance_order_state_error(auction)
+                if not self._committed_state_error(auction)
             }
             self.idempotency_records = {
                 record.request_id: record

@@ -35,6 +35,7 @@ class BackendLifecycleTests(BackendTestCase):
                 ), timeout=5)
                 post_bid_status = stub.GetAuction(pb2.GetAuctionRequest(
                     auction_id=auction_id,
+                    bidder_id="buyer-a",
                 ), timeout=5)
                 gavel = stub.RevealAuction(pb2.RevealAuctionRequest(
                     auction_id=auction_id,
@@ -50,6 +51,9 @@ class BackendLifecycleTests(BackendTestCase):
         self.assertEqual(hidden_status.auction.bidder_count, 1)
         self.assertTrue(bid.success)
         self.assertEqual(post_bid_status.auction.bidder_count, 2)
+        self.assertTrue(post_bid_status.HasField("own_active_bid_amount"))
+        self.assertEqual(post_bid_status.own_active_bid_amount, 750.0)
+        self.assertFalse(hidden_status.HasField("own_active_bid_amount"))
         self.assertTrue(gavel.ok)
         self.assertTrue(revealed_status.ok)
         self.assertEqual(
@@ -57,6 +61,16 @@ class BackendLifecycleTests(BackendTestCase):
             pb2.AUCTION_STATE_REVEALED,
         )
         self.assertEqual(revealed_status.auction.bidder_count, 2)
+        self.assertTrue(revealed_status.auction.HasField("result"))
+        self.assertEqual(
+            revealed_status.auction.result.outcome,
+            pb2.AUCTION_OUTCOME_SUCCESSFUL_SALE,
+        )
+        self.assertEqual(
+            revealed_status.auction.result.winning_bidder_id,
+            "buyer-a",
+        )
+        self.assertEqual(revealed_status.auction.result.winning_amount, 750.0)
         public_fields = {field.name for field in revealed_status.auction.DESCRIPTOR.fields}
         self.assertNotIn("bids", public_fields)
         self.assertNotIn("reserve_price", public_fields)
