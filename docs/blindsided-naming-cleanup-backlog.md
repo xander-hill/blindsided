@@ -110,7 +110,6 @@ Current Recommended
 
 `CommitToVault` `ApplyAuctionMutation` _(attempted)_
 `QueryVault` `GetAuction` / `SearchAuctions` _(attempted split)_
-`ReplicateSecret` `ReplicateAuction`
 `_sync_vault` `_synchronize_from_primary`
 
 ### Variables

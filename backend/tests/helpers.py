@@ -1,6 +1,7 @@
 import os
 import socket
 import unittest
+from itertools import count
 from concurrent import futures
 from contextlib import ExitStack, contextmanager
 from unittest import mock
@@ -50,16 +51,53 @@ def make_judge(
     peers: list[str] | None = None,
     address: str = "storage-0.storage-service:50051",
     state_file_path: str = "",
+    synchronous_backup_address: str = "",
+    use_test_coordinator: bool = True,
 ) -> StorageReplicaService:
     judge = StorageReplicaService.__new__(StorageReplicaService)
     judge.state_lock = storage_service_module.threading.Condition()
     judge.auction_store = {}
     judge.idempotency_records = {}
+    judge.prepared_mutations = {}
+    judge.aborted_mutations = {}
+    judge.pending_backup_commits = {}
     judge.port = address.rsplit(":", 1)[-1]
     judge.replica_role = role
     judge.peer_addresses = peers or []
+    judge.synchronous_backup_address = synchronous_backup_address
     judge.node_address = address
     judge.state_file_path = state_file_path
+    request_sequence = count(1)
+    production_apply = judge.ApplyAuctionMutation
+
+    def apply_with_request_id(request, context):
+        if not request.request_id:
+            request_copy = pb2.AuctionMutationRequest()
+            request_copy.CopyFrom(request)
+            request_copy.request_id = f"test-request-{next(request_sequence)}"
+            request = request_copy
+        return production_apply(request, context)
+
+    judge.ApplyAuctionMutation = apply_with_request_id
+
+    if use_test_coordinator:
+        def successful_coordinator(
+            request_id,
+            candidate_auction,
+            idempotency_record,
+            success_response,
+            previous_version,
+        ):
+            committed_auction = pb2.Auction()
+            committed_auction.CopyFrom(candidate_auction)
+            committed_record = pb2.IdempotencyRecord()
+            committed_record.CopyFrom(idempotency_record)
+            judge.auction_store[candidate_auction.auction_id] = committed_auction
+            judge.idempotency_records[request_id] = committed_record
+            judge._persist_state_to_disk()
+            return success_response
+
+        judge._coordinate_synchronous_commit = successful_coordinator
     return judge
 
 
@@ -109,6 +147,24 @@ def running_backend_stack():
         ))
 
         storage_node = StorageReplicaService()
+
+        def successful_stack_coordinator(
+            request_id,
+            candidate_auction,
+            idempotency_record,
+            success_response,
+            previous_version,
+        ):
+            committed_auction = pb2.Auction()
+            committed_auction.CopyFrom(candidate_auction)
+            committed_record = pb2.IdempotencyRecord()
+            committed_record.CopyFrom(idempotency_record)
+            storage_node.auction_store[candidate_auction.auction_id] = committed_auction
+            storage_node.idempotency_records[request_id] = committed_record
+            storage_node._persist_state_to_disk()
+            return success_response
+
+        storage_node._coordinate_synchronous_commit = successful_stack_coordinator
         storage_server = grpc.server(futures.ThreadPoolExecutor(max_workers=40))
         pb2_grpc.add_StorageReplicaServiceServicer_to_server(storage_node, storage_server)
         storage_server.add_insecure_port(storage_addr)
