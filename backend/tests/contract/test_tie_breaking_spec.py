@@ -178,10 +178,7 @@ class TieBreakingSpecificationTests(BackendTestCase):
             },
         )
 
-        replication = backup.ReplicateAuction(
-            pb2.ReplicationRequest(auction=auction),
-            NoopContext(),
-        )
+        backup.auction_store[auction.auction_id] = auction
         promotion = backup.PromoteToPrimary(
             pb2.PromotionRequest(new_role="primary"),
             NoopContext(),
@@ -207,7 +204,6 @@ class TieBreakingSpecificationTests(BackendTestCase):
         )
         result = backup.auction_store["tie-failover-stability"].result
 
-        self.assertTrue(replication.success)
         self.assertTrue(promotion.success)
         self.assertTrue(bid_after_failover.success)
         self.assertTrue(reveal.success)

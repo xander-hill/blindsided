@@ -39,6 +39,7 @@ class MutationFailureReason(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     MUTATION_FAILURE_REASON_CONCURRENCY_CONFLICT: _ClassVar[MutationFailureReason]
     MUTATION_FAILURE_REASON_REPLICATION_FAILED: _ClassVar[MutationFailureReason]
     MUTATION_FAILURE_REASON_IDEMPOTENCY_CONFLICT: _ClassVar[MutationFailureReason]
+    MUTATION_FAILURE_REASON_ACKNOWLEDGEMENT_PENDING: _ClassVar[MutationFailureReason]
 AUCTION_STATE_UNSPECIFIED: AuctionState
 AUCTION_STATE_OPEN: AuctionState
 AUCTION_STATE_REVEALED: AuctionState
@@ -57,6 +58,7 @@ MUTATION_FAILURE_REASON_INVALID_STATE: MutationFailureReason
 MUTATION_FAILURE_REASON_CONCURRENCY_CONFLICT: MutationFailureReason
 MUTATION_FAILURE_REASON_REPLICATION_FAILED: MutationFailureReason
 MUTATION_FAILURE_REASON_IDEMPOTENCY_CONFLICT: MutationFailureReason
+MUTATION_FAILURE_REASON_ACKNOWLEDGEMENT_PENDING: MutationFailureReason
 
 class Auction(_message.Message):
     __slots__ = ("auction_id", "seller_id", "title", "category", "description", "reserve_price", "bids", "state", "version", "ends_at", "next_bid_sequence", "result")
@@ -355,26 +357,6 @@ class StateResponse(_message.Message):
     idempotency_records: _containers.RepeatedCompositeFieldContainer[IdempotencyRecord]
     def __init__(self, ok: bool = ..., auctions: _Optional[_Iterable[_Union[Auction, _Mapping]]] = ..., message: _Optional[str] = ..., idempotency_records: _Optional[_Iterable[_Union[IdempotencyRecord, _Mapping]]] = ...) -> None: ...
 
-class ReplicationRequest(_message.Message):
-    __slots__ = ("auction", "primary_id", "idempotency_record")
-    AUCTION_FIELD_NUMBER: _ClassVar[int]
-    PRIMARY_ID_FIELD_NUMBER: _ClassVar[int]
-    IDEMPOTENCY_RECORD_FIELD_NUMBER: _ClassVar[int]
-    auction: Auction
-    primary_id: str
-    idempotency_record: IdempotencyRecord
-    def __init__(self, auction: _Optional[_Union[Auction, _Mapping]] = ..., primary_id: _Optional[str] = ..., idempotency_record: _Optional[_Union[IdempotencyRecord, _Mapping]] = ...) -> None: ...
-
-class ReplicationResponse(_message.Message):
-    __slots__ = ("success", "ack_version", "message")
-    SUCCESS_FIELD_NUMBER: _ClassVar[int]
-    ACK_VERSION_FIELD_NUMBER: _ClassVar[int]
-    MESSAGE_FIELD_NUMBER: _ClassVar[int]
-    success: bool
-    ack_version: int
-    message: str
-    def __init__(self, success: bool = ..., ack_version: _Optional[int] = ..., message: _Optional[str] = ...) -> None: ...
-
 class HealthCheckRequest(_message.Message):
     __slots__ = ("request_source",)
     REQUEST_SOURCE_FIELD_NUMBER: _ClassVar[int]
@@ -468,3 +450,77 @@ class IdempotencyRecord(_message.Message):
     request_fingerprint: bytes
     response: AuctionMutationResponse
     def __init__(self, request_id: _Optional[str] = ..., request_fingerprint: _Optional[bytes] = ..., response: _Optional[_Union[AuctionMutationResponse, _Mapping]] = ...) -> None: ...
+
+class PrepareMutationRequest(_message.Message):
+    __slots__ = ("request_id", "candidate_auction", "idempotency_record", "primary_id")
+    REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
+    CANDIDATE_AUCTION_FIELD_NUMBER: _ClassVar[int]
+    IDEMPOTENCY_RECORD_FIELD_NUMBER: _ClassVar[int]
+    PRIMARY_ID_FIELD_NUMBER: _ClassVar[int]
+    request_id: str
+    candidate_auction: Auction
+    idempotency_record: IdempotencyRecord
+    primary_id: str
+    def __init__(self, request_id: _Optional[str] = ..., candidate_auction: _Optional[_Union[Auction, _Mapping]] = ..., idempotency_record: _Optional[_Union[IdempotencyRecord, _Mapping]] = ..., primary_id: _Optional[str] = ...) -> None: ...
+
+class PrepareMutationResponse(_message.Message):
+    __slots__ = ("success", "prepared_version", "message")
+    SUCCESS_FIELD_NUMBER: _ClassVar[int]
+    PREPARED_VERSION_FIELD_NUMBER: _ClassVar[int]
+    MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    success: bool
+    prepared_version: int
+    message: str
+    def __init__(self, success: bool = ..., prepared_version: _Optional[int] = ..., message: _Optional[str] = ...) -> None: ...
+
+class MutationDecisionRequest(_message.Message):
+    __slots__ = ("request_id", "auction_id", "primary_id")
+    REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
+    AUCTION_ID_FIELD_NUMBER: _ClassVar[int]
+    PRIMARY_ID_FIELD_NUMBER: _ClassVar[int]
+    request_id: str
+    auction_id: str
+    primary_id: str
+    def __init__(self, request_id: _Optional[str] = ..., auction_id: _Optional[str] = ..., primary_id: _Optional[str] = ...) -> None: ...
+
+class MutationDecisionResponse(_message.Message):
+    __slots__ = ("success", "committed_version", "message")
+    SUCCESS_FIELD_NUMBER: _ClassVar[int]
+    COMMITTED_VERSION_FIELD_NUMBER: _ClassVar[int]
+    MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    success: bool
+    committed_version: int
+    message: str
+    def __init__(self, success: bool = ..., committed_version: _Optional[int] = ..., message: _Optional[str] = ...) -> None: ...
+
+class StorageSnapshot(_message.Message):
+    __slots__ = ("ok", "auctions", "message", "idempotency_records", "prepared_mutations", "aborted_mutations", "pending_backup_commits")
+    OK_FIELD_NUMBER: _ClassVar[int]
+    AUCTIONS_FIELD_NUMBER: _ClassVar[int]
+    MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    IDEMPOTENCY_RECORDS_FIELD_NUMBER: _ClassVar[int]
+    PREPARED_MUTATIONS_FIELD_NUMBER: _ClassVar[int]
+    ABORTED_MUTATIONS_FIELD_NUMBER: _ClassVar[int]
+    PENDING_BACKUP_COMMITS_FIELD_NUMBER: _ClassVar[int]
+    ok: bool
+    auctions: _containers.RepeatedCompositeFieldContainer[Auction]
+    message: str
+    idempotency_records: _containers.RepeatedCompositeFieldContainer[IdempotencyRecord]
+    prepared_mutations: _containers.RepeatedCompositeFieldContainer[PrepareMutationRequest]
+    aborted_mutations: _containers.RepeatedCompositeFieldContainer[MutationDecisionRequest]
+    pending_backup_commits: _containers.RepeatedCompositeFieldContainer[CommitDecision]
+    def __init__(self, ok: bool = ..., auctions: _Optional[_Iterable[_Union[Auction, _Mapping]]] = ..., message: _Optional[str] = ..., idempotency_records: _Optional[_Iterable[_Union[IdempotencyRecord, _Mapping]]] = ..., prepared_mutations: _Optional[_Iterable[_Union[PrepareMutationRequest, _Mapping]]] = ..., aborted_mutations: _Optional[_Iterable[_Union[MutationDecisionRequest, _Mapping]]] = ..., pending_backup_commits: _Optional[_Iterable[_Union[CommitDecision, _Mapping]]] = ...) -> None: ...
+
+class CommitDecision(_message.Message):
+    __slots__ = ("request_id", "auction", "idempotency_record", "primary_id", "backup_address")
+    REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
+    AUCTION_FIELD_NUMBER: _ClassVar[int]
+    IDEMPOTENCY_RECORD_FIELD_NUMBER: _ClassVar[int]
+    PRIMARY_ID_FIELD_NUMBER: _ClassVar[int]
+    BACKUP_ADDRESS_FIELD_NUMBER: _ClassVar[int]
+    request_id: str
+    auction: Auction
+    idempotency_record: IdempotencyRecord
+    primary_id: str
+    backup_address: str
+    def __init__(self, request_id: _Optional[str] = ..., auction: _Optional[_Union[Auction, _Mapping]] = ..., idempotency_record: _Optional[_Union[IdempotencyRecord, _Mapping]] = ..., primary_id: _Optional[str] = ..., backup_address: _Optional[str] = ...) -> None: ...

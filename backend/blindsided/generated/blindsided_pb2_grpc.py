@@ -384,11 +384,6 @@ class StorageReplicaServiceStub(object):
                 request_serializer=blindsided__pb2.StateRequest.SerializeToString,
                 response_deserializer=blindsided__pb2.StateResponse.FromString,
                 _registered_method=True)
-        self.ReplicateAuction = channel.unary_unary(
-                '/blindsided.StorageReplicaService/ReplicateAuction',
-                request_serializer=blindsided__pb2.ReplicationRequest.SerializeToString,
-                response_deserializer=blindsided__pb2.ReplicationResponse.FromString,
-                _registered_method=True)
         self.Heartbeat = channel.unary_unary(
                 '/blindsided.StorageReplicaService/Heartbeat',
                 request_serializer=blindsided__pb2.HealthCheckRequest.SerializeToString,
@@ -398,6 +393,21 @@ class StorageReplicaServiceStub(object):
                 '/blindsided.StorageReplicaService/PromoteToPrimary',
                 request_serializer=blindsided__pb2.PromotionRequest.SerializeToString,
                 response_deserializer=blindsided__pb2.PromotionResponse.FromString,
+                _registered_method=True)
+        self.PrepareAuctionMutation = channel.unary_unary(
+                '/blindsided.StorageReplicaService/PrepareAuctionMutation',
+                request_serializer=blindsided__pb2.PrepareMutationRequest.SerializeToString,
+                response_deserializer=blindsided__pb2.PrepareMutationResponse.FromString,
+                _registered_method=True)
+        self.CommitPreparedMutation = channel.unary_unary(
+                '/blindsided.StorageReplicaService/CommitPreparedMutation',
+                request_serializer=blindsided__pb2.MutationDecisionRequest.SerializeToString,
+                response_deserializer=blindsided__pb2.MutationDecisionResponse.FromString,
+                _registered_method=True)
+        self.AbortPreparedMutation = channel.unary_unary(
+                '/blindsided.StorageReplicaService/AbortPreparedMutation',
+                request_serializer=blindsided__pb2.MutationDecisionRequest.SerializeToString,
+                response_deserializer=blindsided__pb2.MutationDecisionResponse.FromString,
                 _registered_method=True)
 
 
@@ -428,12 +438,6 @@ class StorageReplicaServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def ReplicateAuction(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
     def Heartbeat(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -441,6 +445,24 @@ class StorageReplicaServiceServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def PromoteToPrimary(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def PrepareAuctionMutation(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def CommitPreparedMutation(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def AbortPreparedMutation(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -469,11 +491,6 @@ def add_StorageReplicaServiceServicer_to_server(servicer, server):
                     request_deserializer=blindsided__pb2.StateRequest.FromString,
                     response_serializer=blindsided__pb2.StateResponse.SerializeToString,
             ),
-            'ReplicateAuction': grpc.unary_unary_rpc_method_handler(
-                    servicer.ReplicateAuction,
-                    request_deserializer=blindsided__pb2.ReplicationRequest.FromString,
-                    response_serializer=blindsided__pb2.ReplicationResponse.SerializeToString,
-            ),
             'Heartbeat': grpc.unary_unary_rpc_method_handler(
                     servicer.Heartbeat,
                     request_deserializer=blindsided__pb2.HealthCheckRequest.FromString,
@@ -483,6 +500,21 @@ def add_StorageReplicaServiceServicer_to_server(servicer, server):
                     servicer.PromoteToPrimary,
                     request_deserializer=blindsided__pb2.PromotionRequest.FromString,
                     response_serializer=blindsided__pb2.PromotionResponse.SerializeToString,
+            ),
+            'PrepareAuctionMutation': grpc.unary_unary_rpc_method_handler(
+                    servicer.PrepareAuctionMutation,
+                    request_deserializer=blindsided__pb2.PrepareMutationRequest.FromString,
+                    response_serializer=blindsided__pb2.PrepareMutationResponse.SerializeToString,
+            ),
+            'CommitPreparedMutation': grpc.unary_unary_rpc_method_handler(
+                    servicer.CommitPreparedMutation,
+                    request_deserializer=blindsided__pb2.MutationDecisionRequest.FromString,
+                    response_serializer=blindsided__pb2.MutationDecisionResponse.SerializeToString,
+            ),
+            'AbortPreparedMutation': grpc.unary_unary_rpc_method_handler(
+                    servicer.AbortPreparedMutation,
+                    request_deserializer=blindsided__pb2.MutationDecisionRequest.FromString,
+                    response_serializer=blindsided__pb2.MutationDecisionResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -604,33 +636,6 @@ class StorageReplicaService(object):
             _registered_method=True)
 
     @staticmethod
-    def ReplicateAuction(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/blindsided.StorageReplicaService/ReplicateAuction',
-            blindsided__pb2.ReplicationRequest.SerializeToString,
-            blindsided__pb2.ReplicationResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
     def Heartbeat(request,
             target,
             options=(),
@@ -674,6 +679,87 @@ class StorageReplicaService(object):
             '/blindsided.StorageReplicaService/PromoteToPrimary',
             blindsided__pb2.PromotionRequest.SerializeToString,
             blindsided__pb2.PromotionResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def PrepareAuctionMutation(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/blindsided.StorageReplicaService/PrepareAuctionMutation',
+            blindsided__pb2.PrepareMutationRequest.SerializeToString,
+            blindsided__pb2.PrepareMutationResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def CommitPreparedMutation(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/blindsided.StorageReplicaService/CommitPreparedMutation',
+            blindsided__pb2.MutationDecisionRequest.SerializeToString,
+            blindsided__pb2.MutationDecisionResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def AbortPreparedMutation(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/blindsided.StorageReplicaService/AbortPreparedMutation',
+            blindsided__pb2.MutationDecisionRequest.SerializeToString,
+            blindsided__pb2.MutationDecisionResponse.FromString,
             options,
             channel_credentials,
             insecure,

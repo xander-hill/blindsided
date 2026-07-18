@@ -32,6 +32,7 @@ enum MutationFailureReason {
     MUTATION_FAILURE_REASON_CONCURRENCY_CONFLICT = 3;
     MUTATION_FAILURE_REASON_REPLICATION_FAILED = 4;
     MUTATION_FAILURE_REASON_IDEMPOTENCY_CONFLICT = 5;
+    MUTATION_FAILURE_REASON_ACKNOWLEDGEMENT_PENDING = 6;
 }
 
 message Auction {
@@ -84,9 +85,11 @@ service StorageReplicaService {
     rpc GetAuction (GetAuctionRequest) returns (GetStoredAuctionResponse);
     rpc SearchAuctions (SearchAuctionsRequest) returns (GetStoredAuctionsResponse);
     rpc SyncFullState (StateRequest) returns (StateResponse);
-    rpc ReplicateAuction (ReplicationRequest) returns (ReplicationResponse);
     rpc Heartbeat (HealthCheckRequest) returns (HealthCheckResponse);
     rpc PromoteToPrimary (PromotionRequest) returns (PromotionResponse);
+    rpc PrepareAuctionMutation (PrepareMutationRequest) returns (PrepareMutationResponse);
+    rpc CommitPreparedMutation (MutationDecisionRequest) returns (MutationDecisionResponse);
+    rpc AbortPreparedMutation (MutationDecisionRequest) returns (MutationDecisionResponse);
 }
 
 service ClusterController {
@@ -202,8 +205,6 @@ message AuctionMutationResponse {
 message StateRequest { string requester_id = 1; }
 message StateResponse { bool ok = 1; repeated Auction auctions = 2; string message = 3; repeated IdempotencyRecord idempotency_records = 4; }
 
-message ReplicationRequest { Auction auction = 1; string primary_id = 2; optional IdempotencyRecord idempotency_record = 3; }
-message ReplicationResponse { bool success = 1; int32 ack_version = 2; string message = 3; }
 
 message HealthCheckRequest { string request_source = 1; }
 message HealthCheckResponse { bool alive = 1; string role = 2; string message = 3; }
@@ -229,4 +230,47 @@ message IdempotencyRecord {
     string request_id = 1;
     bytes request_fingerprint = 2;
     AuctionMutationResponse response = 3;
+}
+
+message PrepareMutationRequest {
+    string request_id = 1;
+    Auction candidate_auction = 2;
+    IdempotencyRecord idempotency_record = 3;
+    string primary_id = 4;
+}
+
+message PrepareMutationResponse {
+    bool success = 1;
+    int32 prepared_version = 2;
+    string message = 3;
+}
+
+message MutationDecisionRequest {
+    string request_id = 1;
+    string auction_id = 2;
+    string primary_id = 3;
+}
+
+message MutationDecisionResponse {
+    bool success = 1;
+    int32 committed_version = 2;
+    string message = 3;
+}
+
+message StorageSnapshot {
+    bool ok = 1;
+    repeated Auction auctions = 2;
+    string message = 3;
+    repeated IdempotencyRecord idempotency_records = 4;
+    repeated PrepareMutationRequest prepared_mutations = 5;
+    repeated MutationDecisionRequest aborted_mutations = 6;
+    repeated CommitDecision pending_backup_commits = 7;
+}
+
+message CommitDecision {
+    string request_id = 1;
+    Auction auction = 2;
+    IdempotencyRecord idempotency_record = 3;
+    string primary_id = 4;
+    string backup_address = 5;
 }

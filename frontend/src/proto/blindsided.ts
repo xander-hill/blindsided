@@ -528,40 +528,6 @@ export interface StateResponse {
     idempotencyRecords: IdempotencyRecord[];
 }
 /**
- * @generated from protobuf message blindsided.ReplicationRequest
- */
-export interface ReplicationRequest {
-    /**
-     * @generated from protobuf field: blindsided.Auction auction = 1
-     */
-    auction?: Auction;
-    /**
-     * @generated from protobuf field: string primary_id = 2
-     */
-    primaryId: string;
-    /**
-     * @generated from protobuf field: optional blindsided.IdempotencyRecord idempotency_record = 3
-     */
-    idempotencyRecord?: IdempotencyRecord;
-}
-/**
- * @generated from protobuf message blindsided.ReplicationResponse
- */
-export interface ReplicationResponse {
-    /**
-     * @generated from protobuf field: bool success = 1
-     */
-    success: boolean;
-    /**
-     * @generated from protobuf field: int32 ack_version = 2
-     */
-    ackVersion: number;
-    /**
-     * @generated from protobuf field: string message = 3
-     */
-    message: string;
-}
-/**
  * @generated from protobuf message blindsided.HealthCheckRequest
  */
 export interface HealthCheckRequest {
@@ -714,6 +680,136 @@ export interface IdempotencyRecord {
     response?: AuctionMutationResponse;
 }
 /**
+ * @generated from protobuf message blindsided.PrepareMutationRequest
+ */
+export interface PrepareMutationRequest {
+    /**
+     * @generated from protobuf field: string request_id = 1
+     */
+    requestId: string;
+    /**
+     * @generated from protobuf field: blindsided.Auction candidate_auction = 2
+     */
+    candidateAuction?: Auction;
+    /**
+     * @generated from protobuf field: blindsided.IdempotencyRecord idempotency_record = 3
+     */
+    idempotencyRecord?: IdempotencyRecord;
+    /**
+     * @generated from protobuf field: string primary_id = 4
+     */
+    primaryId: string;
+}
+/**
+ * @generated from protobuf message blindsided.PrepareMutationResponse
+ */
+export interface PrepareMutationResponse {
+    /**
+     * @generated from protobuf field: bool success = 1
+     */
+    success: boolean;
+    /**
+     * @generated from protobuf field: int32 prepared_version = 2
+     */
+    preparedVersion: number;
+    /**
+     * @generated from protobuf field: string message = 3
+     */
+    message: string;
+}
+/**
+ * @generated from protobuf message blindsided.MutationDecisionRequest
+ */
+export interface MutationDecisionRequest {
+    /**
+     * @generated from protobuf field: string request_id = 1
+     */
+    requestId: string;
+    /**
+     * @generated from protobuf field: string auction_id = 2
+     */
+    auctionId: string;
+    /**
+     * @generated from protobuf field: string primary_id = 3
+     */
+    primaryId: string;
+}
+/**
+ * @generated from protobuf message blindsided.MutationDecisionResponse
+ */
+export interface MutationDecisionResponse {
+    /**
+     * @generated from protobuf field: bool success = 1
+     */
+    success: boolean;
+    /**
+     * @generated from protobuf field: int32 committed_version = 2
+     */
+    committedVersion: number;
+    /**
+     * @generated from protobuf field: string message = 3
+     */
+    message: string;
+}
+/**
+ * @generated from protobuf message blindsided.StorageSnapshot
+ */
+export interface StorageSnapshot {
+    /**
+     * @generated from protobuf field: bool ok = 1
+     */
+    ok: boolean;
+    /**
+     * @generated from protobuf field: repeated blindsided.Auction auctions = 2
+     */
+    auctions: Auction[];
+    /**
+     * @generated from protobuf field: string message = 3
+     */
+    message: string;
+    /**
+     * @generated from protobuf field: repeated blindsided.IdempotencyRecord idempotency_records = 4
+     */
+    idempotencyRecords: IdempotencyRecord[];
+    /**
+     * @generated from protobuf field: repeated blindsided.PrepareMutationRequest prepared_mutations = 5
+     */
+    preparedMutations: PrepareMutationRequest[];
+    /**
+     * @generated from protobuf field: repeated blindsided.MutationDecisionRequest aborted_mutations = 6
+     */
+    abortedMutations: MutationDecisionRequest[];
+    /**
+     * @generated from protobuf field: repeated blindsided.CommitDecision pending_backup_commits = 7
+     */
+    pendingBackupCommits: CommitDecision[];
+}
+/**
+ * @generated from protobuf message blindsided.CommitDecision
+ */
+export interface CommitDecision {
+    /**
+     * @generated from protobuf field: string request_id = 1
+     */
+    requestId: string;
+    /**
+     * @generated from protobuf field: blindsided.Auction auction = 2
+     */
+    auction?: Auction;
+    /**
+     * @generated from protobuf field: blindsided.IdempotencyRecord idempotency_record = 3
+     */
+    idempotencyRecord?: IdempotencyRecord;
+    /**
+     * @generated from protobuf field: string primary_id = 4
+     */
+    primaryId: string;
+    /**
+     * @generated from protobuf field: string backup_address = 5
+     */
+    backupAddress: string;
+}
+/**
  * @generated from protobuf enum blindsided.AuctionState
  */
 export enum AuctionState {
@@ -803,7 +899,11 @@ export enum MutationFailureReason {
     /**
      * @generated from protobuf enum value: MUTATION_FAILURE_REASON_IDEMPOTENCY_CONFLICT = 5;
      */
-    IDEMPOTENCY_CONFLICT = 5
+    IDEMPOTENCY_CONFLICT = 5,
+    /**
+     * @generated from protobuf enum value: MUTATION_FAILURE_REASON_ACKNOWLEDGEMENT_PENDING = 6;
+     */
+    ACKNOWLEDGEMENT_PENDING = 6
 }
 // @generated message type with reflection information, may provide speed optimized methods
 class Auction$Type extends MessageType<Auction> {
@@ -2502,130 +2602,6 @@ class StateResponse$Type extends MessageType<StateResponse> {
  */
 export const StateResponse = new StateResponse$Type();
 // @generated message type with reflection information, may provide speed optimized methods
-class ReplicationRequest$Type extends MessageType<ReplicationRequest> {
-    constructor() {
-        super("blindsided.ReplicationRequest", [
-            { no: 1, name: "auction", kind: "message", T: () => Auction },
-            { no: 2, name: "primary_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 3, name: "idempotency_record", kind: "message", T: () => IdempotencyRecord }
-        ]);
-    }
-    create(value?: PartialMessage<ReplicationRequest>): ReplicationRequest {
-        const message = globalThis.Object.create((this.messagePrototype!));
-        message.primaryId = "";
-        if (value !== undefined)
-            reflectionMergePartial<ReplicationRequest>(this, message, value);
-        return message;
-    }
-    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ReplicationRequest): ReplicationRequest {
-        let message = target ?? this.create(), end = reader.pos + length;
-        while (reader.pos < end) {
-            let [fieldNo, wireType] = reader.tag();
-            switch (fieldNo) {
-                case /* blindsided.Auction auction */ 1:
-                    message.auction = Auction.internalBinaryRead(reader, reader.uint32(), options, message.auction);
-                    break;
-                case /* string primary_id */ 2:
-                    message.primaryId = reader.string();
-                    break;
-                case /* optional blindsided.IdempotencyRecord idempotency_record */ 3:
-                    message.idempotencyRecord = IdempotencyRecord.internalBinaryRead(reader, reader.uint32(), options, message.idempotencyRecord);
-                    break;
-                default:
-                    let u = options.readUnknownField;
-                    if (u === "throw")
-                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
-                    let d = reader.skip(wireType);
-                    if (u !== false)
-                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
-            }
-        }
-        return message;
-    }
-    internalBinaryWrite(message: ReplicationRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
-        /* blindsided.Auction auction = 1; */
-        if (message.auction)
-            Auction.internalBinaryWrite(message.auction, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
-        /* string primary_id = 2; */
-        if (message.primaryId !== "")
-            writer.tag(2, WireType.LengthDelimited).string(message.primaryId);
-        /* optional blindsided.IdempotencyRecord idempotency_record = 3; */
-        if (message.idempotencyRecord)
-            IdempotencyRecord.internalBinaryWrite(message.idempotencyRecord, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
-        let u = options.writeUnknownFields;
-        if (u !== false)
-            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
-        return writer;
-    }
-}
-/**
- * @generated MessageType for protobuf message blindsided.ReplicationRequest
- */
-export const ReplicationRequest = new ReplicationRequest$Type();
-// @generated message type with reflection information, may provide speed optimized methods
-class ReplicationResponse$Type extends MessageType<ReplicationResponse> {
-    constructor() {
-        super("blindsided.ReplicationResponse", [
-            { no: 1, name: "success", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
-            { no: 2, name: "ack_version", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
-            { no: 3, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
-        ]);
-    }
-    create(value?: PartialMessage<ReplicationResponse>): ReplicationResponse {
-        const message = globalThis.Object.create((this.messagePrototype!));
-        message.success = false;
-        message.ackVersion = 0;
-        message.message = "";
-        if (value !== undefined)
-            reflectionMergePartial<ReplicationResponse>(this, message, value);
-        return message;
-    }
-    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ReplicationResponse): ReplicationResponse {
-        let message = target ?? this.create(), end = reader.pos + length;
-        while (reader.pos < end) {
-            let [fieldNo, wireType] = reader.tag();
-            switch (fieldNo) {
-                case /* bool success */ 1:
-                    message.success = reader.bool();
-                    break;
-                case /* int32 ack_version */ 2:
-                    message.ackVersion = reader.int32();
-                    break;
-                case /* string message */ 3:
-                    message.message = reader.string();
-                    break;
-                default:
-                    let u = options.readUnknownField;
-                    if (u === "throw")
-                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
-                    let d = reader.skip(wireType);
-                    if (u !== false)
-                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
-            }
-        }
-        return message;
-    }
-    internalBinaryWrite(message: ReplicationResponse, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
-        /* bool success = 1; */
-        if (message.success !== false)
-            writer.tag(1, WireType.Varint).bool(message.success);
-        /* int32 ack_version = 2; */
-        if (message.ackVersion !== 0)
-            writer.tag(2, WireType.Varint).int32(message.ackVersion);
-        /* string message = 3; */
-        if (message.message !== "")
-            writer.tag(3, WireType.LengthDelimited).string(message.message);
-        let u = options.writeUnknownFields;
-        if (u !== false)
-            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
-        return writer;
-    }
-}
-/**
- * @generated MessageType for protobuf message blindsided.ReplicationResponse
- */
-export const ReplicationResponse = new ReplicationResponse$Type();
-// @generated message type with reflection information, may provide speed optimized methods
 class HealthCheckRequest$Type extends MessageType<HealthCheckRequest> {
     constructor() {
         super("blindsided.HealthCheckRequest", [
@@ -3275,6 +3251,436 @@ class IdempotencyRecord$Type extends MessageType<IdempotencyRecord> {
  * @generated MessageType for protobuf message blindsided.IdempotencyRecord
  */
 export const IdempotencyRecord = new IdempotencyRecord$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class PrepareMutationRequest$Type extends MessageType<PrepareMutationRequest> {
+    constructor() {
+        super("blindsided.PrepareMutationRequest", [
+            { no: 1, name: "request_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "candidate_auction", kind: "message", T: () => Auction },
+            { no: 3, name: "idempotency_record", kind: "message", T: () => IdempotencyRecord },
+            { no: 4, name: "primary_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<PrepareMutationRequest>): PrepareMutationRequest {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.requestId = "";
+        message.primaryId = "";
+        if (value !== undefined)
+            reflectionMergePartial<PrepareMutationRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: PrepareMutationRequest): PrepareMutationRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string request_id */ 1:
+                    message.requestId = reader.string();
+                    break;
+                case /* blindsided.Auction candidate_auction */ 2:
+                    message.candidateAuction = Auction.internalBinaryRead(reader, reader.uint32(), options, message.candidateAuction);
+                    break;
+                case /* blindsided.IdempotencyRecord idempotency_record */ 3:
+                    message.idempotencyRecord = IdempotencyRecord.internalBinaryRead(reader, reader.uint32(), options, message.idempotencyRecord);
+                    break;
+                case /* string primary_id */ 4:
+                    message.primaryId = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: PrepareMutationRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string request_id = 1; */
+        if (message.requestId !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.requestId);
+        /* blindsided.Auction candidate_auction = 2; */
+        if (message.candidateAuction)
+            Auction.internalBinaryWrite(message.candidateAuction, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* blindsided.IdempotencyRecord idempotency_record = 3; */
+        if (message.idempotencyRecord)
+            IdempotencyRecord.internalBinaryWrite(message.idempotencyRecord, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* string primary_id = 4; */
+        if (message.primaryId !== "")
+            writer.tag(4, WireType.LengthDelimited).string(message.primaryId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message blindsided.PrepareMutationRequest
+ */
+export const PrepareMutationRequest = new PrepareMutationRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class PrepareMutationResponse$Type extends MessageType<PrepareMutationResponse> {
+    constructor() {
+        super("blindsided.PrepareMutationResponse", [
+            { no: 1, name: "success", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 2, name: "prepared_version", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 3, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<PrepareMutationResponse>): PrepareMutationResponse {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.success = false;
+        message.preparedVersion = 0;
+        message.message = "";
+        if (value !== undefined)
+            reflectionMergePartial<PrepareMutationResponse>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: PrepareMutationResponse): PrepareMutationResponse {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* bool success */ 1:
+                    message.success = reader.bool();
+                    break;
+                case /* int32 prepared_version */ 2:
+                    message.preparedVersion = reader.int32();
+                    break;
+                case /* string message */ 3:
+                    message.message = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: PrepareMutationResponse, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* bool success = 1; */
+        if (message.success !== false)
+            writer.tag(1, WireType.Varint).bool(message.success);
+        /* int32 prepared_version = 2; */
+        if (message.preparedVersion !== 0)
+            writer.tag(2, WireType.Varint).int32(message.preparedVersion);
+        /* string message = 3; */
+        if (message.message !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.message);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message blindsided.PrepareMutationResponse
+ */
+export const PrepareMutationResponse = new PrepareMutationResponse$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class MutationDecisionRequest$Type extends MessageType<MutationDecisionRequest> {
+    constructor() {
+        super("blindsided.MutationDecisionRequest", [
+            { no: 1, name: "request_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "auction_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "primary_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<MutationDecisionRequest>): MutationDecisionRequest {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.requestId = "";
+        message.auctionId = "";
+        message.primaryId = "";
+        if (value !== undefined)
+            reflectionMergePartial<MutationDecisionRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MutationDecisionRequest): MutationDecisionRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string request_id */ 1:
+                    message.requestId = reader.string();
+                    break;
+                case /* string auction_id */ 2:
+                    message.auctionId = reader.string();
+                    break;
+                case /* string primary_id */ 3:
+                    message.primaryId = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MutationDecisionRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string request_id = 1; */
+        if (message.requestId !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.requestId);
+        /* string auction_id = 2; */
+        if (message.auctionId !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.auctionId);
+        /* string primary_id = 3; */
+        if (message.primaryId !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.primaryId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message blindsided.MutationDecisionRequest
+ */
+export const MutationDecisionRequest = new MutationDecisionRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class MutationDecisionResponse$Type extends MessageType<MutationDecisionResponse> {
+    constructor() {
+        super("blindsided.MutationDecisionResponse", [
+            { no: 1, name: "success", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 2, name: "committed_version", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 3, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<MutationDecisionResponse>): MutationDecisionResponse {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.success = false;
+        message.committedVersion = 0;
+        message.message = "";
+        if (value !== undefined)
+            reflectionMergePartial<MutationDecisionResponse>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MutationDecisionResponse): MutationDecisionResponse {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* bool success */ 1:
+                    message.success = reader.bool();
+                    break;
+                case /* int32 committed_version */ 2:
+                    message.committedVersion = reader.int32();
+                    break;
+                case /* string message */ 3:
+                    message.message = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MutationDecisionResponse, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* bool success = 1; */
+        if (message.success !== false)
+            writer.tag(1, WireType.Varint).bool(message.success);
+        /* int32 committed_version = 2; */
+        if (message.committedVersion !== 0)
+            writer.tag(2, WireType.Varint).int32(message.committedVersion);
+        /* string message = 3; */
+        if (message.message !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.message);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message blindsided.MutationDecisionResponse
+ */
+export const MutationDecisionResponse = new MutationDecisionResponse$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class StorageSnapshot$Type extends MessageType<StorageSnapshot> {
+    constructor() {
+        super("blindsided.StorageSnapshot", [
+            { no: 1, name: "ok", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 2, name: "auctions", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => Auction },
+            { no: 3, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "idempotency_records", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => IdempotencyRecord },
+            { no: 5, name: "prepared_mutations", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => PrepareMutationRequest },
+            { no: 6, name: "aborted_mutations", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => MutationDecisionRequest },
+            { no: 7, name: "pending_backup_commits", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => CommitDecision }
+        ]);
+    }
+    create(value?: PartialMessage<StorageSnapshot>): StorageSnapshot {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.ok = false;
+        message.auctions = [];
+        message.message = "";
+        message.idempotencyRecords = [];
+        message.preparedMutations = [];
+        message.abortedMutations = [];
+        message.pendingBackupCommits = [];
+        if (value !== undefined)
+            reflectionMergePartial<StorageSnapshot>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: StorageSnapshot): StorageSnapshot {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* bool ok */ 1:
+                    message.ok = reader.bool();
+                    break;
+                case /* repeated blindsided.Auction auctions */ 2:
+                    message.auctions.push(Auction.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* string message */ 3:
+                    message.message = reader.string();
+                    break;
+                case /* repeated blindsided.IdempotencyRecord idempotency_records */ 4:
+                    message.idempotencyRecords.push(IdempotencyRecord.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* repeated blindsided.PrepareMutationRequest prepared_mutations */ 5:
+                    message.preparedMutations.push(PrepareMutationRequest.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* repeated blindsided.MutationDecisionRequest aborted_mutations */ 6:
+                    message.abortedMutations.push(MutationDecisionRequest.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* repeated blindsided.CommitDecision pending_backup_commits */ 7:
+                    message.pendingBackupCommits.push(CommitDecision.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: StorageSnapshot, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* bool ok = 1; */
+        if (message.ok !== false)
+            writer.tag(1, WireType.Varint).bool(message.ok);
+        /* repeated blindsided.Auction auctions = 2; */
+        for (let i = 0; i < message.auctions.length; i++)
+            Auction.internalBinaryWrite(message.auctions[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* string message = 3; */
+        if (message.message !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.message);
+        /* repeated blindsided.IdempotencyRecord idempotency_records = 4; */
+        for (let i = 0; i < message.idempotencyRecords.length; i++)
+            IdempotencyRecord.internalBinaryWrite(message.idempotencyRecords[i], writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* repeated blindsided.PrepareMutationRequest prepared_mutations = 5; */
+        for (let i = 0; i < message.preparedMutations.length; i++)
+            PrepareMutationRequest.internalBinaryWrite(message.preparedMutations[i], writer.tag(5, WireType.LengthDelimited).fork(), options).join();
+        /* repeated blindsided.MutationDecisionRequest aborted_mutations = 6; */
+        for (let i = 0; i < message.abortedMutations.length; i++)
+            MutationDecisionRequest.internalBinaryWrite(message.abortedMutations[i], writer.tag(6, WireType.LengthDelimited).fork(), options).join();
+        /* repeated blindsided.CommitDecision pending_backup_commits = 7; */
+        for (let i = 0; i < message.pendingBackupCommits.length; i++)
+            CommitDecision.internalBinaryWrite(message.pendingBackupCommits[i], writer.tag(7, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message blindsided.StorageSnapshot
+ */
+export const StorageSnapshot = new StorageSnapshot$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class CommitDecision$Type extends MessageType<CommitDecision> {
+    constructor() {
+        super("blindsided.CommitDecision", [
+            { no: 1, name: "request_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "auction", kind: "message", T: () => Auction },
+            { no: 3, name: "idempotency_record", kind: "message", T: () => IdempotencyRecord },
+            { no: 4, name: "primary_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "backup_address", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<CommitDecision>): CommitDecision {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.requestId = "";
+        message.primaryId = "";
+        message.backupAddress = "";
+        if (value !== undefined)
+            reflectionMergePartial<CommitDecision>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: CommitDecision): CommitDecision {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string request_id */ 1:
+                    message.requestId = reader.string();
+                    break;
+                case /* blindsided.Auction auction */ 2:
+                    message.auction = Auction.internalBinaryRead(reader, reader.uint32(), options, message.auction);
+                    break;
+                case /* blindsided.IdempotencyRecord idempotency_record */ 3:
+                    message.idempotencyRecord = IdempotencyRecord.internalBinaryRead(reader, reader.uint32(), options, message.idempotencyRecord);
+                    break;
+                case /* string primary_id */ 4:
+                    message.primaryId = reader.string();
+                    break;
+                case /* string backup_address */ 5:
+                    message.backupAddress = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: CommitDecision, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string request_id = 1; */
+        if (message.requestId !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.requestId);
+        /* blindsided.Auction auction = 2; */
+        if (message.auction)
+            Auction.internalBinaryWrite(message.auction, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* blindsided.IdempotencyRecord idempotency_record = 3; */
+        if (message.idempotencyRecord)
+            IdempotencyRecord.internalBinaryWrite(message.idempotencyRecord, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* string primary_id = 4; */
+        if (message.primaryId !== "")
+            writer.tag(4, WireType.LengthDelimited).string(message.primaryId);
+        /* string backup_address = 5; */
+        if (message.backupAddress !== "")
+            writer.tag(5, WireType.LengthDelimited).string(message.backupAddress);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message blindsided.CommitDecision
+ */
+export const CommitDecision = new CommitDecision$Type();
 /**
  * @generated ServiceType for protobuf service blindsided.AuctionService
  */
@@ -3295,9 +3701,11 @@ export const StorageReplicaService = new ServiceType("blindsided.StorageReplicaS
     { name: "GetAuction", options: {}, I: GetAuctionRequest, O: GetStoredAuctionResponse },
     { name: "SearchAuctions", options: {}, I: SearchAuctionsRequest, O: GetStoredAuctionsResponse },
     { name: "SyncFullState", options: {}, I: StateRequest, O: StateResponse },
-    { name: "ReplicateAuction", options: {}, I: ReplicationRequest, O: ReplicationResponse },
     { name: "Heartbeat", options: {}, I: HealthCheckRequest, O: HealthCheckResponse },
-    { name: "PromoteToPrimary", options: {}, I: PromotionRequest, O: PromotionResponse }
+    { name: "PromoteToPrimary", options: {}, I: PromotionRequest, O: PromotionResponse },
+    { name: "PrepareAuctionMutation", options: {}, I: PrepareMutationRequest, O: PrepareMutationResponse },
+    { name: "CommitPreparedMutation", options: {}, I: MutationDecisionRequest, O: MutationDecisionResponse },
+    { name: "AbortPreparedMutation", options: {}, I: MutationDecisionRequest, O: MutationDecisionResponse }
 ]);
 /**
  * @generated ServiceType for protobuf service blindsided.ClusterController

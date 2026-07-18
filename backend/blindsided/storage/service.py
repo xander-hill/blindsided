@@ -26,7 +26,14 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
         self.replica_role = os.getenv("NODE_ROLE", "backup")
         raw_peers = os.getenv("PEER_ADDRESSES", "")
         self.peer_addresses = [p.strip() for p in raw_peers.split(",") if p.strip()]
+        self.synchronous_backup_address = os.getenv(
+            "SYNCHRONOUS_BACKUP_ADDRESS",
+            "",
+        ).strip()
         self.idempotency_records: dict[str, pb2.IdempotencyRecord] = {}
+        self.prepared_mutations: dict[str, pb2.PrepareMutationRequest] = {}
+        self.aborted_mutations: dict[str, pb2.MutationDecisionRequest] = {}
+        self.pending_backup_commits: dict[str, pb2.CommitDecision] = {}
 
         raw_address = os.getenv("POD_IP", "localhost")
         if "storage-" in raw_address and ".storage-service" not in raw_address:
@@ -67,6 +74,12 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                     success=False,
                     failure_reason=pb2.MUTATION_FAILURE_REASON_INVALID_STATE,
                     message="Auction mutations require the primary replica.",
+                )
+            if request.request_id and request.request_id in self.aborted_mutations:
+                return pb2.AuctionMutationResponse(
+                    success=False,
+                    failure_reason=pb2.MUTATION_FAILURE_REASON_IDEMPOTENCY_CONFLICT,
+                    message="Request id has been aborted.",
                 )
             auction_id = request.auction.auction_id
             existing_auction = self.auction_store.get(auction_id)
@@ -269,7 +282,6 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 updated_auction.version = existing_auction.version + 1
                 incoming_auction = updated_auction
 
-            self.auction_store[auction_id] = incoming_auction
             response = pb2.AuctionMutationResponse(
                 success=True,
                 current_version=incoming_auction.version,
@@ -281,26 +293,21 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 request_fingerprint,
                 response,
             )
-
-            if self.replica_role == "primary":
-                if not self._replicate_to_peers(incoming_auction, idempotency_record):
-                    if existing_auction:
-                        self.auction_store[auction_id] = existing_auction
-                    else:
-                        del self.auction_store[auction_id]
-                
-                    return pb2.AuctionMutationResponse(
-                        success=False,
-                        current_version=existing_auction.version if existing_auction else 0,
-                        failure_reason=pb2.MUTATION_FAILURE_REASON_REPLICATION_FAILED,
-                        message="Vault replication failed.",
-                    )
-
-            if idempotency_record:
-                self.idempotency_records[request.request_id] = idempotency_record
-            self._persist_state_to_disk()
-
-            return response
+            previous_version = existing_auction.version if existing_auction else 0
+            if idempotency_record is None:
+                return pb2.AuctionMutationResponse(
+                    success=False,
+                    current_version=previous_version,
+                    failure_reason=pb2.MUTATION_FAILURE_REASON_INVALID_STATE,
+                    message="Auction mutations require a request id.",
+                )
+            return self._coordinate_synchronous_commit(
+                request.request_id,
+                incoming_auction,
+                idempotency_record,
+                response,
+                previous_version,
+            )
 
     def _includes_creation_metadata(self, auction: pb2.Auction) -> bool:
         return (
@@ -406,6 +413,20 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 failure_reason=pb2.MUTATION_FAILURE_REASON_IDEMPOTENCY_CONFLICT,
                 message="Idempotency conflict: request id was already used for different contents.",
             )
+        pending_decision = self.pending_backup_commits.get(request_id)
+        if pending_decision is not None:
+            if not self._complete_pending_backup_commit(request_id):
+                return pb2.AuctionMutationResponse(
+                    success=False,
+                    current_version=pending_decision.auction.version,
+                    failure_reason=(
+                        pb2.MUTATION_FAILURE_REASON_ACKNOWLEDGEMENT_PENDING
+                    ),
+                    auction_id=pending_decision.auction.auction_id,
+                    message=(
+                        "Commit is durable but backup acknowledgement is pending."
+                    ),
+                )
         response = pb2.AuctionMutationResponse()
         response.CopyFrom(existing_record.response)
         response.replayed = True
@@ -540,54 +561,487 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 message="Query successful",
             )
 
-    def _replicate_to_peers(
+    def _prepare_on_synchronous_backup(
         self,
-        auction: pb2.Auction,
-        idempotency_record: pb2.IdempotencyRecord | None = None,
+        request_id: str,
+        candidate_auction: pb2.Auction,
+        idempotency_record: pb2.IdempotencyRecord,
     ) -> bool:
-        targets = [peer_address for peer_address in self.peer_addresses if peer_address != self.node_address]
-        if not targets:
-            return True
+        if self.replica_role != "primary" or not self.synchronous_backup_address:
+            return False
 
-        success = True
+        request = pb2.PrepareMutationRequest(
+            request_id=request_id,
+            candidate_auction=candidate_auction,
+            idempotency_record=idempotency_record,
+            primary_id=self.node_address,
+        )
+        try:
+            with grpc.insecure_channel(self.synchronous_backup_address) as channel:
+                stub = pb2_grpc.StorageReplicaServiceStub(channel)
+                response = stub.PrepareAuctionMutation(request, timeout=1.0)
+        except grpc.RpcError:
+            return False
 
-        for peer_address in targets:
+        return (
+            response.success
+            and response.prepared_version == candidate_auction.version
+        )
+
+    def _record_commit_decision(
+        self,
+        request_id: str,
+        candidate_auction: pb2.Auction,
+        idempotency_record: pb2.IdempotencyRecord,
+    ) -> bool:
+        with self.state_lock:
+            return self._record_commit_decision_locked(
+                request_id,
+                candidate_auction,
+                idempotency_record,
+            )
+
+    def _record_commit_decision_locked(
+        self,
+        request_id: str,
+        candidate_auction: pb2.Auction,
+        idempotency_record: pb2.IdempotencyRecord,
+    ) -> bool:
+        if (
+            self.replica_role != "primary"
+            or not request_id
+            or not candidate_auction.auction_id
+            or not self.synchronous_backup_address
+        ):
+            return False
+
+        decision = pb2.CommitDecision(
+            request_id=request_id,
+            primary_id=self.node_address,
+            backup_address=self.synchronous_backup_address,
+        )
+        decision.auction.CopyFrom(candidate_auction)
+        decision.idempotency_record.CopyFrom(idempotency_record)
+
+        committed_auction = pb2.Auction()
+        committed_auction.CopyFrom(decision.auction)
+        committed_record = pb2.IdempotencyRecord()
+        committed_record.CopyFrom(decision.idempotency_record)
+        pending_decision = pb2.CommitDecision()
+        pending_decision.CopyFrom(decision)
+
+        auction_id = committed_auction.auction_id
+        previous_auction = self.auction_store.get(auction_id)
+        previous_record = self.idempotency_records.get(request_id)
+        previous_decision = self.pending_backup_commits.get(request_id)
+        self.auction_store[auction_id] = committed_auction
+        self.idempotency_records[request_id] = committed_record
+        self.pending_backup_commits[request_id] = pending_decision
+        try:
+            self._persist_state_to_disk()
+        except Exception:
+            if previous_auction is None:
+                del self.auction_store[auction_id]
+            else:
+                self.auction_store[auction_id] = previous_auction
+            if previous_record is None:
+                del self.idempotency_records[request_id]
+            else:
+                self.idempotency_records[request_id] = previous_record
+            if previous_decision is None:
+                del self.pending_backup_commits[request_id]
+            else:
+                self.pending_backup_commits[request_id] = previous_decision
+            return False
+        return True
+
+    def _complete_pending_backup_commit(self, request_id: str) -> bool:
+        with self.state_lock:
+            if self.replica_role != "primary":
+                return False
+            decision = self.pending_backup_commits.get(request_id)
+            if decision is None or not decision.backup_address:
+                return False
+
+            commit_request = pb2.MutationDecisionRequest(
+                request_id=decision.request_id,
+                auction_id=decision.auction.auction_id,
+                primary_id=decision.primary_id,
+            )
             try:
-                with grpc.insecure_channel(peer_address) as ch:
-                    stub = pb2_grpc.StorageReplicaServiceStub(ch)
-                    request = pb2.ReplicationRequest(auction=auction)
-                    if idempotency_record:
-                        request.idempotency_record.CopyFrom(idempotency_record)
-                    resp = stub.ReplicateAuction(
-                        request,
+                with grpc.insecure_channel(decision.backup_address) as channel:
+                    stub = pb2_grpc.StorageReplicaServiceStub(channel)
+                    response = stub.CommitPreparedMutation(
+                        commit_request,
                         timeout=1.0,
                     )
-                    if not resp.success:
-                        success = False
+            except grpc.RpcError:
+                return False
+
+            if (
+                not response.success
+                or response.committed_version != decision.auction.version
+            ):
+                return False
+
+            del self.pending_backup_commits[request_id]
+            try:
+                self._persist_state_to_disk()
             except Exception:
-                print(f"[Judge] Peer {peer_address} unreachable. Proceeding in degraded mode.")
-                continue
+                self.pending_backup_commits[request_id] = decision
+                return False
+            return True
 
-        return success
+    def _abort_on_synchronous_backup(
+        self,
+        request_id: str,
+        auction_id: str,
+    ) -> bool:
+        if self.replica_role != "primary" or not self.synchronous_backup_address:
+            return False
+        request = pb2.MutationDecisionRequest(
+            request_id=request_id,
+            auction_id=auction_id,
+            primary_id=self.node_address,
+        )
+        try:
+            with grpc.insecure_channel(self.synchronous_backup_address) as channel:
+                stub = pb2_grpc.StorageReplicaServiceStub(channel)
+                response = stub.AbortPreparedMutation(request, timeout=1.0)
+        except grpc.RpcError:
+            return False
+        return response.success
 
-    def ReplicateAuction(self, request, context):
+    def _coordinate_synchronous_commit(
+        self,
+        request_id: str,
+        candidate_auction: pb2.Auction,
+        idempotency_record: pb2.IdempotencyRecord,
+        success_response: pb2.AuctionMutationResponse,
+        previous_version: int,
+    ) -> pb2.AuctionMutationResponse:
+        if not self._prepare_on_synchronous_backup(
+            request_id,
+            candidate_auction,
+            idempotency_record,
+        ):
+            self._abort_on_synchronous_backup(
+                request_id,
+                candidate_auction.auction_id,
+            )
+            return pb2.AuctionMutationResponse(
+                success=False,
+                current_version=previous_version,
+                failure_reason=pb2.MUTATION_FAILURE_REASON_REPLICATION_FAILED,
+                auction_id=candidate_auction.auction_id,
+                message="Synchronous backup preparation failed.",
+            )
+
+        if not self._record_commit_decision(
+            request_id,
+            candidate_auction,
+            idempotency_record,
+        ):
+            self._abort_on_synchronous_backup(
+                request_id,
+                candidate_auction.auction_id,
+            )
+            return pb2.AuctionMutationResponse(
+                success=False,
+                current_version=previous_version,
+                failure_reason=pb2.MUTATION_FAILURE_REASON_REPLICATION_FAILED,
+                auction_id=candidate_auction.auction_id,
+                message="Primary commit decision could not be persisted.",
+            )
+
+        if not self._complete_pending_backup_commit(request_id):
+            return pb2.AuctionMutationResponse(
+                success=False,
+                current_version=candidate_auction.version,
+                failure_reason=pb2.MUTATION_FAILURE_REASON_ACKNOWLEDGEMENT_PENDING,
+                auction_id=candidate_auction.auction_id,
+                message="Commit is durable but backup acknowledgement is pending.",
+            )
+
+        return success_response
+
+    def PrepareAuctionMutation(self, request, context):
         with self.state_lock:
-            state_error = self._committed_state_error(request.auction)
+            if self.replica_role != "backup":
+                return pb2.PrepareMutationResponse(
+                    success=False,
+                    message="Mutation preparation is allowed only on backup replicas.",
+                )
+
+            request_id = request.request_id.strip()
+            primary_id = request.primary_id.strip()
+            auction_id = request.candidate_auction.auction_id.strip()
+            if not request_id:
+                return pb2.PrepareMutationResponse(
+                    success=False,
+                    message="Mutation preparation requires a request id.",
+                )
+            if not primary_id:
+                return pb2.PrepareMutationResponse(
+                    success=False,
+                    message="Mutation preparation requires a primary id.",
+                )
+            if not auction_id:
+                return pb2.PrepareMutationResponse(
+                    success=False,
+                    message="Mutation preparation requires an auction id.",
+                )
+            if request_id in self.aborted_mutations:
+                return pb2.PrepareMutationResponse(
+                    success=False,
+                    message="Request id has been aborted.",
+                )
+            existing_preparation = self.prepared_mutations.get(request_id)
+            if existing_preparation is not None:
+                if existing_preparation == request:
+                    return pb2.PrepareMutationResponse(
+                        success=True,
+                        prepared_version=existing_preparation.candidate_auction.version,
+                        message="Mutation prepared.",
+                    )
+                return pb2.PrepareMutationResponse(
+                    success=False,
+                    prepared_version=(
+                        self.auction_store.get(auction_id).version
+                        if self.auction_store.get(auction_id)
+                        else 0
+                    ),
+                    message="Request id is already prepared with different contents.",
+                )
+            if request_id in self.idempotency_records:
+                return pb2.PrepareMutationResponse(
+                    success=False,
+                    message="Request id belongs to a committed mutation.",
+                )
+            if (
+                not request.HasField("idempotency_record")
+                or request.idempotency_record.request_id != request_id
+            ):
+                return pb2.PrepareMutationResponse(
+                    success=False,
+                    message="Idempotency record id must match the request id.",
+                )
+
+            candidate = request.candidate_auction
+            state_error = self._committed_state_error(candidate)
             if state_error:
-                return pb2.ReplicationResponse(
+                return pb2.PrepareMutationResponse(
                     success=False,
                     message=state_error,
                 )
-            self.auction_store[request.auction.auction_id] = request.auction
-            if request.HasField("idempotency_record"):
-                self.idempotency_records[
-                    request.idempotency_record.request_id
-                ] = request.idempotency_record
-            self._persist_state_to_disk()
-            return pb2.ReplicationResponse(
+
+            current = self.auction_store.get(auction_id)
+            expected_candidate_version = current.version + 1 if current else 1
+            if candidate.version != expected_candidate_version:
+                return pb2.PrepareMutationResponse(
+                    success=False,
+                    prepared_version=current.version if current else 0,
+                    message=(
+                        "Candidate version does not follow the backup's current "
+                        "committed version."
+                    ),
+                )
+
+            prepared = pb2.PrepareMutationRequest()
+            prepared.CopyFrom(request)
+            self.prepared_mutations[request_id] = prepared
+            try:
+                self._persist_state_to_disk()
+            except Exception as error:
+                del self.prepared_mutations[request_id]
+                return pb2.PrepareMutationResponse(
+                    success=False,
+                    message=f"Could not persist prepared mutation: {error}",
+                )
+            return pb2.PrepareMutationResponse(
                 success=True,
-                ack_version=request.auction.version,
-                message="Replicated",
+                prepared_version=candidate.version,
+                message="Mutation prepared.",
+            )
+
+    def CommitPreparedMutation(self, request, context):
+        with self.state_lock:
+            if self.replica_role != "backup":
+                return pb2.MutationDecisionResponse(
+                    success=False,
+                    message="Prepared mutations can be committed only on backup replicas.",
+                )
+
+            request_id = request.request_id.strip()
+            auction_id = request.auction_id.strip()
+            primary_id = request.primary_id.strip()
+            if not request_id or not auction_id or not primary_id:
+                return pb2.MutationDecisionResponse(
+                    success=False,
+                    message="Commit requires request, auction, and primary ids.",
+                )
+            if request_id in self.aborted_mutations:
+                return pb2.MutationDecisionResponse(
+                    success=False,
+                    message="Request id has been aborted.",
+                )
+
+            prepared = self.prepared_mutations.get(request_id)
+            if prepared is None:
+                committed_record = self.idempotency_records.get(request_id)
+                if (
+                    committed_record is not None
+                    and committed_record.response.success
+                    and committed_record.response.auction_id == auction_id
+                ):
+                    return pb2.MutationDecisionResponse(
+                        success=True,
+                        committed_version=committed_record.response.current_version,
+                        message="Prepared mutation committed.",
+                    )
+                return pb2.MutationDecisionResponse(
+                    success=False,
+                    message="Prepared mutation not found.",
+                )
+
+            if prepared.candidate_auction.auction_id != auction_id:
+                return pb2.MutationDecisionResponse(
+                    success=False,
+                    message="Auction id does not match the prepared mutation.",
+                )
+            if prepared.primary_id != primary_id:
+                return pb2.MutationDecisionResponse(
+                    success=False,
+                    message="Primary id does not match the prepared mutation.",
+                )
+
+            current = self.auction_store.get(auction_id)
+            expected_candidate_version = current.version + 1 if current else 1
+            candidate = prepared.candidate_auction
+            if candidate.version != expected_candidate_version:
+                return pb2.MutationDecisionResponse(
+                    success=False,
+                    committed_version=current.version if current else 0,
+                    message=(
+                        "Prepared candidate version does not follow the backup's "
+                        "current committed version."
+                    ),
+                )
+
+            committed_auction = pb2.Auction()
+            committed_auction.CopyFrom(candidate)
+            committed_record = pb2.IdempotencyRecord()
+            committed_record.CopyFrom(prepared.idempotency_record)
+
+            previous_auction = self.auction_store.get(auction_id)
+            previous_record = self.idempotency_records.get(request_id)
+            self.auction_store[auction_id] = committed_auction
+            self.idempotency_records[request_id] = committed_record
+            del self.prepared_mutations[request_id]
+            try:
+                self._persist_state_to_disk()
+            except Exception as error:
+                if previous_auction is None:
+                    del self.auction_store[auction_id]
+                else:
+                    self.auction_store[auction_id] = previous_auction
+                if previous_record is None:
+                    del self.idempotency_records[request_id]
+                else:
+                    self.idempotency_records[request_id] = previous_record
+                self.prepared_mutations[request_id] = prepared
+                return pb2.MutationDecisionResponse(
+                    success=False,
+                    committed_version=previous_auction.version if previous_auction else 0,
+                    message=f"Could not persist committed mutation: {error}",
+                )
+
+            return pb2.MutationDecisionResponse(
+                success=True,
+                committed_version=committed_auction.version,
+                message="Prepared mutation committed.",
+            )
+
+    def AbortPreparedMutation(self, request, context):
+        with self.state_lock:
+            if self.replica_role != "backup":
+                return pb2.MutationDecisionResponse(
+                    success=False,
+                    message="Prepared mutations can be aborted only on backup replicas.",
+                )
+
+            request_id = request.request_id.strip()
+            auction_id = request.auction_id.strip()
+            primary_id = request.primary_id.strip()
+            if not request_id or not auction_id or not primary_id:
+                return pb2.MutationDecisionResponse(
+                    success=False,
+                    message="Abort requires request, auction, and primary ids.",
+                )
+            if request_id in self.idempotency_records:
+                return pb2.MutationDecisionResponse(
+                    success=False,
+                    message="A committed mutation cannot be aborted.",
+                )
+
+            current = self.auction_store.get(auction_id)
+            committed_version = current.version if current else 0
+            previous_tombstone = self.aborted_mutations.get(request_id)
+            if previous_tombstone is not None:
+                if (
+                    previous_tombstone.auction_id != auction_id
+                    or previous_tombstone.primary_id != primary_id
+                ):
+                    return pb2.MutationDecisionResponse(
+                        success=False,
+                        committed_version=committed_version,
+                        message="Request id was aborted for a different auction or primary.",
+                    )
+                return pb2.MutationDecisionResponse(
+                    success=True,
+                    committed_version=committed_version,
+                    message="Prepared mutation aborted.",
+                )
+
+            prepared = self.prepared_mutations.get(request_id)
+            if prepared is not None:
+                if prepared.candidate_auction.auction_id != auction_id:
+                    return pb2.MutationDecisionResponse(
+                        success=False,
+                        committed_version=committed_version,
+                        message="Auction id does not match the prepared mutation.",
+                    )
+                if prepared.primary_id != primary_id:
+                    return pb2.MutationDecisionResponse(
+                        success=False,
+                        committed_version=committed_version,
+                        message="Primary id does not match the prepared mutation.",
+                    )
+
+            tombstone = pb2.MutationDecisionRequest()
+            tombstone.CopyFrom(request)
+            if prepared is not None:
+                del self.prepared_mutations[request_id]
+            self.aborted_mutations[request_id] = tombstone
+            try:
+                self._persist_state_to_disk()
+            except Exception as error:
+                if prepared is not None:
+                    self.prepared_mutations[request_id] = prepared
+                if previous_tombstone is None:
+                    del self.aborted_mutations[request_id]
+                else:
+                    self.aborted_mutations[request_id] = previous_tombstone
+                return pb2.MutationDecisionResponse(
+                    success=False,
+                    committed_version=committed_version,
+                    message=f"Could not persist aborted mutation: {error}",
+                )
+
+            return pb2.MutationDecisionResponse(
+                success=True,
+                committed_version=committed_version,
+                message="Prepared mutation aborted.",
             )
 
     def SyncFullState(self, request, context):
@@ -632,7 +1086,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
         if not self.state_file_path or not os.path.exists(self.state_file_path):
             return
         try:
-            snapshot = pb2.StateResponse()
+            snapshot = pb2.StorageSnapshot()
             with open(self.state_file_path, "rb") as state_file:
                 snapshot.ParseFromString(state_file.read())
             self.auction_store = {
@@ -644,16 +1098,31 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 record.request_id: record
                 for record in snapshot.idempotency_records
             }
+            self.prepared_mutations = {
+                prepared.request_id: prepared
+                for prepared in snapshot.prepared_mutations
+            }
+            self.aborted_mutations = {
+                aborted.request_id: aborted
+                for aborted in snapshot.aborted_mutations
+            }
+            self.pending_backup_commits = {
+                decision.request_id: decision
+                for decision in snapshot.pending_backup_commits
+            }
         except Exception as e:
             print(f"[Judge] Could not load local state snapshot: {e}")
 
     def _persist_state_to_disk(self) -> None:
         if not self.state_file_path:
             return
-        snapshot = pb2.StateResponse(
+        snapshot = pb2.StorageSnapshot(
             ok=True,
             auctions=list(self.auction_store.values()),
             idempotency_records=list(self.idempotency_records.values()),
+            prepared_mutations=list(self.prepared_mutations.values()),
+            aborted_mutations=list(self.aborted_mutations.values()),
+            pending_backup_commits=list(self.pending_backup_commits.values()),
             message="Local storage snapshot",
         )
         state_dir = os.path.dirname(self.state_file_path)
