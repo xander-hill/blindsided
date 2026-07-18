@@ -10,7 +10,7 @@ class BidSubmissionSpecificationTests(BackendTestCase):
     """Contract tests for docs/auction-specification.md section 3.2."""
 
     def test_bidder_may_submit_one_active_bid_while_auction_is_open(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
         judge.auction_store["bid-open-accepted"] = pb2.Auction(
             auction_id="bid-open-accepted",
             version=1,
@@ -40,7 +40,7 @@ class BidSubmissionSpecificationTests(BackendTestCase):
         self.assertEqual(judge.auction_store["bid-open-accepted"].version, 2)
 
     def test_revealed_auction_rejects_bid_submission_without_mutation(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
         judge.auction_store["bid-revealed-rejected"] = pb2.Auction(
             auction_id="bid-revealed-rejected",
             version=3,
@@ -65,8 +65,8 @@ class BidSubmissionSpecificationTests(BackendTestCase):
         self.assertFalse(response.success)
         self.assertEqual(judge.auction_store["bid-revealed-rejected"], original)
 
-    def test_bid_submission_after_ends_at_triggers_auto_reveal_and_rejects_bid(self):
-        judge = make_judge(role="backup")
+    def test_bid_submission_after_ends_at_rejects_without_committing_result(self):
+        judge = make_judge(role="primary")
         judge.auction_store["bid-deadline-rejected"] = pb2.Auction(
             auction_id="bid-deadline-rejected",
             reserve_price=200.0,
@@ -90,20 +90,17 @@ class BidSubmissionSpecificationTests(BackendTestCase):
             )
 
         self.assertFalse(response.success)
-        self.assertIn("Gavel", response.message)
+        self.assertIn("deadline", response.message)
         self.assertNotIn("buyer-b", judge.auction_store["bid-deadline-rejected"].bids)
         self.assertEqual(
             judge.auction_store["bid-deadline-rejected"].state,
-            pb2.AUCTION_STATE_REVEALED,
+            pb2.AUCTION_STATE_OPEN,
         )
-        self.assertEqual(judge.auction_store["bid-deadline-rejected"].version, 2)
-        self.assertEqual(
-            judge.auction_store["bid-deadline-rejected"].result.outcome,
-            pb2.AUCTION_OUTCOME_SUCCESSFUL_SALE,
-        )
+        self.assertEqual(judge.auction_store["bid-deadline-rejected"].version, 1)
+        self.assertFalse(judge.auction_store["bid-deadline-rejected"].HasField("result"))
 
     def test_successful_bid_mutation_increments_version_exactly_once(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
         judge.auction_store["bid-version-once"] = pb2.Auction(
             auction_id="bid-version-once",
             version=10,
@@ -133,7 +130,7 @@ class BidSubmissionSpecificationTests(BackendTestCase):
         self.assertEqual(judge.auction_store["bid-version-once"].next_bid_sequence, 8)
 
     def test_bid_mutation_without_bid_is_rejected_without_state_or_version_change(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
         judge.auction_store["bid-empty-rejected"] = pb2.Auction(
             auction_id="bid-empty-rejected",
             version=4,
@@ -157,7 +154,7 @@ class BidSubmissionSpecificationTests(BackendTestCase):
         self.assertEqual(judge.auction_store["bid-empty-rejected"], original)
 
     def test_bidder_cannot_lower_active_bid_directly(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
         judge.auction_store["bid-lower-rejected"] = pb2.Auction(
             auction_id="bid-lower-rejected",
             version=1,
@@ -183,7 +180,7 @@ class BidSubmissionSpecificationTests(BackendTestCase):
         self.assertEqual(judge.auction_store["bid-lower-rejected"].version, 1)
 
     def test_bidder_cannot_replace_active_bid_with_same_amount(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
         judge.auction_store["bid-equal-rejected"] = pb2.Auction(
             auction_id="bid-equal-rejected",
             version=1,

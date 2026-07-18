@@ -17,7 +17,7 @@ class AuctionCreationSpecificationTests(BackendTestCase):
         self.assertIn("ends_at", pb2.Auction.DESCRIPTOR.fields_by_name)
 
     def test_successful_creation_establishes_all_required_properties(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
 
         response = judge.ApplyAuctionMutation(
             pb2.AuctionMutationRequest(
@@ -48,7 +48,7 @@ class AuctionCreationSpecificationTests(BackendTestCase):
         self.assertEqual(response.current_version, 1)
 
     def test_creation_requires_seller_identity(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
 
         response = judge.ApplyAuctionMutation(
             pb2.AuctionMutationRequest(
@@ -66,7 +66,7 @@ class AuctionCreationSpecificationTests(BackendTestCase):
         self.assertNotIn("creation-missing-seller", judge.auction_store)
 
     def test_creation_requires_ends_at(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
 
         response = judge.ApplyAuctionMutation(
             pb2.AuctionMutationRequest(
@@ -84,7 +84,7 @@ class AuctionCreationSpecificationTests(BackendTestCase):
         self.assertNotIn("creation-missing-ends-at", judge.auction_store)
 
     def test_creation_requires_reserve_price(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
 
         response = judge.ApplyAuctionMutation(
             pb2.AuctionMutationRequest(
@@ -102,7 +102,7 @@ class AuctionCreationSpecificationTests(BackendTestCase):
         self.assertNotIn("creation-missing-reserve", judge.auction_store)
 
     def test_creation_starts_with_empty_active_bid_collection(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
 
         response = judge.ApplyAuctionMutation(
             pb2.AuctionMutationRequest(
@@ -122,7 +122,7 @@ class AuctionCreationSpecificationTests(BackendTestCase):
         self.assertNotIn("creation-with-bid", judge.auction_store)
 
     def test_initial_version_is_assigned_by_system(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
 
         response = judge.ApplyAuctionMutation(
             pb2.AuctionMutationRequest(
@@ -143,7 +143,7 @@ class AuctionCreationSpecificationTests(BackendTestCase):
         self.assertEqual(response.current_version, 1)
 
     def test_ends_at_is_immutable_after_creation(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
         judge.ApplyAuctionMutation(
             pb2.AuctionMutationRequest(
                 auction=pb2.Auction(
@@ -175,7 +175,7 @@ class AuctionCreationSpecificationTests(BackendTestCase):
         )
 
     def test_auction_identifier_must_be_unique(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
         judge.ApplyAuctionMutation(
             pb2.AuctionMutationRequest(
                 auction=pb2.Auction(
@@ -209,7 +209,7 @@ class AuctionCreationSpecificationTests(BackendTestCase):
         self.assertEqual(judge.auction_store["creation-unique-id"].version, 1)
 
     def test_incomplete_creation_fails_without_partial_auction(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
 
         response = judge.ApplyAuctionMutation(
             pb2.AuctionMutationRequest(

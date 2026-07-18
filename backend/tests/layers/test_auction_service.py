@@ -49,6 +49,7 @@ class TestableAuctionService(AuctionService):
     def __init__(self, stub: FakeJudgeStub, primary_address: str | None = "judge:50051"):
         self.stub = stub
         self.primary_address = primary_address
+        self.storage_addresses: list[str] = []
 
     def _get_primary_address(self, force_refresh=False):
         return self.primary_address
@@ -57,6 +58,7 @@ class TestableAuctionService(AuctionService):
         return [self.primary_address] if self.primary_address else []
 
     def _create_storage_stub(self, address: str):
+        self.storage_addresses.append(address)
         return self.stub, ChannelContext()
 
 
@@ -242,6 +244,90 @@ class AuctionServiceTests(BackendTestCase):
         self.assertNotIn("hidden-bidder-b", str(public_auction))
         self.assertNotIn("12345.5", str(public_auction))
         self.assertNotIn("67890", str(public_auction))
+
+    def test_get_auction_returns_only_requesting_bidder_active_bid(self):
+        stub = FakeJudgeStub()
+        stub.get_responses.append(pb2.GetStoredAuctionResponse(
+            ok=True,
+            auction=pb2.Auction(
+                auction_id="auction-1",
+                state=pb2.AUCTION_STATE_OPEN,
+                bids={
+                    "buyer-a": active_bid(250.0, 1),
+                    "buyer-b": active_bid(900.0, 2),
+                },
+            ),
+        ))
+        service = TestableAuctionService(stub)
+
+        response = service.GetAuction(
+            pb2.GetAuctionRequest(
+                auction_id="auction-1",
+                bidder_id="buyer-a",
+            ),
+            NoopContext(),
+        )
+
+        self.assertTrue(response.ok)
+        self.assertEqual(stub.gets[0].bidder_id, "buyer-a")
+        self.assertTrue(response.HasField("own_active_bid_amount"))
+        self.assertEqual(response.own_active_bid_amount, 250.0)
+        self.assertNotIn("acceptance_order", str(response))
+        self.assertNotIn("900", str(response))
+        self.assertNotIn("buyer-b", str(response))
+
+    def test_get_auction_omits_active_bid_when_requesting_bidder_has_none(self):
+        stub = FakeJudgeStub()
+        stub.get_responses.append(pb2.GetStoredAuctionResponse(
+            ok=True,
+            auction=pb2.Auction(
+                auction_id="auction-1",
+                state=pb2.AUCTION_STATE_OPEN,
+                bids={"buyer-b": active_bid(900.0, 1)},
+            ),
+        ))
+        service = TestableAuctionService(stub)
+
+        response = service.GetAuction(
+            pb2.GetAuctionRequest(
+                auction_id="auction-1",
+                bidder_id="buyer-a",
+            ),
+            NoopContext(),
+        )
+
+        self.assertTrue(response.ok)
+        self.assertFalse(response.HasField("own_active_bid_amount"))
+        self.assertNotIn("900", str(response))
+
+    def test_live_updates_read_primary_committed_state(self):
+        stub = FakeJudgeStub()
+        stub.get_responses.append(pb2.GetStoredAuctionResponse(
+            ok=True,
+            auction=pb2.Auction(
+                auction_id="auction-1",
+                state=pb2.AUCTION_STATE_REVEALED,
+                version=4,
+                result=pb2.AuctionResult(
+                    outcome=pb2.AUCTION_OUTCOME_NO_BIDS,
+                ),
+            ),
+        ))
+        service = TestableAuctionService(
+            stub,
+            primary_address="current-primary:50051",
+        )
+
+        update = next(service.WatchAuction(
+            pb2.AuctionRequest(auction_id="auction-1"),
+            NoopContext(),
+        ))
+
+        self.assertEqual(service.storage_addresses, ["current-primary:50051"])
+        self.assertEqual(stub.gets[0].auction_id, "auction-1")
+        self.assertEqual(update.version, 4)
+        self.assertEqual(update.state, pb2.AUCTION_STATE_REVEALED)
+        self.assertEqual(update.result.outcome, pb2.AUCTION_OUTCOME_NO_BIDS)
 
     def test_revealed_no_bids_public_result_exposes_no_bids(self):
         service = TestableAuctionService(FakeJudgeStub())

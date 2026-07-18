@@ -106,13 +106,22 @@ message CreateAuctionRequest {
     google.protobuf.Timestamp ends_at = 6;
     string request_id = 7;
 }
-message CreateAuctionResponse { bool ok = 1; string auction_id = 2; string message = 3; }
+message CreateAuctionResponse {
+    bool ok = 1;
+    string auction_id = 2;
+    string message = 3;
+}
 
-message GetAuctionRequest { string auction_id = 1; }
+message GetAuctionRequest {
+    string auction_id = 1;
+    string bidder_id = 2;
+}
+
 message GetAuctionResponse {
     bool ok = 1;
     PublicAuction auction = 2;
     string message = 3;
+    optional float own_active_bid_amount = 4;
 }
 
 message GetStoredAuctionResponse {

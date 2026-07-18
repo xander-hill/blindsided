@@ -11,7 +11,7 @@ class BidWithdrawalSpecificationTests(BackendTestCase):
     """Contract tests for docs/auction-specification.md section 3.3."""
 
     def test_bidder_can_withdraw_own_active_bid_before_deadline(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
         judge.auction_store["withdraw-success"] = pb2.Auction(
             auction_id="withdraw-success",
             version=4,
@@ -46,12 +46,13 @@ class BidWithdrawalSpecificationTests(BackendTestCase):
         )
         self.assertEqual(update.bidder_count, 1)
 
-    def test_withdrawal_after_deadline_triggers_auto_reveal_and_rejects_withdrawal(self):
-        judge = make_judge(role="backup")
+    def test_withdrawal_after_deadline_rejects_without_committing_result(self):
+        judge = make_judge(role="primary")
         judge.auction_store["withdraw-deadline"] = pb2.Auction(
             auction_id="withdraw-deadline",
             reserve_price=200.0,
             version=4,
+            state=pb2.AUCTION_STATE_OPEN,
             bids={"buyer-a": active_bid(300.0, 1)},
             next_bid_sequence=2,
             ends_at=timestamp_pb2.Timestamp(seconds=1000),
@@ -69,20 +70,17 @@ class BidWithdrawalSpecificationTests(BackendTestCase):
             )
 
         self.assertFalse(response.success)
-        self.assertIn("Gavel", response.message)
+        self.assertIn("deadline", response.message)
         self.assertIn("buyer-a", judge.auction_store["withdraw-deadline"].bids)
         self.assertEqual(
             judge.auction_store["withdraw-deadline"].state,
-            pb2.AUCTION_STATE_REVEALED,
+            pb2.AUCTION_STATE_OPEN,
         )
-        self.assertEqual(judge.auction_store["withdraw-deadline"].version, 5)
-        self.assertEqual(
-            judge.auction_store["withdraw-deadline"].result.outcome,
-            pb2.AUCTION_OUTCOME_SUCCESSFUL_SALE,
-        )
+        self.assertEqual(judge.auction_store["withdraw-deadline"].version, 4)
+        self.assertFalse(judge.auction_store["withdraw-deadline"].HasField("result"))
 
     def test_withdrawal_without_active_bid_fails_without_mutation(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
         judge.auction_store["withdraw-missing-bid"] = pb2.Auction(
             auction_id="withdraw-missing-bid",
             version=4,
@@ -107,7 +105,7 @@ class BidWithdrawalSpecificationTests(BackendTestCase):
         self.assertEqual(judge.auction_store["withdraw-missing-bid"], original)
 
     def test_revealed_auction_rejects_withdrawal(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
         judge.auction_store["withdraw-revealed"] = pb2.Auction(
             auction_id="withdraw-revealed",
             version=4,
@@ -133,7 +131,7 @@ class BidWithdrawalSpecificationTests(BackendTestCase):
         self.assertEqual(judge.auction_store["withdraw-revealed"], original)
 
     def test_bidder_cannot_withdraw_another_bidder_bid(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
         judge.auction_store["withdraw-other-bidder"] = pb2.Auction(
             auction_id="withdraw-other-bidder",
             version=4,
@@ -161,7 +159,7 @@ class BidWithdrawalSpecificationTests(BackendTestCase):
         self.assertEqual(judge.auction_store["withdraw-other-bidder"], original)
 
     def test_withdrawn_bid_is_not_eligible_to_win(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
         judge.auction_store["withdraw-not-winner"] = pb2.Auction(
             auction_id="withdraw-not-winner",
             reserve_price=100.0,
@@ -197,7 +195,7 @@ class BidWithdrawalSpecificationTests(BackendTestCase):
         self.assertEqual(judge.auction_store["withdraw-not-winner"].bids["buyer-b"].amount, 300.0)
 
     def test_bidder_may_submit_new_valid_bid_after_withdrawal(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
         judge.auction_store["withdraw-rebid"] = pb2.Auction(
             auction_id="withdraw-rebid",
             version=4,
@@ -236,7 +234,7 @@ class BidWithdrawalSpecificationTests(BackendTestCase):
         self.assertEqual(judge.auction_store["withdraw-rebid"].next_bid_sequence, 3)
 
     def test_concurrent_withdrawal_and_replacement_commit_only_one_same_version_mutation(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
         judge.auction_store["withdraw-replace-race"] = pb2.Auction(
             auction_id="withdraw-replace-race",
             version=4,
@@ -278,7 +276,7 @@ class BidWithdrawalSpecificationTests(BackendTestCase):
         self.assertEqual(judge.auction_store["withdraw-replace-race"].next_bid_sequence, 2)
 
     def test_concurrent_replacement_and_withdrawal_commit_only_one_same_version_mutation(self):
-        judge = make_judge(role="backup")
+        judge = make_judge(role="primary")
         judge.auction_store["replace-withdraw-race"] = pb2.Auction(
             auction_id="replace-withdraw-race",
             version=4,

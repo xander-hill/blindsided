@@ -166,7 +166,7 @@ class DistributedBehaviorTests(BackendTestCase):
     def test_restart_and_retry_uses_persisted_idempotency_state(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             state_path = f"{temp_dir}/auction-state.pb"
-            judge = make_judge(role="backup", state_file_path=state_path)
+            judge = make_judge(role="primary", state_file_path=state_path)
             judge.auction_store["idem-restart-distributed"] = pb2.Auction(
                 auction_id="idem-restart-distributed",
                 version=1,
@@ -184,7 +184,7 @@ class DistributedBehaviorTests(BackendTestCase):
             )
 
             original = judge.ApplyAuctionMutation(request, NoopContext())
-            recovered = make_judge(role="backup", state_file_path=state_path)
+            recovered = make_judge(role="primary", state_file_path=state_path)
             recovered._load_state_from_disk()
             replay = recovered.ApplyAuctionMutation(request, NoopContext())
 
@@ -197,7 +197,7 @@ class DistributedBehaviorTests(BackendTestCase):
         )
 
     def test_full_state_synchronization_transfers_idempotency_records(self):
-        primary = make_judge(role="backup", address="primary:50051")
+        primary = make_judge(role="primary", address="primary:50051")
         backup = make_judge(role="backup", address="backup:50051")
         primary.auction_store["idem-sync"] = pb2.Auction(
             auction_id="idem-sync",
@@ -223,6 +223,10 @@ class DistributedBehaviorTests(BackendTestCase):
             record.request_id: record
             for record in state.idempotency_records
         }
+        backup.PromoteToPrimary(
+            pb2.PromotionRequest(new_role="primary"),
+            NoopContext(),
+        )
         replay = backup.ApplyAuctionMutation(request, NoopContext())
 
         self.assertTrue(original.success)

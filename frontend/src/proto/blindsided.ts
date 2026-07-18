@@ -193,6 +193,10 @@ export interface GetAuctionRequest {
      * @generated from protobuf field: string auction_id = 1
      */
     auctionId: string;
+    /**
+     * @generated from protobuf field: string bidder_id = 2
+     */
+    bidderId: string;
 }
 /**
  * @generated from protobuf message blindsided.GetAuctionResponse
@@ -210,6 +214,10 @@ export interface GetAuctionResponse {
      * @generated from protobuf field: string message = 3
      */
     message: string;
+    /**
+     * @generated from protobuf field: optional float own_active_bid_amount = 4
+     */
+    ownActiveBidAmount?: number;
 }
 /**
  * @generated from protobuf message blindsided.GetStoredAuctionResponse
@@ -1297,12 +1305,14 @@ export const CreateAuctionResponse = new CreateAuctionResponse$Type();
 class GetAuctionRequest$Type extends MessageType<GetAuctionRequest> {
     constructor() {
         super("blindsided.GetAuctionRequest", [
-            { no: 1, name: "auction_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+            { no: 1, name: "auction_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "bidder_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<GetAuctionRequest>): GetAuctionRequest {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.auctionId = "";
+        message.bidderId = "";
         if (value !== undefined)
             reflectionMergePartial<GetAuctionRequest>(this, message, value);
         return message;
@@ -1314,6 +1324,9 @@ class GetAuctionRequest$Type extends MessageType<GetAuctionRequest> {
             switch (fieldNo) {
                 case /* string auction_id */ 1:
                     message.auctionId = reader.string();
+                    break;
+                case /* string bidder_id */ 2:
+                    message.bidderId = reader.string();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -1330,6 +1343,9 @@ class GetAuctionRequest$Type extends MessageType<GetAuctionRequest> {
         /* string auction_id = 1; */
         if (message.auctionId !== "")
             writer.tag(1, WireType.LengthDelimited).string(message.auctionId);
+        /* string bidder_id = 2; */
+        if (message.bidderId !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.bidderId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -1346,7 +1362,8 @@ class GetAuctionResponse$Type extends MessageType<GetAuctionResponse> {
         super("blindsided.GetAuctionResponse", [
             { no: 1, name: "ok", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
             { no: 2, name: "auction", kind: "message", T: () => PublicAuction },
-            { no: 3, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+            { no: 3, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "own_active_bid_amount", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ }
         ]);
     }
     create(value?: PartialMessage<GetAuctionResponse>): GetAuctionResponse {
@@ -1371,6 +1388,9 @@ class GetAuctionResponse$Type extends MessageType<GetAuctionResponse> {
                 case /* string message */ 3:
                     message.message = reader.string();
                     break;
+                case /* optional float own_active_bid_amount */ 4:
+                    message.ownActiveBidAmount = reader.float();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -1392,6 +1412,9 @@ class GetAuctionResponse$Type extends MessageType<GetAuctionResponse> {
         /* string message = 3; */
         if (message.message !== "")
             writer.tag(3, WireType.LengthDelimited).string(message.message);
+        /* optional float own_active_bid_amount = 4; */
+        if (message.ownActiveBidAmount !== undefined)
+            writer.tag(4, WireType.Bit32).float(message.ownActiveBidAmount);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

@@ -311,10 +311,21 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
         try:
             stub, channel = self._create_storage_stub(primary_address)
             with channel:
-                response = stub.GetAuction(pb2.GetAuctionRequest(auction_id=request.auction_id))
+                response = stub.GetAuction(pb2.GetAuctionRequest(
+                    auction_id=request.auction_id,
+                    bidder_id=request.bidder_id,
+                ))
                 if response.ok:
                     public_auction = self._to_public_auction(response.auction)
-                    return pb2.GetAuctionResponse(ok=True, auction=public_auction)
+                    public_response = pb2.GetAuctionResponse(
+                        ok=True,
+                        auction=public_auction,
+                    )
+                    if request.bidder_id:
+                        own_active_bid = response.auction.bids.get(request.bidder_id)
+                        if own_active_bid is not None:
+                            public_response.own_active_bid_amount = own_active_bid.amount
+                    return public_response
                 return pb2.GetAuctionResponse(ok=False, message="Auction not found")
         except Exception as e:
             return pb2.GetAuctionResponse(ok=False, message=str(e))

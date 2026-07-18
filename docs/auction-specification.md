@@ -379,29 +379,34 @@ Test coverage:
 
 ## 8. Read Consistency
 
-Authoritative reads use the current primary.
+✅ Authoritative reads use the current primary.
 
 Authoritative reads include:
 
-- single-auction status
-- bidder count
-- bidder's own active bid
-- reveal status
-- auction outcome
-- reads used by mutations
-- live auction updates
+- ✅ single-auction status
+- ✅ bidder count
+- ✅ bidder's own active bid
+- ✅ reveal status
+- ✅ auction outcome
+- ✅ reads used by mutations
+- ✅ live auction updates
 
 Required behavior:
 
-- Authoritative reads MUST be served from the current primary or from a
+- ✅ Authoritative reads MUST be served from the current primary or from a
   source proven to contain the same committed state.
-- Reads used by mutations MUST observe the latest authoritative state
+- ✅ Reads used by mutations MUST observe the latest authoritative state
   required for rule validation.
-- Live auction updates MUST reflect primary-committed state.
-- Replica reads MAY be used only for stale-tolerant discovery
+- ✅ Live auction updates MUST reflect primary-committed state.
+- ✅ Replica reads MAY be used only for stale-tolerant discovery
   operations.
-- Search and listing operations MAY use stale-tolerant replica reads
+- ✅ Search and listing operations MAY use stale-tolerant replica reads
   only if they do not violate visibility rules.
+
+Coverage includes storage role enforcement for authoritative reads and
+mutations, service routing to the current primary, public status/count/own-bid/
+reveal/outcome projections, primary-backed live updates, stale-version rule
+validation, and visibility-safe search from backup replicas.
 
 ---
 
