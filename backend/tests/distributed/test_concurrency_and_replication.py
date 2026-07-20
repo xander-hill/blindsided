@@ -6,7 +6,13 @@ from unittest import mock
 
 import grpc
 
-from blindsided.controller.service import ControllerService, ReplicaSyncStatus
+from blindsided.controller.service import (
+    ControllerService,
+    PrimaryAssignment,
+    PrimaryStatus,
+    ReplicaRecord,
+    ReplicaSyncStatus,
+)
 from blindsided.generated import blindsided_pb2 as pb2
 from blindsided.generated import blindsided_pb2_grpc as pb2_grpc
 from backend.tests.helpers import (
@@ -53,6 +59,77 @@ def running_storage_pair():
                 "backup_state_path": backup_state_path,
             }
         finally:
+            server.stop(0).wait(timeout=5)
+
+
+@contextmanager
+def running_promotion_cluster():
+    controller_address = f"127.0.0.1:{free_port()}"
+    candidate_address = f"127.0.0.1:{free_port()}"
+    replacement_address = f"127.0.0.1:{free_port()}"
+    controller = ControllerService()
+    candidate = make_judge(
+        role="backup",
+        address=candidate_address,
+        use_test_coordinator=False,
+    )
+    replacement = make_judge(role="backup", address=replacement_address)
+    candidate.auction_store["promotion-auction"] = pb2.Auction(
+        auction_id="promotion-auction",
+        seller_id="seller-a",
+        reserve_price=100.0,
+        version=1,
+        state=pb2.AUCTION_STATE_OPEN,
+        next_bid_sequence=1,
+        ends_at=future_timestamp(),
+    )
+    controller.nodes = {
+        candidate_address: ReplicaRecord(
+            address=candidate_address,
+            last_seen=2.0,
+            sync_status=ReplicaSyncStatus.SYNCHRONIZED,
+        ),
+        replacement_address: ReplicaRecord(
+            address=replacement_address,
+            last_seen=1.0,
+            sync_status=ReplicaSyncStatus.SYNCHRONIZED,
+        ),
+    }
+    controller.primary_assignment = PrimaryAssignment(
+        node_id=candidate_address,
+        epoch=7,
+        status=PrimaryStatus.PROMOTING,
+    )
+    controller.last_primary_epoch = 7
+
+    servers = []
+    for address, servicer, registration in (
+        (controller_address, controller, pb2_grpc.add_ClusterControllerServicer_to_server),
+        (candidate_address, candidate, pb2_grpc.add_StorageReplicaServiceServicer_to_server),
+        (replacement_address, replacement, pb2_grpc.add_StorageReplicaServiceServicer_to_server),
+    ):
+        server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+        registration(servicer, server)
+        server.add_insecure_port(address)
+        server.start()
+        servers.append(server)
+    try:
+        for address in (controller_address, candidate_address, replacement_address):
+            with grpc.insecure_channel(address) as channel:
+                grpc.channel_ready_future(channel).result(timeout=5)
+        with mock.patch(
+            "blindsided.storage.service.CONTROLLER_ADDRESS",
+            controller_address,
+        ):
+            yield {
+                "controller": controller,
+                "candidate": candidate,
+                "replacement": replacement,
+                "candidate_address": candidate_address,
+                "replacement_address": replacement_address,
+            }
+    finally:
+        for server in reversed(servers):
             server.stop(0).wait(timeout=5)
 
 
@@ -422,12 +499,13 @@ class DistributedBehaviorTests(BackendTestCase):
         with running_storage_pair() as pair:
             request = self._mutation_case("create", "promoted-replay")[1]
             acknowledged = pair["primary"].ApplyAuctionMutation(request, NoopContext())
-            promoted = pair["backup"].PromoteToPrimary(
-                pb2.PromotionRequest(new_role="primary"), NoopContext()
+            promoted = pair["backup"].BeginPrimaryPromotion(
+                pb2.BeginPrimaryPromotionRequest(epoch=1), NoopContext()
             )
+            pair["backup"].promotion_ready = True
             retry = pair["backup"].ApplyAuctionMutation(request, NoopContext())
         self.assertTrue(acknowledged.success)
-        self.assertTrue(promoted.success)
+        self.assertTrue(promoted.accepted)
         self.assertTrue(retry.success)
         self.assertTrue(retry.replayed)
         self.assertEqual(retry.current_version, acknowledged.current_version)
@@ -743,7 +821,8 @@ class DistributedBehaviorTests(BackendTestCase):
             side_effect=self._coordinate_to_backup(primary, backup),
         ):
             original = primary.ApplyAuctionMutation(request, NoopContext())
-        backup.PromoteToPrimary(pb2.PromotionRequest(new_role="primary"), NoopContext())
+        backup.BeginPrimaryPromotion(pb2.BeginPrimaryPromotionRequest(epoch=1), NoopContext())
+        backup.promotion_ready = True
         replay = backup.ApplyAuctionMutation(request, NoopContext())
 
         self.assertTrue(original.success)
@@ -816,10 +895,11 @@ class DistributedBehaviorTests(BackendTestCase):
             record.request_id: record
             for record in state.idempotency_records
         }
-        backup.PromoteToPrimary(
-            pb2.PromotionRequest(new_role="primary"),
+        backup.BeginPrimaryPromotion(
+            pb2.BeginPrimaryPromotionRequest(epoch=1),
             NoopContext(),
         )
+        backup.promotion_ready = True
         replay = backup.ApplyAuctionMutation(request, NoopContext())
 
         self.assertTrue(original.success)
@@ -867,7 +947,8 @@ class DistributedBehaviorTests(BackendTestCase):
             side_effect=self._coordinate_to_backup(primary, backup),
         ):
             original = primary.ApplyAuctionMutation(original_request, NoopContext())
-        backup.PromoteToPrimary(pb2.PromotionRequest(new_role="primary"), NoopContext())
+        backup.BeginPrimaryPromotion(pb2.BeginPrimaryPromotionRequest(epoch=1), NoopContext())
+        backup.promotion_ready = True
         conflict = backup.ApplyAuctionMutation(conflicting_request, NoopContext())
 
         self.assertTrue(original.success)
@@ -889,9 +970,128 @@ class DistributedBehaviorTests(BackendTestCase):
         controller.nodes["backup:50051"].sync_status = ReplicaSyncStatus.SYNCHRONIZED
 
         del controller.nodes["primary_address:50051"]
-        controller.primary_address = None
+        controller.primary_assignment = None
         with mock.patch.object(controller, "_notify_promotion") as notify:
             controller._elect_new_primary()
 
-        self.assertEqual(controller.primary_address, "backup:50051")
-        notify.assert_called_once_with("backup:50051")
+        self.assertEqual(controller.primary_assignment.node_id, "backup:50051")
+        self.assertEqual(controller.primary_assignment.epoch, 2)
+        self.assertEqual(controller.primary_assignment.status, PrimaryStatus.PROMOTING)
+        notify.assert_called_once_with("backup:50051", 2)
+
+    def test_end_to_end_promotion_barrier_blocks_then_publishes_ready_primary(self):
+        with running_promotion_cluster() as cluster:
+            controller = cluster["controller"]
+            candidate = cluster["candidate"]
+            candidate_address = cluster["candidate_address"]
+            begun = candidate.BeginPrimaryPromotion(
+                pb2.BeginPrimaryPromotionRequest(epoch=7), NoopContext()
+            )
+            before_primary = controller.GetPrimary(
+                pb2.GetPrimaryRequest(), NoopContext()
+            )
+            blocked_mutation = candidate.ApplyAuctionMutation(
+                pb2.AuctionMutationRequest(
+                    mutation_type=pb2.AUCTION_MUTATION_TYPE_PLACE_BID,
+                    request_id="blocked-promotion-bid",
+                    bidder_id="buyer-a",
+                    expected_version=1,
+                    auction=pb2.Auction(
+                        auction_id="promotion-auction",
+                        bids={"buyer-a": active_bid(200.0)},
+                    ),
+                ),
+                NoopContext(),
+            )
+            blocked_read = candidate.GetAuction(
+                pb2.GetAuctionRequest(auction_id="promotion-auction"),
+                NoopContext(),
+            )
+            available_sync = candidate.SyncFullState(
+                pb2.StateRequest(requester_id=cluster["replacement_address"]),
+                NoopContext(),
+            )
+
+            controller._notify_promotion(candidate_address, 7)
+
+            after_primary = controller.GetPrimary(
+                pb2.GetPrimaryRequest(), NoopContext()
+            )
+            ready_read = candidate.GetAuction(
+                pb2.GetAuctionRequest(auction_id="promotion-auction"),
+                NoopContext(),
+            )
+            ready_mutation = candidate.ApplyAuctionMutation(
+                pb2.AuctionMutationRequest(
+                    mutation_type=pb2.AUCTION_MUTATION_TYPE_PLACE_BID,
+                    request_id="ready-promotion-bid",
+                    bidder_id="buyer-a",
+                    expected_version=1,
+                    auction=pb2.Auction(
+                        auction_id="promotion-auction",
+                        bids={"buyer-a": active_bid(200.0)},
+                    ),
+                ),
+                NoopContext(),
+            )
+
+        self.assertEqual(controller.primary_assignment.epoch, 7)
+        self.assertTrue(begun.accepted)
+        self.assertFalse(before_primary.success)
+        self.assertEqual(before_primary.primary_address, "")
+        self.assertFalse(blocked_mutation.success)
+        self.assertIn("not ready", blocked_mutation.message)
+        self.assertFalse(blocked_read.ok)
+        self.assertIn("not ready", blocked_read.message)
+        self.assertTrue(available_sync.ok)
+        self.assertEqual(controller.primary_assignment.status, PrimaryStatus.READY)
+        self.assertTrue(candidate.promotion_ready)
+        self.assertEqual(
+            candidate.synchronous_backup_address,
+            cluster["replacement_address"],
+        )
+        self.assertEqual(
+            controller.nodes[cluster["replacement_address"]].sync_status,
+            ReplicaSyncStatus.SYNCHRONIZED,
+        )
+        self.assertTrue(after_primary.success)
+        self.assertEqual(after_primary.primary_address, candidate_address)
+        self.assertTrue(ready_read.ok)
+        self.assertTrue(ready_mutation.success)
+
+    def test_failed_replacement_synchronization_keeps_candidate_reads_and_writes_blocked(self):
+        with running_promotion_cluster() as cluster:
+            controller = cluster["controller"]
+            candidate = cluster["candidate"]
+            with mock.patch.object(
+                cluster["replacement"],
+                "_synchronize_from_primary",
+                return_value=False,
+            ):
+                controller._notify_promotion(cluster["candidate_address"], 7)
+
+            primary = controller.GetPrimary(pb2.GetPrimaryRequest(), NoopContext())
+            blocked_read = candidate.GetAuction(
+                pb2.GetAuctionRequest(auction_id="promotion-auction"),
+                NoopContext(),
+            )
+            blocked_mutation = candidate.ApplyAuctionMutation(
+                pb2.AuctionMutationRequest(
+                    mutation_type=pb2.AUCTION_MUTATION_TYPE_PLACE_BID,
+                    request_id="failed-sync-bid",
+                    bidder_id="buyer-a",
+                    expected_version=1,
+                    auction=pb2.Auction(
+                        auction_id="promotion-auction",
+                        bids={"buyer-a": active_bid(200.0)},
+                    ),
+                ),
+                NoopContext(),
+            )
+
+        self.assertEqual(controller.primary_assignment.status, PrimaryStatus.PROMOTING)
+        self.assertFalse(candidate.promotion_ready)
+        self.assertFalse(primary.success)
+        self.assertEqual(primary.primary_address, "")
+        self.assertFalse(blocked_read.ok)
+        self.assertFalse(blocked_mutation.success)

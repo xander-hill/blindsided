@@ -11,12 +11,18 @@ import type { GetPrimaryRequest } from "./blindsided";
 import type { RegisterResponse } from "./blindsided";
 import type { RegisterRequest } from "./blindsided";
 import { StorageReplicaService } from "./blindsided";
+import type { CompletePrimaryPromotionResponse } from "./blindsided";
+import type { CompletePrimaryPromotionRequest } from "./blindsided";
+import type { SynchronizeFromPrimaryResponse } from "./blindsided";
+import type { SynchronizeFromPrimaryRequest } from "./blindsided";
+import type { PromotionStateConfirmationResponse } from "./blindsided";
+import type { PromotionStateConfirmationRequest } from "./blindsided";
 import type { MutationDecisionResponse } from "./blindsided";
 import type { MutationDecisionRequest } from "./blindsided";
 import type { PrepareMutationResponse } from "./blindsided";
 import type { PrepareMutationRequest } from "./blindsided";
-import type { PromotionResponse } from "./blindsided";
-import type { PromotionRequest } from "./blindsided";
+import type { BeginPrimaryPromotionResponse } from "./blindsided";
+import type { BeginPrimaryPromotionRequest } from "./blindsided";
 import type { HealthCheckResponse } from "./blindsided";
 import type { HealthCheckRequest } from "./blindsided";
 import type { StateResponse } from "./blindsided";
@@ -163,9 +169,9 @@ export interface IStorageReplicaServiceClient {
      */
     heartbeat(input: HealthCheckRequest, options?: RpcOptions): UnaryCall<HealthCheckRequest, HealthCheckResponse>;
     /**
-     * @generated from protobuf rpc: PromoteToPrimary
+     * @generated from protobuf rpc: BeginPrimaryPromotion
      */
-    promoteToPrimary(input: PromotionRequest, options?: RpcOptions): UnaryCall<PromotionRequest, PromotionResponse>;
+    beginPrimaryPromotion(input: BeginPrimaryPromotionRequest, options?: RpcOptions): UnaryCall<BeginPrimaryPromotionRequest, BeginPrimaryPromotionResponse>;
     /**
      * @generated from protobuf rpc: PrepareAuctionMutation
      */
@@ -178,6 +184,18 @@ export interface IStorageReplicaServiceClient {
      * @generated from protobuf rpc: AbortPreparedMutation
      */
     abortPreparedMutation(input: MutationDecisionRequest, options?: RpcOptions): UnaryCall<MutationDecisionRequest, MutationDecisionResponse>;
+    /**
+     * @generated from protobuf rpc: ConfirmPromotionState
+     */
+    confirmPromotionState(input: PromotionStateConfirmationRequest, options?: RpcOptions): UnaryCall<PromotionStateConfirmationRequest, PromotionStateConfirmationResponse>;
+    /**
+     * @generated from protobuf rpc: SynchronizeFromPrimary
+     */
+    synchronizeFromPrimary(input: SynchronizeFromPrimaryRequest, options?: RpcOptions): UnaryCall<SynchronizeFromPrimaryRequest, SynchronizeFromPrimaryResponse>;
+    /**
+     * @generated from protobuf rpc: CompletePrimaryPromotion
+     */
+    completePrimaryPromotion(input: CompletePrimaryPromotionRequest, options?: RpcOptions): UnaryCall<CompletePrimaryPromotionRequest, CompletePrimaryPromotionResponse>;
 }
 /**
  * @generated from protobuf service blindsided.StorageReplicaService
@@ -224,11 +242,11 @@ export class StorageReplicaServiceClient implements IStorageReplicaServiceClient
         return stackIntercept<HealthCheckRequest, HealthCheckResponse>("unary", this._transport, method, opt, input);
     }
     /**
-     * @generated from protobuf rpc: PromoteToPrimary
+     * @generated from protobuf rpc: BeginPrimaryPromotion
      */
-    promoteToPrimary(input: PromotionRequest, options?: RpcOptions): UnaryCall<PromotionRequest, PromotionResponse> {
+    beginPrimaryPromotion(input: BeginPrimaryPromotionRequest, options?: RpcOptions): UnaryCall<BeginPrimaryPromotionRequest, BeginPrimaryPromotionResponse> {
         const method = this.methods[5], opt = this._transport.mergeOptions(options);
-        return stackIntercept<PromotionRequest, PromotionResponse>("unary", this._transport, method, opt, input);
+        return stackIntercept<BeginPrimaryPromotionRequest, BeginPrimaryPromotionResponse>("unary", this._transport, method, opt, input);
     }
     /**
      * @generated from protobuf rpc: PrepareAuctionMutation
@@ -250,6 +268,27 @@ export class StorageReplicaServiceClient implements IStorageReplicaServiceClient
     abortPreparedMutation(input: MutationDecisionRequest, options?: RpcOptions): UnaryCall<MutationDecisionRequest, MutationDecisionResponse> {
         const method = this.methods[8], opt = this._transport.mergeOptions(options);
         return stackIntercept<MutationDecisionRequest, MutationDecisionResponse>("unary", this._transport, method, opt, input);
+    }
+    /**
+     * @generated from protobuf rpc: ConfirmPromotionState
+     */
+    confirmPromotionState(input: PromotionStateConfirmationRequest, options?: RpcOptions): UnaryCall<PromotionStateConfirmationRequest, PromotionStateConfirmationResponse> {
+        const method = this.methods[9], opt = this._transport.mergeOptions(options);
+        return stackIntercept<PromotionStateConfirmationRequest, PromotionStateConfirmationResponse>("unary", this._transport, method, opt, input);
+    }
+    /**
+     * @generated from protobuf rpc: SynchronizeFromPrimary
+     */
+    synchronizeFromPrimary(input: SynchronizeFromPrimaryRequest, options?: RpcOptions): UnaryCall<SynchronizeFromPrimaryRequest, SynchronizeFromPrimaryResponse> {
+        const method = this.methods[10], opt = this._transport.mergeOptions(options);
+        return stackIntercept<SynchronizeFromPrimaryRequest, SynchronizeFromPrimaryResponse>("unary", this._transport, method, opt, input);
+    }
+    /**
+     * @generated from protobuf rpc: CompletePrimaryPromotion
+     */
+    completePrimaryPromotion(input: CompletePrimaryPromotionRequest, options?: RpcOptions): UnaryCall<CompletePrimaryPromotionRequest, CompletePrimaryPromotionResponse> {
+        const method = this.methods[11], opt = this._transport.mergeOptions(options);
+        return stackIntercept<CompletePrimaryPromotionRequest, CompletePrimaryPromotionResponse>("unary", this._transport, method, opt, input);
     }
 }
 /**

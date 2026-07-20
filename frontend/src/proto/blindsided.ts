@@ -554,24 +554,54 @@ export interface HealthCheckResponse {
     message: string;
 }
 /**
- * @generated from protobuf message blindsided.PromotionRequest
+ * @generated from protobuf message blindsided.BeginPrimaryPromotionRequest
  */
-export interface PromotionRequest {
+export interface BeginPrimaryPromotionRequest {
     /**
-     * @generated from protobuf field: string new_role = 1
+     * @generated from protobuf field: int64 epoch = 1
      */
-    newRole: string;
+    epoch: bigint;
 }
 /**
- * @generated from protobuf message blindsided.PromotionResponse
+ * @generated from protobuf message blindsided.BeginPrimaryPromotionResponse
  */
-export interface PromotionResponse {
+export interface BeginPrimaryPromotionResponse {
     /**
-     * @generated from protobuf field: bool success = 1
+     * @generated from protobuf field: bool accepted = 1
      */
-    success: boolean;
+    accepted: boolean;
     /**
-     * @generated from protobuf field: string message = 2
+     * @generated from protobuf field: int64 epoch = 2
+     */
+    epoch: bigint;
+    /**
+     * @generated from protobuf field: string message = 3
+     */
+    message: string;
+}
+/**
+ * @generated from protobuf message blindsided.PromotionStateConfirmationRequest
+ */
+export interface PromotionStateConfirmationRequest {
+    /**
+     * @generated from protobuf field: int64 epoch = 1
+     */
+    epoch: bigint;
+}
+/**
+ * @generated from protobuf message blindsided.PromotionStateConfirmationResponse
+ */
+export interface PromotionStateConfirmationResponse {
+    /**
+     * @generated from protobuf field: bool confirmed = 1
+     */
+    confirmed: boolean;
+    /**
+     * @generated from protobuf field: int64 epoch = 2
+     */
+    epoch: bigint;
+    /**
+     * @generated from protobuf field: string message = 3
      */
     message: string;
 }
@@ -600,6 +630,10 @@ export interface RegisterResponse {
      * @generated from protobuf field: string message = 3
      */
     message: string;
+    /**
+     * @generated from protobuf field: int64 epoch = 4
+     */
+    epoch: bigint;
 }
 /**
  * @generated from protobuf message blindsided.GetPrimaryRequest
@@ -783,6 +817,18 @@ export interface StorageSnapshot {
      * @generated from protobuf field: repeated blindsided.CommitDecision pending_backup_commits = 7
      */
     pendingBackupCommits: CommitDecision[];
+    /**
+     * @generated from protobuf field: int64 current_epoch = 8
+     */
+    currentEpoch: bigint;
+    /**
+     * @generated from protobuf field: bool promotion_ready = 9
+     */
+    promotionReady: boolean;
+    /**
+     * @generated from protobuf field: string synchronous_backup_address = 10
+     */
+    synchronousBackupAddress: string;
 }
 /**
  * @generated from protobuf message blindsided.CommitDecision
@@ -821,6 +867,10 @@ export interface SynchronizationCompleteRequest {
      * @generated from protobuf field: string source_primary_address = 2
      */
     sourcePrimaryAddress: string;
+    /**
+     * @generated from protobuf field: int64 epoch = 3
+     */
+    epoch: bigint;
 }
 /**
  * @generated from protobuf message blindsided.SynchronizationCompleteResponse
@@ -832,6 +882,66 @@ export interface SynchronizationCompleteResponse {
     success: boolean;
     /**
      * @generated from protobuf field: string message = 2
+     */
+    message: string;
+}
+/**
+ * @generated from protobuf message blindsided.SynchronizeFromPrimaryRequest
+ */
+export interface SynchronizeFromPrimaryRequest {
+    /**
+     * @generated from protobuf field: string primary_address = 1
+     */
+    primaryAddress: string;
+    /**
+     * @generated from protobuf field: int64 epoch = 2
+     */
+    epoch: bigint;
+}
+/**
+ * @generated from protobuf message blindsided.SynchronizeFromPrimaryResponse
+ */
+export interface SynchronizeFromPrimaryResponse {
+    /**
+     * @generated from protobuf field: bool success = 1
+     */
+    success: boolean;
+    /**
+     * @generated from protobuf field: int64 epoch = 2
+     */
+    epoch: bigint;
+    /**
+     * @generated from protobuf field: string message = 3
+     */
+    message: string;
+}
+/**
+ * @generated from protobuf message blindsided.CompletePrimaryPromotionRequest
+ */
+export interface CompletePrimaryPromotionRequest {
+    /**
+     * @generated from protobuf field: int64 epoch = 1
+     */
+    epoch: bigint;
+    /**
+     * @generated from protobuf field: string backup_address = 2
+     */
+    backupAddress: string;
+}
+/**
+ * @generated from protobuf message blindsided.CompletePrimaryPromotionResponse
+ */
+export interface CompletePrimaryPromotionResponse {
+    /**
+     * @generated from protobuf field: bool success = 1
+     */
+    success: boolean;
+    /**
+     * @generated from protobuf field: int64 epoch = 2
+     */
+    epoch: bigint;
+    /**
+     * @generated from protobuf field: string message = 3
      */
     message: string;
 }
@@ -2738,26 +2848,26 @@ class HealthCheckResponse$Type extends MessageType<HealthCheckResponse> {
  */
 export const HealthCheckResponse = new HealthCheckResponse$Type();
 // @generated message type with reflection information, may provide speed optimized methods
-class PromotionRequest$Type extends MessageType<PromotionRequest> {
+class BeginPrimaryPromotionRequest$Type extends MessageType<BeginPrimaryPromotionRequest> {
     constructor() {
-        super("blindsided.PromotionRequest", [
-            { no: 1, name: "new_role", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        super("blindsided.BeginPrimaryPromotionRequest", [
+            { no: 1, name: "epoch", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
-    create(value?: PartialMessage<PromotionRequest>): PromotionRequest {
+    create(value?: PartialMessage<BeginPrimaryPromotionRequest>): BeginPrimaryPromotionRequest {
         const message = globalThis.Object.create((this.messagePrototype!));
-        message.newRole = "";
+        message.epoch = 0n;
         if (value !== undefined)
-            reflectionMergePartial<PromotionRequest>(this, message, value);
+            reflectionMergePartial<BeginPrimaryPromotionRequest>(this, message, value);
         return message;
     }
-    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: PromotionRequest): PromotionRequest {
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BeginPrimaryPromotionRequest): BeginPrimaryPromotionRequest {
         let message = target ?? this.create(), end = reader.pos + length;
         while (reader.pos < end) {
             let [fieldNo, wireType] = reader.tag();
             switch (fieldNo) {
-                case /* string new_role */ 1:
-                    message.newRole = reader.string();
+                case /* int64 epoch */ 1:
+                    message.epoch = reader.int64().toBigInt();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -2770,10 +2880,10 @@ class PromotionRequest$Type extends MessageType<PromotionRequest> {
         }
         return message;
     }
-    internalBinaryWrite(message: PromotionRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
-        /* string new_role = 1; */
-        if (message.newRole !== "")
-            writer.tag(1, WireType.LengthDelimited).string(message.newRole);
+    internalBinaryWrite(message: BeginPrimaryPromotionRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 epoch = 1; */
+        if (message.epoch !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.epoch);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -2781,34 +2891,39 @@ class PromotionRequest$Type extends MessageType<PromotionRequest> {
     }
 }
 /**
- * @generated MessageType for protobuf message blindsided.PromotionRequest
+ * @generated MessageType for protobuf message blindsided.BeginPrimaryPromotionRequest
  */
-export const PromotionRequest = new PromotionRequest$Type();
+export const BeginPrimaryPromotionRequest = new BeginPrimaryPromotionRequest$Type();
 // @generated message type with reflection information, may provide speed optimized methods
-class PromotionResponse$Type extends MessageType<PromotionResponse> {
+class BeginPrimaryPromotionResponse$Type extends MessageType<BeginPrimaryPromotionResponse> {
     constructor() {
-        super("blindsided.PromotionResponse", [
-            { no: 1, name: "success", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
-            { no: 2, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        super("blindsided.BeginPrimaryPromotionResponse", [
+            { no: 1, name: "accepted", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 2, name: "epoch", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
         ]);
     }
-    create(value?: PartialMessage<PromotionResponse>): PromotionResponse {
+    create(value?: PartialMessage<BeginPrimaryPromotionResponse>): BeginPrimaryPromotionResponse {
         const message = globalThis.Object.create((this.messagePrototype!));
-        message.success = false;
+        message.accepted = false;
+        message.epoch = 0n;
         message.message = "";
         if (value !== undefined)
-            reflectionMergePartial<PromotionResponse>(this, message, value);
+            reflectionMergePartial<BeginPrimaryPromotionResponse>(this, message, value);
         return message;
     }
-    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: PromotionResponse): PromotionResponse {
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BeginPrimaryPromotionResponse): BeginPrimaryPromotionResponse {
         let message = target ?? this.create(), end = reader.pos + length;
         while (reader.pos < end) {
             let [fieldNo, wireType] = reader.tag();
             switch (fieldNo) {
-                case /* bool success */ 1:
-                    message.success = reader.bool();
+                case /* bool accepted */ 1:
+                    message.accepted = reader.bool();
                     break;
-                case /* string message */ 2:
+                case /* int64 epoch */ 2:
+                    message.epoch = reader.int64().toBigInt();
+                    break;
+                case /* string message */ 3:
                     message.message = reader.string();
                     break;
                 default:
@@ -2822,13 +2937,16 @@ class PromotionResponse$Type extends MessageType<PromotionResponse> {
         }
         return message;
     }
-    internalBinaryWrite(message: PromotionResponse, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
-        /* bool success = 1; */
-        if (message.success !== false)
-            writer.tag(1, WireType.Varint).bool(message.success);
-        /* string message = 2; */
+    internalBinaryWrite(message: BeginPrimaryPromotionResponse, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* bool accepted = 1; */
+        if (message.accepted !== false)
+            writer.tag(1, WireType.Varint).bool(message.accepted);
+        /* int64 epoch = 2; */
+        if (message.epoch !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.epoch);
+        /* string message = 3; */
         if (message.message !== "")
-            writer.tag(2, WireType.LengthDelimited).string(message.message);
+            writer.tag(3, WireType.LengthDelimited).string(message.message);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -2836,9 +2954,119 @@ class PromotionResponse$Type extends MessageType<PromotionResponse> {
     }
 }
 /**
- * @generated MessageType for protobuf message blindsided.PromotionResponse
+ * @generated MessageType for protobuf message blindsided.BeginPrimaryPromotionResponse
  */
-export const PromotionResponse = new PromotionResponse$Type();
+export const BeginPrimaryPromotionResponse = new BeginPrimaryPromotionResponse$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class PromotionStateConfirmationRequest$Type extends MessageType<PromotionStateConfirmationRequest> {
+    constructor() {
+        super("blindsided.PromotionStateConfirmationRequest", [
+            { no: 1, name: "epoch", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<PromotionStateConfirmationRequest>): PromotionStateConfirmationRequest {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.epoch = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<PromotionStateConfirmationRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: PromotionStateConfirmationRequest): PromotionStateConfirmationRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 epoch */ 1:
+                    message.epoch = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: PromotionStateConfirmationRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 epoch = 1; */
+        if (message.epoch !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.epoch);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message blindsided.PromotionStateConfirmationRequest
+ */
+export const PromotionStateConfirmationRequest = new PromotionStateConfirmationRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class PromotionStateConfirmationResponse$Type extends MessageType<PromotionStateConfirmationResponse> {
+    constructor() {
+        super("blindsided.PromotionStateConfirmationResponse", [
+            { no: 1, name: "confirmed", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 2, name: "epoch", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<PromotionStateConfirmationResponse>): PromotionStateConfirmationResponse {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.confirmed = false;
+        message.epoch = 0n;
+        message.message = "";
+        if (value !== undefined)
+            reflectionMergePartial<PromotionStateConfirmationResponse>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: PromotionStateConfirmationResponse): PromotionStateConfirmationResponse {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* bool confirmed */ 1:
+                    message.confirmed = reader.bool();
+                    break;
+                case /* int64 epoch */ 2:
+                    message.epoch = reader.int64().toBigInt();
+                    break;
+                case /* string message */ 3:
+                    message.message = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: PromotionStateConfirmationResponse, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* bool confirmed = 1; */
+        if (message.confirmed !== false)
+            writer.tag(1, WireType.Varint).bool(message.confirmed);
+        /* int64 epoch = 2; */
+        if (message.epoch !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.epoch);
+        /* string message = 3; */
+        if (message.message !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.message);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message blindsided.PromotionStateConfirmationResponse
+ */
+export const PromotionStateConfirmationResponse = new PromotionStateConfirmationResponse$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class RegisterRequest$Type extends MessageType<RegisterRequest> {
     constructor() {
@@ -2892,7 +3120,8 @@ class RegisterResponse$Type extends MessageType<RegisterResponse> {
         super("blindsided.RegisterResponse", [
             { no: 1, name: "success", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
             { no: 2, name: "is_primary", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
-            { no: 3, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+            { no: 3, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "epoch", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<RegisterResponse>): RegisterResponse {
@@ -2900,6 +3129,7 @@ class RegisterResponse$Type extends MessageType<RegisterResponse> {
         message.success = false;
         message.isPrimary = false;
         message.message = "";
+        message.epoch = 0n;
         if (value !== undefined)
             reflectionMergePartial<RegisterResponse>(this, message, value);
         return message;
@@ -2917,6 +3147,9 @@ class RegisterResponse$Type extends MessageType<RegisterResponse> {
                     break;
                 case /* string message */ 3:
                     message.message = reader.string();
+                    break;
+                case /* int64 epoch */ 4:
+                    message.epoch = reader.int64().toBigInt();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -2939,6 +3172,9 @@ class RegisterResponse$Type extends MessageType<RegisterResponse> {
         /* string message = 3; */
         if (message.message !== "")
             writer.tag(3, WireType.LengthDelimited).string(message.message);
+        /* int64 epoch = 4; */
+        if (message.epoch !== 0n)
+            writer.tag(4, WireType.Varint).int64(message.epoch);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -3545,7 +3781,10 @@ class StorageSnapshot$Type extends MessageType<StorageSnapshot> {
             { no: 4, name: "idempotency_records", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => IdempotencyRecord },
             { no: 5, name: "prepared_mutations", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => PrepareMutationRequest },
             { no: 6, name: "aborted_mutations", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => MutationDecisionRequest },
-            { no: 7, name: "pending_backup_commits", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => CommitDecision }
+            { no: 7, name: "pending_backup_commits", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => CommitDecision },
+            { no: 8, name: "current_epoch", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 9, name: "promotion_ready", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 10, name: "synchronous_backup_address", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<StorageSnapshot>): StorageSnapshot {
@@ -3557,6 +3796,9 @@ class StorageSnapshot$Type extends MessageType<StorageSnapshot> {
         message.preparedMutations = [];
         message.abortedMutations = [];
         message.pendingBackupCommits = [];
+        message.currentEpoch = 0n;
+        message.promotionReady = false;
+        message.synchronousBackupAddress = "";
         if (value !== undefined)
             reflectionMergePartial<StorageSnapshot>(this, message, value);
         return message;
@@ -3586,6 +3828,15 @@ class StorageSnapshot$Type extends MessageType<StorageSnapshot> {
                     break;
                 case /* repeated blindsided.CommitDecision pending_backup_commits */ 7:
                     message.pendingBackupCommits.push(CommitDecision.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* int64 current_epoch */ 8:
+                    message.currentEpoch = reader.int64().toBigInt();
+                    break;
+                case /* bool promotion_ready */ 9:
+                    message.promotionReady = reader.bool();
+                    break;
+                case /* string synchronous_backup_address */ 10:
+                    message.synchronousBackupAddress = reader.string();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -3620,6 +3871,15 @@ class StorageSnapshot$Type extends MessageType<StorageSnapshot> {
         /* repeated blindsided.CommitDecision pending_backup_commits = 7; */
         for (let i = 0; i < message.pendingBackupCommits.length; i++)
             CommitDecision.internalBinaryWrite(message.pendingBackupCommits[i], writer.tag(7, WireType.LengthDelimited).fork(), options).join();
+        /* int64 current_epoch = 8; */
+        if (message.currentEpoch !== 0n)
+            writer.tag(8, WireType.Varint).int64(message.currentEpoch);
+        /* bool promotion_ready = 9; */
+        if (message.promotionReady !== false)
+            writer.tag(9, WireType.Varint).bool(message.promotionReady);
+        /* string synchronous_backup_address = 10; */
+        if (message.synchronousBackupAddress !== "")
+            writer.tag(10, WireType.LengthDelimited).string(message.synchronousBackupAddress);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -3712,13 +3972,15 @@ class SynchronizationCompleteRequest$Type extends MessageType<SynchronizationCom
     constructor() {
         super("blindsided.SynchronizationCompleteRequest", [
             { no: 1, name: "replica_address", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 2, name: "source_primary_address", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+            { no: 2, name: "source_primary_address", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "epoch", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<SynchronizationCompleteRequest>): SynchronizationCompleteRequest {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.replicaAddress = "";
         message.sourcePrimaryAddress = "";
+        message.epoch = 0n;
         if (value !== undefined)
             reflectionMergePartial<SynchronizationCompleteRequest>(this, message, value);
         return message;
@@ -3733,6 +3995,9 @@ class SynchronizationCompleteRequest$Type extends MessageType<SynchronizationCom
                     break;
                 case /* string source_primary_address */ 2:
                     message.sourcePrimaryAddress = reader.string();
+                    break;
+                case /* int64 epoch */ 3:
+                    message.epoch = reader.int64().toBigInt();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -3752,6 +4017,9 @@ class SynchronizationCompleteRequest$Type extends MessageType<SynchronizationCom
         /* string source_primary_address = 2; */
         if (message.sourcePrimaryAddress !== "")
             writer.tag(2, WireType.LengthDelimited).string(message.sourcePrimaryAddress);
+        /* int64 epoch = 3; */
+        if (message.epoch !== 0n)
+            writer.tag(3, WireType.Varint).int64(message.epoch);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -3817,6 +4085,242 @@ class SynchronizationCompleteResponse$Type extends MessageType<SynchronizationCo
  * @generated MessageType for protobuf message blindsided.SynchronizationCompleteResponse
  */
 export const SynchronizationCompleteResponse = new SynchronizationCompleteResponse$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SynchronizeFromPrimaryRequest$Type extends MessageType<SynchronizeFromPrimaryRequest> {
+    constructor() {
+        super("blindsided.SynchronizeFromPrimaryRequest", [
+            { no: 1, name: "primary_address", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "epoch", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<SynchronizeFromPrimaryRequest>): SynchronizeFromPrimaryRequest {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.primaryAddress = "";
+        message.epoch = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<SynchronizeFromPrimaryRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SynchronizeFromPrimaryRequest): SynchronizeFromPrimaryRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string primary_address */ 1:
+                    message.primaryAddress = reader.string();
+                    break;
+                case /* int64 epoch */ 2:
+                    message.epoch = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SynchronizeFromPrimaryRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string primary_address = 1; */
+        if (message.primaryAddress !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.primaryAddress);
+        /* int64 epoch = 2; */
+        if (message.epoch !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.epoch);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message blindsided.SynchronizeFromPrimaryRequest
+ */
+export const SynchronizeFromPrimaryRequest = new SynchronizeFromPrimaryRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SynchronizeFromPrimaryResponse$Type extends MessageType<SynchronizeFromPrimaryResponse> {
+    constructor() {
+        super("blindsided.SynchronizeFromPrimaryResponse", [
+            { no: 1, name: "success", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 2, name: "epoch", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<SynchronizeFromPrimaryResponse>): SynchronizeFromPrimaryResponse {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.success = false;
+        message.epoch = 0n;
+        message.message = "";
+        if (value !== undefined)
+            reflectionMergePartial<SynchronizeFromPrimaryResponse>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SynchronizeFromPrimaryResponse): SynchronizeFromPrimaryResponse {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* bool success */ 1:
+                    message.success = reader.bool();
+                    break;
+                case /* int64 epoch */ 2:
+                    message.epoch = reader.int64().toBigInt();
+                    break;
+                case /* string message */ 3:
+                    message.message = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SynchronizeFromPrimaryResponse, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* bool success = 1; */
+        if (message.success !== false)
+            writer.tag(1, WireType.Varint).bool(message.success);
+        /* int64 epoch = 2; */
+        if (message.epoch !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.epoch);
+        /* string message = 3; */
+        if (message.message !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.message);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message blindsided.SynchronizeFromPrimaryResponse
+ */
+export const SynchronizeFromPrimaryResponse = new SynchronizeFromPrimaryResponse$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class CompletePrimaryPromotionRequest$Type extends MessageType<CompletePrimaryPromotionRequest> {
+    constructor() {
+        super("blindsided.CompletePrimaryPromotionRequest", [
+            { no: 1, name: "epoch", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "backup_address", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<CompletePrimaryPromotionRequest>): CompletePrimaryPromotionRequest {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.epoch = 0n;
+        message.backupAddress = "";
+        if (value !== undefined)
+            reflectionMergePartial<CompletePrimaryPromotionRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: CompletePrimaryPromotionRequest): CompletePrimaryPromotionRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 epoch */ 1:
+                    message.epoch = reader.int64().toBigInt();
+                    break;
+                case /* string backup_address */ 2:
+                    message.backupAddress = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: CompletePrimaryPromotionRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 epoch = 1; */
+        if (message.epoch !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.epoch);
+        /* string backup_address = 2; */
+        if (message.backupAddress !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.backupAddress);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message blindsided.CompletePrimaryPromotionRequest
+ */
+export const CompletePrimaryPromotionRequest = new CompletePrimaryPromotionRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class CompletePrimaryPromotionResponse$Type extends MessageType<CompletePrimaryPromotionResponse> {
+    constructor() {
+        super("blindsided.CompletePrimaryPromotionResponse", [
+            { no: 1, name: "success", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 2, name: "epoch", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<CompletePrimaryPromotionResponse>): CompletePrimaryPromotionResponse {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.success = false;
+        message.epoch = 0n;
+        message.message = "";
+        if (value !== undefined)
+            reflectionMergePartial<CompletePrimaryPromotionResponse>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: CompletePrimaryPromotionResponse): CompletePrimaryPromotionResponse {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* bool success */ 1:
+                    message.success = reader.bool();
+                    break;
+                case /* int64 epoch */ 2:
+                    message.epoch = reader.int64().toBigInt();
+                    break;
+                case /* string message */ 3:
+                    message.message = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: CompletePrimaryPromotionResponse, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* bool success = 1; */
+        if (message.success !== false)
+            writer.tag(1, WireType.Varint).bool(message.success);
+        /* int64 epoch = 2; */
+        if (message.epoch !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.epoch);
+        /* string message = 3; */
+        if (message.message !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.message);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message blindsided.CompletePrimaryPromotionResponse
+ */
+export const CompletePrimaryPromotionResponse = new CompletePrimaryPromotionResponse$Type();
 /**
  * @generated ServiceType for protobuf service blindsided.AuctionService
  */
@@ -3838,10 +4342,13 @@ export const StorageReplicaService = new ServiceType("blindsided.StorageReplicaS
     { name: "SearchAuctions", options: {}, I: SearchAuctionsRequest, O: GetStoredAuctionsResponse },
     { name: "SyncFullState", options: {}, I: StateRequest, O: StateResponse },
     { name: "Heartbeat", options: {}, I: HealthCheckRequest, O: HealthCheckResponse },
-    { name: "PromoteToPrimary", options: {}, I: PromotionRequest, O: PromotionResponse },
+    { name: "BeginPrimaryPromotion", options: {}, I: BeginPrimaryPromotionRequest, O: BeginPrimaryPromotionResponse },
     { name: "PrepareAuctionMutation", options: {}, I: PrepareMutationRequest, O: PrepareMutationResponse },
     { name: "CommitPreparedMutation", options: {}, I: MutationDecisionRequest, O: MutationDecisionResponse },
-    { name: "AbortPreparedMutation", options: {}, I: MutationDecisionRequest, O: MutationDecisionResponse }
+    { name: "AbortPreparedMutation", options: {}, I: MutationDecisionRequest, O: MutationDecisionResponse },
+    { name: "ConfirmPromotionState", options: {}, I: PromotionStateConfirmationRequest, O: PromotionStateConfirmationResponse },
+    { name: "SynchronizeFromPrimary", options: {}, I: SynchronizeFromPrimaryRequest, O: SynchronizeFromPrimaryResponse },
+    { name: "CompletePrimaryPromotion", options: {}, I: CompletePrimaryPromotionRequest, O: CompletePrimaryPromotionResponse }
 ]);
 /**
  * @generated ServiceType for protobuf service blindsided.ClusterController

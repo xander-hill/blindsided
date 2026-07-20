@@ -12,6 +12,17 @@ class ReplicaSyncStatus(Enum):
     UNSYNCHRONIZED = "unsynchronized"
     SYNCHRONIZED = "synchronized"
 
+class PrimaryStatus(Enum):
+    PROMOTING = "promoting"
+    READY = "ready"
+
+@dataclass
+class PrimaryAssignment:
+    node_id: str
+    epoch: int
+    status: PrimaryStatus
+    sync_backup_address: str | None = None
+
 
 @dataclass
 class ReplicaRecord:
@@ -30,7 +41,8 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
     def __init__(self):
         self.lock = threading.Lock()
         self.nodes: dict[str, ReplicaRecord] = {}
-        self.primary_address = None
+        self.primary_assignment: PrimaryAssignment | None = None
+        self.last_primary_epoch = 0
 
     def RegisterNode(self, request, context):
         with self.lock:
@@ -41,23 +53,35 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
                 last_seen=registered_at,
                 sync_status=ReplicaSyncStatus.UNSYNCHRONIZED,
             )
-            if not self.primary_address:
-                self.primary_address = addr
+            if self.primary_assignment is None:
+                self.last_primary_epoch += 1
+                self.primary_assignment = PrimaryAssignment(
+                    node_id=addr,
+                    epoch=self.last_primary_epoch,
+                    status=PrimaryStatus.READY,
+                )
                 print(f"[Controller] Initial Judge assigned as Primary: {addr}")
             print(f"[Controller] Registered node: {addr}")
             return pb2.RegisterResponse(
                 success=True, 
-                is_primary=(addr == self.primary_address),
-                message="Judge registered successfully"
+                is_primary=(addr == self.primary_assignment.node_id),
+                message="Judge registered successfully",
+                epoch=self.primary_assignment.epoch,
             )
 
     def GetPrimary(self, request, context):
         with self.lock:
-            if not self.primary_address:
+            assignment = self.primary_assignment
+            if assignment is None:
                 return pb2.GetPrimaryResponse(success=False, message="No Primary Judge available")
+            if assignment.status != PrimaryStatus.READY:
+                return pb2.GetPrimaryResponse(
+                    success=False,
+                    message="Primary promotion is not complete.",
+                )
             return pb2.GetPrimaryResponse(
                 success=True, 
-                primary_address=self.primary_address,
+                primary_address=assignment.node_id,
                 message="Primary retrieved"
             )
 
@@ -84,22 +108,78 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
                     success=False,
                     message="Replica is not registered.",
                 )
-            if source_primary_address != self.primary_address:
+            assignment = self.primary_assignment
+            if (
+                assignment is None
+                or source_primary_address != assignment.node_id
+                or request.epoch != assignment.epoch
+            ):
                 return pb2.SynchronizationCompleteResponse(
                     success=False,
-                    message="Synchronization source is not the current primary.",
+                    message="Synchronization source or epoch does not match the current primary.",
                 )
-            if replica_address == self.primary_address:
+            if replica_address == assignment.node_id:
                 return pb2.SynchronizationCompleteResponse(
                     success=False,
                     message="The primary cannot report itself as a synchronized backup.",
                 )
+            if (
+                assignment.status == PrimaryStatus.PROMOTING
+                and replica_address != assignment.sync_backup_address
+            ):
+                return pb2.SynchronizationCompleteResponse(
+                    success=False,
+                    message="Replica is not the designated promotion backup.",
+                )
 
             replica.sync_status = ReplicaSyncStatus.SYNCHRONIZED
+            if assignment.status == PrimaryStatus.READY:
+                return pb2.SynchronizationCompleteResponse(
+                    success=True,
+                    message="Replica synchronization recorded.",
+                )
+            candidate_address = assignment.node_id
+            epoch = assignment.epoch
+            backup_address = assignment.sync_backup_address
+
+        try:
+            with grpc.insecure_channel(candidate_address) as channel:
+                stub = pb2_grpc.StorageReplicaServiceStub(channel)
+                completion = stub.CompletePrimaryPromotion(
+                    pb2.CompletePrimaryPromotionRequest(
+                        epoch=epoch,
+                        backup_address=backup_address,
+                    )
+                )
+        except grpc.RpcError:
             return pb2.SynchronizationCompleteResponse(
-                success=True,
-                message="Replica synchronization recorded.",
+                success=False,
+                message="Primary promotion completion RPC failed.",
             )
+        if not completion.success or completion.epoch != epoch:
+            return pb2.SynchronizationCompleteResponse(
+                success=False,
+                message="Primary promotion completion was rejected.",
+            )
+
+        with self.lock:
+            assignment = self.primary_assignment
+            if (
+                assignment is None
+                or assignment.node_id != candidate_address
+                or assignment.epoch != epoch
+                or assignment.sync_backup_address != backup_address
+                or assignment.status != PrimaryStatus.PROMOTING
+            ):
+                return pb2.SynchronizationCompleteResponse(
+                    success=False,
+                    message="Primary assignment changed during completion.",
+                )
+            assignment.status = PrimaryStatus.READY
+        return pb2.SynchronizationCompleteResponse(
+            success=True,
+            message="Replica synchronized and primary promotion completed.",
+        )
 
     def _monitor_heartbeats(self):
         while True:
@@ -116,8 +196,11 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
                     except Exception:
                         print(f"[Controller] Judge {addr} failed heartbeat! Evicting...")
                         del self.nodes[addr]
-                        if self.primary_address == addr:
-                            self.primary_address = None
+                        if (
+                            self.primary_assignment is not None
+                            and self.primary_assignment.node_id == addr
+                        ):
+                            self.primary_assignment = None
                             self._elect_new_primary()
     
     def _elect_new_primary(self):
@@ -129,15 +212,83 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
             return
 
         new_primary_address = eligible_replicas[0].address
-        self.primary_address = new_primary_address
-        print(f"[Controller] ELECTED NEW PRIMARY: {self.primary_address}")
-        threading.Thread(target=self._notify_promotion, args=(new_primary_address,)).start()
+        self.last_primary_epoch += 1
+        assignment = PrimaryAssignment(
+            node_id=new_primary_address,
+            epoch=self.last_primary_epoch,
+            status=PrimaryStatus.PROMOTING,
+        )
+        self.primary_assignment = assignment
+        print(
+            f"[Controller] ELECTED NEW PRIMARY: {assignment.node_id} "
+            f"(epoch {assignment.epoch}, promoting)"
+        )
+        threading.Thread(
+            target=self._notify_promotion,
+            args=(assignment.node_id, assignment.epoch),
+        ).start()
 
-    def _notify_promotion(self, address):
+    def _notify_promotion(self, address, epoch):
         try:
+            with self.lock:
+                assignment = self.primary_assignment
+                replica = self.nodes.get(address)
+                if (
+                    assignment is None
+                    or assignment.node_id != address
+                    or assignment.epoch != epoch
+                    or assignment.status != PrimaryStatus.PROMOTING
+                    or replica is None
+                    or not replica.promotion_eligible
+                ):
+                    return
             with grpc.insecure_channel(address) as channel:
                 stub = pb2_grpc.StorageReplicaServiceStub(channel)
-                stub.PromoteToPrimary(pb2.PromotionRequest(new_role="primary"))
-                print(f"[Controller] Node {address} acknowledged promotion.")
+                response = stub.BeginPrimaryPromotion(
+                    pb2.BeginPrimaryPromotionRequest(epoch=epoch)
+                )
+                if not response.accepted or response.epoch != epoch:
+                    return
+                confirmation = stub.ConfirmPromotionState(
+                    pb2.PromotionStateConfirmationRequest(epoch=epoch)
+                )
+            if not confirmation.confirmed or confirmation.epoch != epoch:
+                return
+            with self.lock:
+                assignment = self.primary_assignment
+                if (
+                    assignment is None
+                    or assignment.node_id != address
+                    or assignment.epoch != epoch
+                    or assignment.status != PrimaryStatus.PROMOTING
+                ):
+                    return
+                backup = next(
+                    (
+                        replica
+                        for replica in self.nodes.values()
+                        if replica.address != address
+                    ),
+                    None,
+                )
+                if backup is None:
+                    return
+                backup.sync_status = ReplicaSyncStatus.UNSYNCHRONIZED
+                assignment.sync_backup_address = backup.address
+                backup_address = backup.address
+            with grpc.insecure_channel(backup_address) as channel:
+                backup_stub = pb2_grpc.StorageReplicaServiceStub(channel)
+                synchronization = backup_stub.SynchronizeFromPrimary(
+                    pb2.SynchronizeFromPrimaryRequest(
+                        primary_address=address,
+                        epoch=epoch,
+                    )
+                )
+            if not synchronization.success or synchronization.epoch != epoch:
+                return
+            print(
+                f"[Controller] Backup {backup_address} synchronized from "
+                f"{address} for promotion epoch {epoch}."
+            )
         except Exception as e:
             print(f"[Controller] Failed to promote {address}: {e}")

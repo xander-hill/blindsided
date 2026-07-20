@@ -63,6 +63,8 @@ def make_judge(
     judge.pending_backup_commits = {}
     judge.port = address.rsplit(":", 1)[-1]
     judge.replica_role = role
+    judge.current_epoch = 1 if role == "primary" else 0
+    judge.promotion_ready = role == "primary"
     judge.peer_addresses = peers or []
     judge.synchronous_backup_address = synchronous_backup_address
     judge.node_address = address

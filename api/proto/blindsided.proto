@@ -86,10 +86,13 @@ service StorageReplicaService {
     rpc SearchAuctions (SearchAuctionsRequest) returns (GetStoredAuctionsResponse);
     rpc SyncFullState (StateRequest) returns (StateResponse);
     rpc Heartbeat (HealthCheckRequest) returns (HealthCheckResponse);
-    rpc PromoteToPrimary (PromotionRequest) returns (PromotionResponse);
+    rpc BeginPrimaryPromotion (BeginPrimaryPromotionRequest) returns (BeginPrimaryPromotionResponse);
     rpc PrepareAuctionMutation (PrepareMutationRequest) returns (PrepareMutationResponse);
     rpc CommitPreparedMutation (MutationDecisionRequest) returns (MutationDecisionResponse);
     rpc AbortPreparedMutation (MutationDecisionRequest) returns (MutationDecisionResponse);
+    rpc ConfirmPromotionState (PromotionStateConfirmationRequest) returns (PromotionStateConfirmationResponse);
+    rpc SynchronizeFromPrimary (SynchronizeFromPrimaryRequest) returns (SynchronizeFromPrimaryResponse);
+    rpc CompletePrimaryPromotion (CompletePrimaryPromotionRequest) returns (CompletePrimaryPromotionResponse);
 }
 
 service ClusterController {
@@ -210,11 +213,22 @@ message StateResponse { bool ok = 1; repeated Auction auctions = 2; string messa
 message HealthCheckRequest { string request_source = 1; }
 message HealthCheckResponse { bool alive = 1; string role = 2; string message = 3; }
 
-message PromotionRequest { string new_role = 1; }
-message PromotionResponse { bool success = 1; string message = 2; }
+message BeginPrimaryPromotionRequest { int64 epoch = 1; }
+message BeginPrimaryPromotionResponse {
+    bool accepted = 1;
+    int64 epoch = 2;
+    string message = 3;
+}
+
+message PromotionStateConfirmationRequest { int64 epoch = 1; }
+message PromotionStateConfirmationResponse {
+    bool confirmed = 1;
+    int64 epoch = 2;
+    string message = 3;
+}
 
 message RegisterRequest { string address = 1; }
-message RegisterResponse { bool success = 1; bool is_primary = 2; string message = 3; }
+message RegisterResponse { bool success = 1; bool is_primary = 2; string message = 3; int64 epoch = 4; }
 
 message GetPrimaryRequest { string requester_id = 1; }
 message GetPrimaryResponse { bool success = 1; string primary_address = 2; string message = 3; }
@@ -266,6 +280,9 @@ message StorageSnapshot {
     repeated PrepareMutationRequest prepared_mutations = 5;
     repeated MutationDecisionRequest aborted_mutations = 6;
     repeated CommitDecision pending_backup_commits = 7;
+    int64 current_epoch = 8;
+    bool promotion_ready = 9;
+    string synchronous_backup_address = 10;
 }
 
 message CommitDecision {
@@ -279,9 +296,32 @@ message CommitDecision {
 message SynchronizationCompleteRequest {
     string replica_address = 1;
     string source_primary_address = 2;
+    int64 epoch = 3;
 }
 
 message SynchronizationCompleteResponse {
     bool success = 1;
     string message = 2;
+}
+
+message SynchronizeFromPrimaryRequest {
+    string primary_address = 1;
+    int64 epoch = 2;
+}
+
+message SynchronizeFromPrimaryResponse {
+    bool success = 1;
+    int64 epoch = 2;
+    string message = 3;
+}
+
+message CompletePrimaryPromotionRequest {
+    int64 epoch = 1;
+    string backup_address = 2;
+}
+
+message CompletePrimaryPromotionResponse {
+    bool success = 1;
+    int64 epoch = 2;
+    string message = 3;
 }

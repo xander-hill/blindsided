@@ -493,17 +493,38 @@ are exercised by `backend/tests/layers/test_storage_service.py` and
 
 Before accepting writes, a promoted primary MUST:
 
-- receive the current epoch
-- confirm complete committed state
-- establish a synchronized backup
-- complete promotion readiness
+- ✅ receive the current epoch
+- ✅ confirm complete committed state
+- ✅ establish a synchronized backup
+- ✅ complete promotion readiness
 
 Required behavior:
 
-- A promoted primary MUST NOT accept writes before completing the
+- ✅ A promoted primary MUST NOT accept writes before completing the
   promotion barrier.
-- Reads requiring authoritative state SHOULD be delayed or failed until
+- ✅ Reads requiring authoritative state SHOULD be delayed or failed until
   promotion readiness is complete.
+
+#### Test Coverage
+
+Unit coverage verifies epoch-bound promotion start, committed-state
+confirmation, replacement-backup designation and synchronization, durable
+storage activation, idempotent completion, stale/conflicting completion
+rejection, and controller publication only after storage reports activation
+success.
+
+The end-to-end controller/storage test runs a controller, promotion candidate,
+and replacement backup over gRPC. It verifies that the candidate enters
+`PROMOTING`, remains absent from `GetPrimary`, rejects mutations and
+authoritative `GetAuction`, continues serving full-state synchronization,
+accepts the matching replacement synchronization report, activates storage
+before controller publication, becomes `READY`, and then accepts authoritative
+reads and mutations. A corresponding failure test verifies that failed
+replacement synchronization leaves the candidate unpublished, unreadable for
+authoritative requests, and write-blocked. Coverage is in
+`backend/tests/layers/test_controller_service.py`,
+`backend/tests/layers/test_storage_service.py`, and
+`backend/tests/distributed/test_concurrency_and_replication.py`.
 
 ### Stale Primary Protection
 
