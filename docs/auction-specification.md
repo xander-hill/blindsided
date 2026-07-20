@@ -466,12 +466,28 @@ completion. These cases are exercised by
 
 Required behavior:
 
-- Only a backup known to contain the complete committed state MAY become
+- ✅ Only a backup known to contain the complete committed state MAY become
   primary.
-- A backup with missing, stale, or unverified committed state MUST NOT
+- ✅ A backup with missing, stale, or unverified committed state MUST NOT
   become primary.
-- Promotion eligibility MUST be determined using authoritative cluster
+- ✅ Promotion eligibility MUST be determined using authoritative cluster
   coordination state.
+
+#### Test Coverage
+
+Storage coverage verifies that full synchronization replaces and durably
+persists the backup's complete local state before synchronization completion is
+reported, and that failed synchronization or persistence never produces a
+completion report.
+
+Controller coverage verifies that only a registered backup synchronized from
+the current primary becomes eligible; unknown backups, stale-primary reports,
+incomplete reports, and primary self-reports are rejected. Re-registration
+revokes prior eligibility. Election tests verify acceptance of synchronized
+replicas, rejection when none are synchronized, and selection of a later
+synchronized replica when an unsynchronized replica appears first. These cases
+are exercised by `backend/tests/layers/test_storage_service.py` and
+`backend/tests/layers/test_controller_service.py`.
 
 ### Promotion Barrier
 

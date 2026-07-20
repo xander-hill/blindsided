@@ -61,7 +61,10 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                     if self.replica_role == "backup":
                         p_resp = stub.GetPrimary(pb2.GetPrimaryRequest())
                         if p_resp.success and p_resp.primary_address != self.node_address:
-                            self._synchronize_from_primary(p_resp.primary_address)
+                            if not self._synchronize_from_primary(p_resp.primary_address):
+                                raise RuntimeError(
+                                    "Full synchronization did not complete successfully."
+                                )
                     connected = True
             except Exception as e:
                 print(f"[Judge] Booting... Controller not ready: {e}")
@@ -1066,21 +1069,86 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             self.replica_role = "primary"
             return pb2.PromotionResponse(success=True, message="Promoted to Primary")
 
-    def _synchronize_from_primary(self, primary_address):
+    def _synchronize_from_primary(self, primary_address) -> bool:
         try:
             with grpc.insecure_channel(primary_address) as ch:
                 stub = pb2_grpc.StorageReplicaServiceStub(ch)
-                resp = stub.SyncFullState(pb2.StateRequest(), timeout=10.0)
-                for auction in resp.auctions:
-                    if not self._committed_state_error(auction):
-                        self.auction_store[auction.auction_id] = auction
-                self.idempotency_records = {
-                    record.request_id: record
-                    for record in resp.idempotency_records
-                }
-                self._persist_state_to_disk()
+                response = stub.SyncFullState(
+                    pb2.StateRequest(requester_id=self.node_address),
+                    timeout=10.0,
+                )
+            if not self._replace_with_full_state(response):
+                return False
+            return self._report_synchronization_complete(primary_address)
         except Exception as e:
             print(f"[Judge] Sync failed: {e}")
+            return False
+
+    def _replace_with_full_state(self, response: pb2.StateResponse) -> bool:
+        if not response.ok:
+            return False
+
+        replacement_auctions: dict[str, pb2.Auction] = {}
+        for auction in response.auctions:
+            if (
+                not auction.auction_id.strip()
+                or auction.auction_id in replacement_auctions
+                or self._committed_state_error(auction)
+            ):
+                return False
+            copied_auction = pb2.Auction()
+            copied_auction.CopyFrom(auction)
+            replacement_auctions[copied_auction.auction_id] = copied_auction
+
+        replacement_records: dict[str, pb2.IdempotencyRecord] = {}
+        for record in response.idempotency_records:
+            if not record.request_id.strip() or record.request_id in replacement_records:
+                return False
+            copied_record = pb2.IdempotencyRecord()
+            copied_record.CopyFrom(record)
+            replacement_records[copied_record.request_id] = copied_record
+
+        with self.state_lock:
+            previous_collections = (
+                self.auction_store,
+                self.idempotency_records,
+                self.prepared_mutations,
+                self.aborted_mutations,
+                self.pending_backup_commits,
+            )
+            self.auction_store = replacement_auctions
+            self.idempotency_records = replacement_records
+            self.prepared_mutations = {}
+            self.aborted_mutations = {}
+            self.pending_backup_commits = {}
+            try:
+                self._persist_state_to_disk()
+            except Exception as error:
+                (
+                    self.auction_store,
+                    self.idempotency_records,
+                    self.prepared_mutations,
+                    self.aborted_mutations,
+                    self.pending_backup_commits,
+                ) = previous_collections
+                print(f"[Judge] Could not persist synchronized state: {error}")
+                return False
+        return True
+
+    def _report_synchronization_complete(self, primary_address: str) -> bool:
+        try:
+            with grpc.insecure_channel(CONTROLLER_ADDRESS) as channel:
+                stub = pb2_grpc.ClusterControllerStub(channel)
+                response = stub.ReportSynchronizationComplete(
+                    pb2.SynchronizationCompleteRequest(
+                        replica_address=self.node_address,
+                        source_primary_address=primary_address,
+                    ),
+                    timeout=2.0,
+                )
+            return response.success
+        except grpc.RpcError:
+            return False
 
     def _load_state_from_disk(self) -> None:
         if not self.state_file_path or not os.path.exists(self.state_file_path):

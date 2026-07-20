@@ -96,6 +96,7 @@ service ClusterController {
     rpc RegisterNode (RegisterRequest) returns (RegisterResponse);
     rpc GetPrimary (GetPrimaryRequest) returns (GetPrimaryResponse);
     rpc GetClusterInfo (ClusterInfoRequest) returns (ClusterInfoResponse);
+    rpc ReportSynchronizationComplete (SynchronizationCompleteRequest) returns (SynchronizationCompleteResponse);
 }
 
 // --- Requests & Responses ---
@@ -273,4 +274,14 @@ message CommitDecision {
     IdempotencyRecord idempotency_record = 3;
     string primary_id = 4;
     string backup_address = 5;
+}
+
+message SynchronizationCompleteRequest {
+    string replica_address = 1;
+    string source_primary_address = 2;
+}
+
+message SynchronizationCompleteResponse {
+    bool success = 1;
+    string message = 2;
 }

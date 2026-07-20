@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+from enum import Enum
 import threading
 import time
 
@@ -6,18 +8,39 @@ import grpc
 from blindsided.generated import blindsided_pb2 as pb2
 from blindsided.generated import blindsided_pb2_grpc as pb2_grpc
 
+class ReplicaSyncStatus(Enum):
+    UNSYNCHRONIZED = "unsynchronized"
+    SYNCHRONIZED = "synchronized"
+
+
+@dataclass
+class ReplicaRecord:
+    address: str
+    last_seen: float
+    sync_status: ReplicaSyncStatus
+
+    @property
+    def promotion_eligible(self) -> bool:
+        return self.sync_status == ReplicaSyncStatus.SYNCHRONIZED
+
+
 class ControllerService(pb2_grpc.ClusterControllerServicer):
     """Tracks storage replicas and promotes a new primary after failures."""
 
     def __init__(self):
         self.lock = threading.Lock()
-        self.nodes = {} 
+        self.nodes: dict[str, ReplicaRecord] = {}
         self.primary_address = None
 
     def RegisterNode(self, request, context):
         with self.lock:
             addr = request.address
-            self.nodes[addr] = time.time()
+            registered_at = time.time()
+            self.nodes[addr] = ReplicaRecord(
+                address=addr,
+                last_seen=registered_at,
+                sync_status=ReplicaSyncStatus.UNSYNCHRONIZED,
+            )
             if not self.primary_address:
                 self.primary_address = addr
                 print(f"[Controller] Initial Judge assigned as Primary: {addr}")
@@ -42,21 +65,54 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
         with self.lock:
             return pb2.ClusterInfoResponse(
                 success=True,
-                node_addresses=list(self.nodes.keys()),
+                node_addresses=[replica.address for replica in self.nodes.values()],
                 message=f"Found {len(self.nodes)} active Judges"
+            )
+
+    def ReportSynchronizationComplete(self, request, context):
+        with self.lock:
+            replica_address = request.replica_address.strip()
+            source_primary_address = request.source_primary_address.strip()
+            if not replica_address or not source_primary_address:
+                return pb2.SynchronizationCompleteResponse(
+                    success=False,
+                    message="Replica and source primary addresses are required.",
+                )
+            replica = self.nodes.get(replica_address)
+            if replica is None:
+                return pb2.SynchronizationCompleteResponse(
+                    success=False,
+                    message="Replica is not registered.",
+                )
+            if source_primary_address != self.primary_address:
+                return pb2.SynchronizationCompleteResponse(
+                    success=False,
+                    message="Synchronization source is not the current primary.",
+                )
+            if replica_address == self.primary_address:
+                return pb2.SynchronizationCompleteResponse(
+                    success=False,
+                    message="The primary cannot report itself as a synchronized backup.",
+                )
+
+            replica.sync_status = ReplicaSyncStatus.SYNCHRONIZED
+            return pb2.SynchronizationCompleteResponse(
+                success=True,
+                message="Replica synchronization recorded.",
             )
 
     def _monitor_heartbeats(self):
         while True:
             time.sleep(5)
             with self.lock:
-                for addr in list(self.nodes.keys()):
+                for addr, replica in list(self.nodes.items()):
                     try:
                         with grpc.insecure_channel(addr) as channel:
                             stub = pb2_grpc.StorageReplicaServiceStub(channel)
                             response = stub.Heartbeat(pb2.HealthCheckRequest(request_source="CONTROLLER"), timeout=2.0)
                             if not response.alive:
                                 raise Exception("Node reported unhealthy")
+                            replica.last_seen = time.time()
                     except Exception:
                         print(f"[Controller] Judge {addr} failed heartbeat! Evicting...")
                         del self.nodes[addr]
@@ -65,11 +121,14 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
                             self._elect_new_primary()
     
     def _elect_new_primary(self):
-        if not self.nodes:
-            print("[Controller] CRITICAL: The Vault is empty. All Judges are dead.")
+        eligible_replicas = [
+            replica for replica in self.nodes.values() if replica.promotion_eligible
+        ]
+        if not eligible_replicas:
+            print("[Controller] CRITICAL: No synchronized replica can be promoted.")
             return
 
-        new_primary_address = list(self.nodes.keys())[0]
+        new_primary_address = eligible_replicas[0].address
         self.primary_address = new_primary_address
         print(f"[Controller] ELECTED NEW PRIMARY: {self.primary_address}")
         threading.Thread(target=self._notify_promotion, args=(new_primary_address,)).start()

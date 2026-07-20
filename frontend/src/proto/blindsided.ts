@@ -810,6 +810,32 @@ export interface CommitDecision {
     backupAddress: string;
 }
 /**
+ * @generated from protobuf message blindsided.SynchronizationCompleteRequest
+ */
+export interface SynchronizationCompleteRequest {
+    /**
+     * @generated from protobuf field: string replica_address = 1
+     */
+    replicaAddress: string;
+    /**
+     * @generated from protobuf field: string source_primary_address = 2
+     */
+    sourcePrimaryAddress: string;
+}
+/**
+ * @generated from protobuf message blindsided.SynchronizationCompleteResponse
+ */
+export interface SynchronizationCompleteResponse {
+    /**
+     * @generated from protobuf field: bool success = 1
+     */
+    success: boolean;
+    /**
+     * @generated from protobuf field: string message = 2
+     */
+    message: string;
+}
+/**
  * @generated from protobuf enum blindsided.AuctionState
  */
 export enum AuctionState {
@@ -3681,6 +3707,116 @@ class CommitDecision$Type extends MessageType<CommitDecision> {
  * @generated MessageType for protobuf message blindsided.CommitDecision
  */
 export const CommitDecision = new CommitDecision$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SynchronizationCompleteRequest$Type extends MessageType<SynchronizationCompleteRequest> {
+    constructor() {
+        super("blindsided.SynchronizationCompleteRequest", [
+            { no: 1, name: "replica_address", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "source_primary_address", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<SynchronizationCompleteRequest>): SynchronizationCompleteRequest {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.replicaAddress = "";
+        message.sourcePrimaryAddress = "";
+        if (value !== undefined)
+            reflectionMergePartial<SynchronizationCompleteRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SynchronizationCompleteRequest): SynchronizationCompleteRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string replica_address */ 1:
+                    message.replicaAddress = reader.string();
+                    break;
+                case /* string source_primary_address */ 2:
+                    message.sourcePrimaryAddress = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SynchronizationCompleteRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string replica_address = 1; */
+        if (message.replicaAddress !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.replicaAddress);
+        /* string source_primary_address = 2; */
+        if (message.sourcePrimaryAddress !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.sourcePrimaryAddress);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message blindsided.SynchronizationCompleteRequest
+ */
+export const SynchronizationCompleteRequest = new SynchronizationCompleteRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SynchronizationCompleteResponse$Type extends MessageType<SynchronizationCompleteResponse> {
+    constructor() {
+        super("blindsided.SynchronizationCompleteResponse", [
+            { no: 1, name: "success", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 2, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<SynchronizationCompleteResponse>): SynchronizationCompleteResponse {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.success = false;
+        message.message = "";
+        if (value !== undefined)
+            reflectionMergePartial<SynchronizationCompleteResponse>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SynchronizationCompleteResponse): SynchronizationCompleteResponse {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* bool success */ 1:
+                    message.success = reader.bool();
+                    break;
+                case /* string message */ 2:
+                    message.message = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SynchronizationCompleteResponse, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* bool success = 1; */
+        if (message.success !== false)
+            writer.tag(1, WireType.Varint).bool(message.success);
+        /* string message = 2; */
+        if (message.message !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.message);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message blindsided.SynchronizationCompleteResponse
+ */
+export const SynchronizationCompleteResponse = new SynchronizationCompleteResponse$Type();
 /**
  * @generated ServiceType for protobuf service blindsided.AuctionService
  */
@@ -3713,5 +3849,6 @@ export const StorageReplicaService = new ServiceType("blindsided.StorageReplicaS
 export const ClusterController = new ServiceType("blindsided.ClusterController", [
     { name: "RegisterNode", options: {}, I: RegisterRequest, O: RegisterResponse },
     { name: "GetPrimary", options: {}, I: GetPrimaryRequest, O: GetPrimaryResponse },
-    { name: "GetClusterInfo", options: {}, I: ClusterInfoRequest, O: ClusterInfoResponse }
+    { name: "GetClusterInfo", options: {}, I: ClusterInfoRequest, O: ClusterInfoResponse },
+    { name: "ReportSynchronizationComplete", options: {}, I: SynchronizationCompleteRequest, O: SynchronizationCompleteResponse }
 ]);

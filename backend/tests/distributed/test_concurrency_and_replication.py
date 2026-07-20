@@ -6,7 +6,7 @@ from unittest import mock
 
 import grpc
 
-from blindsided.controller.service import ControllerService
+from blindsided.controller.service import ControllerService, ReplicaSyncStatus
 from blindsided.generated import blindsided_pb2 as pb2
 from blindsided.generated import blindsided_pb2_grpc as pb2_grpc
 from backend.tests.helpers import (
@@ -886,6 +886,7 @@ class DistributedBehaviorTests(BackendTestCase):
         controller = ControllerService()
         controller.RegisterNode(pb2.RegisterRequest(address="primary_address:50051"), NoopContext())
         controller.RegisterNode(pb2.RegisterRequest(address="backup:50051"), NoopContext())
+        controller.nodes["backup:50051"].sync_status = ReplicaSyncStatus.SYNCHRONIZED
 
         del controller.nodes["primary_address:50051"]
         controller.primary_address = None

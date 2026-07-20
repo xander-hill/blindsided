@@ -524,3 +524,19 @@ class CommitDecision(_message.Message):
     primary_id: str
     backup_address: str
     def __init__(self, request_id: _Optional[str] = ..., auction: _Optional[_Union[Auction, _Mapping]] = ..., idempotency_record: _Optional[_Union[IdempotencyRecord, _Mapping]] = ..., primary_id: _Optional[str] = ..., backup_address: _Optional[str] = ...) -> None: ...
+
+class SynchronizationCompleteRequest(_message.Message):
+    __slots__ = ("replica_address", "source_primary_address")
+    REPLICA_ADDRESS_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_PRIMARY_ADDRESS_FIELD_NUMBER: _ClassVar[int]
+    replica_address: str
+    source_primary_address: str
+    def __init__(self, replica_address: _Optional[str] = ..., source_primary_address: _Optional[str] = ...) -> None: ...
+
+class SynchronizationCompleteResponse(_message.Message):
+    __slots__ = ("success", "message")
+    SUCCESS_FIELD_NUMBER: _ClassVar[int]
+    MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    success: bool
+    message: str
+    def __init__(self, success: bool = ..., message: _Optional[str] = ...) -> None: ...
