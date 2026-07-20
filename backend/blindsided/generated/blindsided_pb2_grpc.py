@@ -795,6 +795,11 @@ class ClusterControllerStub(object):
                 request_serializer=blindsided__pb2.ClusterInfoRequest.SerializeToString,
                 response_deserializer=blindsided__pb2.ClusterInfoResponse.FromString,
                 _registered_method=True)
+        self.ReportSynchronizationComplete = channel.unary_unary(
+                '/blindsided.ClusterController/ReportSynchronizationComplete',
+                request_serializer=blindsided__pb2.SynchronizationCompleteRequest.SerializeToString,
+                response_deserializer=blindsided__pb2.SynchronizationCompleteResponse.FromString,
+                _registered_method=True)
 
 
 class ClusterControllerServicer(object):
@@ -818,6 +823,12 @@ class ClusterControllerServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ReportSynchronizationComplete(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_ClusterControllerServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -835,6 +846,11 @@ def add_ClusterControllerServicer_to_server(servicer, server):
                     servicer.GetClusterInfo,
                     request_deserializer=blindsided__pb2.ClusterInfoRequest.FromString,
                     response_serializer=blindsided__pb2.ClusterInfoResponse.SerializeToString,
+            ),
+            'ReportSynchronizationComplete': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReportSynchronizationComplete,
+                    request_deserializer=blindsided__pb2.SynchronizationCompleteRequest.FromString,
+                    response_serializer=blindsided__pb2.SynchronizationCompleteResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -918,6 +934,33 @@ class ClusterController(object):
             '/blindsided.ClusterController/GetClusterInfo',
             blindsided__pb2.ClusterInfoRequest.SerializeToString,
             blindsided__pb2.ClusterInfoResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ReportSynchronizationComplete(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/blindsided.ClusterController/ReportSynchronizationComplete',
+            blindsided__pb2.SynchronizationCompleteRequest.SerializeToString,
+            blindsided__pb2.SynchronizationCompleteResponse.FromString,
             options,
             channel_credentials,
             insecure,

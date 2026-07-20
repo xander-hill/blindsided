@@ -2,6 +2,8 @@
 // @generated from protobuf file "blindsided.proto" (package "blindsided", syntax proto3)
 // tslint:disable
 import { ClusterController } from "./blindsided";
+import type { SynchronizationCompleteResponse } from "./blindsided";
+import type { SynchronizationCompleteRequest } from "./blindsided";
 import type { ClusterInfoResponse } from "./blindsided";
 import type { ClusterInfoRequest } from "./blindsided";
 import type { GetPrimaryResponse } from "./blindsided";
@@ -266,6 +268,10 @@ export interface IClusterControllerClient {
      * @generated from protobuf rpc: GetClusterInfo
      */
     getClusterInfo(input: ClusterInfoRequest, options?: RpcOptions): UnaryCall<ClusterInfoRequest, ClusterInfoResponse>;
+    /**
+     * @generated from protobuf rpc: ReportSynchronizationComplete
+     */
+    reportSynchronizationComplete(input: SynchronizationCompleteRequest, options?: RpcOptions): UnaryCall<SynchronizationCompleteRequest, SynchronizationCompleteResponse>;
 }
 /**
  * @generated from protobuf service blindsided.ClusterController
@@ -296,5 +302,12 @@ export class ClusterControllerClient implements IClusterControllerClient, Servic
     getClusterInfo(input: ClusterInfoRequest, options?: RpcOptions): UnaryCall<ClusterInfoRequest, ClusterInfoResponse> {
         const method = this.methods[2], opt = this._transport.mergeOptions(options);
         return stackIntercept<ClusterInfoRequest, ClusterInfoResponse>("unary", this._transport, method, opt, input);
+    }
+    /**
+     * @generated from protobuf rpc: ReportSynchronizationComplete
+     */
+    reportSynchronizationComplete(input: SynchronizationCompleteRequest, options?: RpcOptions): UnaryCall<SynchronizationCompleteRequest, SynchronizationCompleteResponse> {
+        const method = this.methods[3], opt = this._transport.mergeOptions(options);
+        return stackIntercept<SynchronizationCompleteRequest, SynchronizationCompleteResponse>("unary", this._transport, method, opt, input);
     }
 }

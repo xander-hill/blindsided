@@ -2087,3 +2087,175 @@ class StorageServiceTests(BackendTestCase):
         self.assertFalse(response.auctions[0].HasField("result"))
         self.assertEqual(judge.auction_store["overdue"].state, pb2.AUCTION_STATE_OPEN)
         self.assertEqual(judge.auction_store["overdue"].version, 2)
+
+    def test_full_sync_atomically_replaces_local_state_before_reporting(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = f"{temp_dir}/backup.pb"
+            judge = make_judge(
+                role="backup",
+                address="backup:50051",
+                state_file_path=state_path,
+            )
+            judge.auction_store["stale-auction"] = pb2.Auction(
+                auction_id="stale-auction", version=8, state=pb2.AUCTION_STATE_OPEN
+            )
+            judge.idempotency_records["stale-request"] = pb2.IdempotencyRecord(
+                request_id="stale-request"
+            )
+            judge.prepared_mutations["stale-prepare"] = pb2.PrepareMutationRequest(
+                request_id="stale-prepare"
+            )
+            judge.aborted_mutations["stale-abort"] = pb2.MutationDecisionRequest(
+                request_id="stale-abort"
+            )
+            judge.pending_backup_commits["stale-pending"] = pb2.CommitDecision(
+                request_id="stale-pending"
+            )
+            response = pb2.StateResponse(
+                ok=True,
+                auctions=[pb2.Auction(
+                    auction_id="current-auction",
+                    version=3,
+                    state=pb2.AUCTION_STATE_OPEN,
+                )],
+                idempotency_records=[pb2.IdempotencyRecord(
+                    request_id="current-request"
+                )],
+            )
+
+            replaced = judge._replace_with_full_state(response)
+            snapshot = pb2.StorageSnapshot()
+            with open(state_path, "rb") as state_file:
+                snapshot.ParseFromString(state_file.read())
+
+        self.assertTrue(replaced)
+        self.assertEqual(set(judge.auction_store), {"current-auction"})
+        self.assertEqual(set(judge.idempotency_records), {"current-request"})
+        self.assertEqual(judge.prepared_mutations, {})
+        self.assertEqual(judge.aborted_mutations, {})
+        self.assertEqual(judge.pending_backup_commits, {})
+        self.assertEqual([auction.auction_id for auction in snapshot.auctions], ["current-auction"])
+        self.assertEqual(len(snapshot.prepared_mutations), 0)
+        self.assertEqual(len(snapshot.aborted_mutations), 0)
+        self.assertEqual(len(snapshot.pending_backup_commits), 0)
+
+    def test_storage_reports_synchronization_only_after_full_state_replacement(self):
+        judge = make_judge(role="backup", address="backup:50051")
+        state_response = pb2.StateResponse(
+            ok=True,
+            auctions=[pb2.Auction(
+                auction_id="current-auction",
+                version=1,
+                state=pb2.AUCTION_STATE_OPEN,
+            )],
+        )
+        storage_stub = mock.Mock()
+        storage_stub.SyncFullState.return_value = state_response
+
+        with (
+            mock.patch(
+                "blindsided.storage.service.grpc.insecure_channel",
+                return_value=ChannelContext(),
+            ),
+            mock.patch(
+                "blindsided.storage.service.pb2_grpc.StorageReplicaServiceStub",
+                return_value=storage_stub,
+            ),
+            mock.patch.object(
+                judge, "_report_synchronization_complete", return_value=True
+            ) as report,
+        ):
+            synchronized = judge._synchronize_from_primary("primary:50051")
+
+        self.assertTrue(synchronized)
+        self.assertEqual(set(judge.auction_store), {"current-auction"})
+        report.assert_called_once_with("primary:50051")
+        sync_request = storage_stub.SyncFullState.call_args.args[0]
+        self.assertEqual(sync_request.requester_id, "backup:50051")
+
+    def test_synchronization_report_identifies_backup_and_source_primary(self):
+        judge = make_judge(role="backup", address="backup:50051")
+        controller_stub = mock.Mock()
+        controller_stub.ReportSynchronizationComplete.return_value = (
+            pb2.SynchronizationCompleteResponse(success=True)
+        )
+
+        with (
+            mock.patch(
+                "blindsided.storage.service.grpc.insecure_channel",
+                return_value=ChannelContext(),
+            ),
+            mock.patch(
+                "blindsided.storage.service.pb2_grpc.ClusterControllerStub",
+                return_value=controller_stub,
+            ),
+        ):
+            reported = judge._report_synchronization_complete("primary:50051")
+
+        self.assertTrue(reported)
+        request = controller_stub.ReportSynchronizationComplete.call_args.args[0]
+        self.assertEqual(request.replica_address, "backup:50051")
+        self.assertEqual(request.source_primary_address, "primary:50051")
+
+    def test_failed_synchronize_from_primary_does_not_report_completion(self):
+        judge = make_judge(role="backup", address="backup:50051")
+        storage_stub = mock.Mock()
+        storage_stub.SyncFullState.side_effect = PrepareRpcError()
+        controller_stub = mock.Mock()
+
+        with (
+            mock.patch(
+                "blindsided.storage.service.grpc.insecure_channel",
+                return_value=ChannelContext(),
+            ),
+            mock.patch(
+                "blindsided.storage.service.pb2_grpc.StorageReplicaServiceStub",
+                return_value=storage_stub,
+            ),
+            mock.patch(
+                "blindsided.storage.service.pb2_grpc.ClusterControllerStub",
+                return_value=controller_stub,
+            ) as controller_stub_factory,
+        ):
+            synchronized = judge._synchronize_from_primary("primary:50051")
+
+        self.assertFalse(synchronized)
+        controller_stub_factory.assert_not_called()
+        controller_stub.ReportSynchronizationComplete.assert_not_called()
+
+    def test_full_sync_persistence_failure_restores_state_and_is_not_reported(self):
+        judge = make_judge(role="backup", address="backup:50051")
+        stale = pb2.Auction(
+            auction_id="stale-auction", version=4, state=pb2.AUCTION_STATE_OPEN
+        )
+        judge.auction_store[stale.auction_id] = stale
+        storage_stub = mock.Mock()
+        storage_stub.SyncFullState.return_value = pb2.StateResponse(
+            ok=True,
+            auctions=[pb2.Auction(
+                auction_id="current-auction",
+                version=5,
+                state=pb2.AUCTION_STATE_OPEN,
+            )],
+        )
+
+        with (
+            mock.patch(
+                "blindsided.storage.service.grpc.insecure_channel",
+                return_value=ChannelContext(),
+            ),
+            mock.patch(
+                "blindsided.storage.service.pb2_grpc.StorageReplicaServiceStub",
+                return_value=storage_stub,
+            ),
+            mock.patch.object(
+                judge, "_persist_state_to_disk", side_effect=OSError("disk unavailable")
+            ),
+            mock.patch.object(judge, "_report_synchronization_complete") as report,
+        ):
+            synchronized = judge._synchronize_from_primary("primary:50051")
+
+        self.assertFalse(synchronized)
+        self.assertEqual(set(judge.auction_store), {"stale-auction"})
+        self.assertEqual(judge.auction_store["stale-auction"], stale)
+        report.assert_not_called()

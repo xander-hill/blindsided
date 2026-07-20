@@ -419,17 +419,44 @@ A mutation is acknowledged only after it has been committed to:
 
 Required behavior:
 
-- The system MUST NOT acknowledge a mutation before the primary commits
+- ✅ The system MUST NOT acknowledge a mutation before the primary commits
   it.
-- The system MUST NOT acknowledge a mutation before the designated
+- ✅ The system MUST NOT acknowledge a mutation before the designated
   synchronous backup commits it.
-- If the acknowledgement requirement cannot be satisfied, the mutation
+- ✅ If the acknowledgement requirement cannot be satisfied, the mutation
   MUST NOT be committed.
-- If the acknowledgement requirement cannot be satisfied, the auction
+- ✅ If the acknowledgement requirement cannot be satisfied, the auction
   version MUST NOT advance.
-- If the acknowledgement requirement cannot be satisfied, the client
+- ✅ If the acknowledgement requirement cannot be satisfied, the client
   MUST receive a failure response.
-- An acknowledged mutation MUST be recoverable after primary failover.
+- ✅ An acknowledged mutation MUST be recoverable after primary failover.
+
+The no-commit and no-version-advance requirements apply before the primary
+records its durable commit decision. After that decision is durable, the
+mutation is irrevocable: the client receives acknowledgement-pending rather
+than success, and an idempotent retry completes the backup commit. This is the
+recovery rule defined by ADR-014.
+
+### Test Coverage
+
+Distributed coverage verifies the complete two-replica create, bid,
+withdrawal, and reveal paths; rejection when no synchronous backup is
+designated or reachable; rejection of incorrect prepare and commit versions;
+recovery of pending commits and prepared mutations across primary and backup
+restarts; acknowledged-state survival through backup promotion; and consistent
+ordering and idempotency records under concurrent bids.
+
+Persistence-failure coverage verifies rollback of failed backup preparation,
+restoration of retryable prepared state after failed backup commit persistence,
+abort after failure to persist the primary commit decision, and retry after
+failure to persist removal of a completed pending decision.
+
+Protocol-idempotency coverage verifies identical prepare, commit, and abort
+retries; rejection of conflicting prepares and tombstoned requests; rejection
+of abort after commit; and fingerprint conflict detection before pending-commit
+completion. These cases are exercised by
+`backend/tests/distributed/test_concurrency_and_replication.py` and
+`backend/tests/layers/test_storage_service.py`.
 
 ---
 
@@ -439,12 +466,28 @@ Required behavior:
 
 Required behavior:
 
-- Only a backup known to contain the complete committed state MAY become
+- ✅ Only a backup known to contain the complete committed state MAY become
   primary.
-- A backup with missing, stale, or unverified committed state MUST NOT
+- ✅ A backup with missing, stale, or unverified committed state MUST NOT
   become primary.
-- Promotion eligibility MUST be determined using authoritative cluster
+- ✅ Promotion eligibility MUST be determined using authoritative cluster
   coordination state.
+
+#### Test Coverage
+
+Storage coverage verifies that full synchronization replaces and durably
+persists the backup's complete local state before synchronization completion is
+reported, and that failed synchronization or persistence never produces a
+completion report.
+
+Controller coverage verifies that only a registered backup synchronized from
+the current primary becomes eligible; unknown backups, stale-primary reports,
+incomplete reports, and primary self-reports are rejected. Re-registration
+revokes prior eligibility. Election tests verify acceptance of synchronized
+replicas, rejection when none are synchronized, and selection of a later
+synchronized replica when an unsynchronized replica appears first. These cases
+are exercised by `backend/tests/layers/test_storage_service.py` and
+`backend/tests/layers/test_controller_service.py`.
 
 ### Promotion Barrier
 
