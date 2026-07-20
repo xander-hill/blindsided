@@ -1404,10 +1404,11 @@ class StorageServiceTests(BackendTestCase):
             self._decision_request(),
             NoopContext(),
         )
-        judge.PromoteToPrimary(
-            pb2.PromotionRequest(new_role="primary"),
+        judge.BeginPrimaryPromotion(
+            pb2.BeginPrimaryPromotionRequest(epoch=1),
             NoopContext(),
         )
+        judge.promotion_ready = True
         mutation = judge.ApplyAuctionMutation(
             pb2.AuctionMutationRequest(
                 mutation_type=pb2.AUCTION_MUTATION_TYPE_CREATE,
@@ -1431,6 +1432,276 @@ class StorageServiceTests(BackendTestCase):
         self.assertIn("aborted", mutation.message)
         self.assertEqual(judge.auction_store, {})
         self.assertEqual(judge.idempotency_records, {})
+
+    def test_begin_primary_promotion_rejects_nonpositive_and_older_epochs(self):
+        judge = make_judge(role="backup")
+        judge.current_epoch = 5
+
+        for epoch in (0, -1, 4):
+            with self.subTest(epoch=epoch):
+                response = judge.BeginPrimaryPromotion(
+                    pb2.BeginPrimaryPromotionRequest(epoch=epoch),
+                    NoopContext(),
+                )
+                self.assertFalse(response.accepted)
+                self.assertEqual(response.epoch, 5)
+                self.assertEqual(judge.replica_role, "backup")
+                self.assertFalse(judge.promotion_ready)
+
+    def test_begin_primary_promotion_accepts_identical_epoch_idempotently(self):
+        judge = make_judge(role="backup")
+        judge.current_epoch = 5
+        judge.replica_role = "primary"
+        judge.promotion_ready = False
+
+        with mock.patch.object(judge, "_persist_state_to_disk") as persist:
+            response = judge.BeginPrimaryPromotion(
+                pb2.BeginPrimaryPromotionRequest(epoch=5),
+                NoopContext(),
+            )
+
+        self.assertTrue(response.accepted)
+        self.assertEqual(response.epoch, 5)
+        self.assertEqual(judge.replica_role, "primary")
+        self.assertFalse(judge.promotion_ready)
+        persist.assert_not_called()
+
+    def test_begin_primary_promotion_records_new_epoch_and_starts_not_ready(self):
+        judge = make_judge(role="backup")
+        judge.current_epoch = 5
+
+        response = judge.BeginPrimaryPromotion(
+            pb2.BeginPrimaryPromotionRequest(epoch=6),
+            NoopContext(),
+        )
+
+        self.assertTrue(response.accepted)
+        self.assertEqual(response.epoch, 6)
+        self.assertEqual(judge.current_epoch, 6)
+        self.assertEqual(judge.replica_role, "primary")
+        self.assertFalse(judge.promotion_ready)
+
+    def test_primary_promotion_candidate_remains_write_blocked(self):
+        judge = make_judge(role="backup")
+        begun = judge.BeginPrimaryPromotion(
+            pb2.BeginPrimaryPromotionRequest(epoch=6),
+            NoopContext(),
+        )
+
+        mutation = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
+                mutation_type=pb2.AUCTION_MUTATION_TYPE_CREATE,
+                request_id="blocked-during-promotion",
+                auction=pb2.Auction(
+                    auction_id="blocked-auction",
+                    seller_id="seller-a",
+                    reserve_price=100.0,
+                    ends_at=future_timestamp(),
+                ),
+            ),
+            NoopContext(),
+        )
+
+        self.assertTrue(begun.accepted)
+        self.assertEqual(judge.replica_role, "primary")
+        self.assertFalse(judge.promotion_ready)
+        self.assertFalse(mutation.success)
+        self.assertEqual(
+            mutation.failure_reason,
+            pb2.MUTATION_FAILURE_REASON_INVALID_STATE,
+        )
+        self.assertIn("not ready", mutation.message)
+        self.assertEqual(judge.auction_store, {})
+        self.assertEqual(judge.idempotency_records, {})
+
+    def test_promotion_candidate_confirms_valid_committed_state_for_current_epoch(self):
+        judge = make_judge(role="backup")
+        judge.auction_store["auction-1"] = pb2.Auction(
+            auction_id="auction-1",
+            version=3,
+            state=pb2.AUCTION_STATE_OPEN,
+        )
+        begun = judge.BeginPrimaryPromotion(
+            pb2.BeginPrimaryPromotionRequest(epoch=6), NoopContext()
+        )
+
+        confirmation = judge.ConfirmPromotionState(
+            pb2.PromotionStateConfirmationRequest(epoch=6), NoopContext()
+        )
+
+        self.assertTrue(begun.accepted)
+        self.assertTrue(confirmation.confirmed)
+        self.assertEqual(confirmation.epoch, 6)
+        self.assertFalse(judge.promotion_ready)
+
+    def test_promotion_state_confirmation_rejects_mismatched_epoch(self):
+        candidate = make_judge(role="backup")
+        candidate.BeginPrimaryPromotion(
+            pb2.BeginPrimaryPromotionRequest(epoch=6), NoopContext()
+        )
+
+        confirmation = candidate.ConfirmPromotionState(
+            pb2.PromotionStateConfirmationRequest(epoch=5), NoopContext()
+        )
+
+        self.assertFalse(confirmation.confirmed)
+        self.assertEqual(confirmation.epoch, 6)
+
+    def test_normal_backup_cannot_confirm_promotion(self):
+        backup = make_judge(role="backup")
+        backup.current_epoch = 1
+        confirmation = backup.ConfirmPromotionState(
+            pb2.PromotionStateConfirmationRequest(epoch=1), NoopContext()
+        )
+
+        self.assertFalse(confirmation.confirmed)
+        self.assertIn("candidate", confirmation.message)
+
+    def test_unresolved_prepared_mutation_prevents_promotion_confirmation(self):
+        judge = make_judge(role="backup")
+        judge.BeginPrimaryPromotion(
+            pb2.BeginPrimaryPromotionRequest(epoch=6), NoopContext()
+        )
+        judge.prepared_mutations["prepared-request"] = pb2.PrepareMutationRequest(
+            request_id="prepared-request"
+        )
+
+        confirmation = judge.ConfirmPromotionState(
+            pb2.PromotionStateConfirmationRequest(epoch=6), NoopContext()
+        )
+
+        self.assertFalse(confirmation.confirmed)
+        self.assertIn("prepared", confirmation.message)
+
+    def test_invalid_auction_state_prevents_promotion_confirmation(self):
+        judge = make_judge(role="backup")
+        judge.auction_store["invalid-auction"] = pb2.Auction(
+            auction_id="invalid-auction",
+            version=2,
+            state=pb2.AUCTION_STATE_REVEALED,
+        )
+        judge.BeginPrimaryPromotion(
+            pb2.BeginPrimaryPromotionRequest(epoch=6), NoopContext()
+        )
+
+        confirmation = judge.ConfirmPromotionState(
+            pb2.PromotionStateConfirmationRequest(epoch=6), NoopContext()
+        )
+
+        self.assertFalse(confirmation.confirmed)
+        self.assertIn("invalid", confirmation.message)
+
+    def test_complete_primary_promotion_validates_epoch_role_and_backup(self):
+        candidate = make_judge(role="backup", address="candidate:50051")
+        candidate.BeginPrimaryPromotion(
+            pb2.BeginPrimaryPromotionRequest(epoch=7), NoopContext()
+        )
+        cases = (
+            (6, "backup:50051", "epoch"),
+            (7, "", "backup address"),
+            (7, "candidate:50051", "differ"),
+        )
+        for epoch, backup_address, expected_message in cases:
+            with self.subTest(epoch=epoch, backup=backup_address):
+                response = candidate.CompletePrimaryPromotion(
+                    pb2.CompletePrimaryPromotionRequest(
+                        epoch=epoch,
+                        backup_address=backup_address,
+                    ),
+                    NoopContext(),
+                )
+                self.assertFalse(response.success)
+                self.assertIn(expected_message, response.message)
+                self.assertFalse(candidate.promotion_ready)
+
+        normal_backup = make_judge(role="backup", address="normal-backup:50051")
+        normal_backup.current_epoch = 7
+        response = normal_backup.CompletePrimaryPromotion(
+            pb2.CompletePrimaryPromotionRequest(
+                epoch=7,
+                backup_address="other-backup:50051",
+            ),
+            NoopContext(),
+        )
+        self.assertFalse(response.success)
+        self.assertIn("candidate", response.message)
+
+    def test_complete_primary_promotion_activates_and_retries_idempotently(self):
+        candidate = make_judge(role="backup", address="candidate:50051")
+        candidate.BeginPrimaryPromotion(
+            pb2.BeginPrimaryPromotionRequest(epoch=7), NoopContext()
+        )
+        request = pb2.CompletePrimaryPromotionRequest(
+            epoch=7,
+            backup_address="backup:50051",
+        )
+
+        first = candidate.CompletePrimaryPromotion(request, NoopContext())
+        with mock.patch.object(candidate, "_persist_state_to_disk") as persist:
+            repeated = candidate.CompletePrimaryPromotion(request, NoopContext())
+            conflicting = candidate.CompletePrimaryPromotion(
+                pb2.CompletePrimaryPromotionRequest(
+                    epoch=7,
+                    backup_address="different-backup:50051",
+                ),
+                NoopContext(),
+            )
+
+        self.assertTrue(first.success)
+        self.assertTrue(repeated.success)
+        self.assertFalse(conflicting.success)
+        persist.assert_not_called()
+        self.assertTrue(candidate.promotion_ready)
+        self.assertEqual(candidate.synchronous_backup_address, "backup:50051")
+
+    def test_matching_promotion_completion_makes_storage_writable(self):
+        candidate = make_judge(role="backup", address="candidate:50051")
+        candidate.BeginPrimaryPromotion(
+            pb2.BeginPrimaryPromotionRequest(epoch=7), NoopContext()
+        )
+        completion = candidate.CompletePrimaryPromotion(
+            pb2.CompletePrimaryPromotionRequest(
+                epoch=7,
+                backup_address="backup:50051",
+            ),
+            NoopContext(),
+        )
+
+        mutation = candidate.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
+                mutation_type=pb2.AUCTION_MUTATION_TYPE_CREATE,
+                request_id="post-promotion-write",
+                auction=pb2.Auction(
+                    auction_id="post-promotion-auction",
+                    seller_id="seller-a",
+                    reserve_price=100.0,
+                    ends_at=future_timestamp(),
+                ),
+            ),
+            NoopContext(),
+        )
+
+        self.assertTrue(completion.success)
+        self.assertTrue(candidate.promotion_ready)
+        self.assertTrue(mutation.success)
+        self.assertIn("post-promotion-auction", candidate.auction_store)
+
+    def test_promotion_state_confirmation_rejects_unresolved_commit_decision(self):
+        judge = make_judge(role="backup")
+        judge.BeginPrimaryPromotion(
+            pb2.BeginPrimaryPromotionRequest(epoch=6), NoopContext()
+        )
+        judge.pending_backup_commits["pending-request"] = pb2.CommitDecision(
+            request_id="pending-request"
+        )
+
+        confirmation = judge.ConfirmPromotionState(
+            pb2.PromotionStateConfirmationRequest(epoch=6), NoopContext()
+        )
+
+        self.assertFalse(confirmation.confirmed)
+        self.assertIn("unresolved", confirmation.message)
+        self.assertFalse(judge.promotion_ready)
 
     def test_initial_commit_assigns_version_and_starts_without_active_bids(self):
         judge = make_judge(role="primary")
@@ -2169,7 +2440,7 @@ class StorageServiceTests(BackendTestCase):
 
         self.assertTrue(synchronized)
         self.assertEqual(set(judge.auction_store), {"current-auction"})
-        report.assert_called_once_with("primary:50051")
+        report.assert_called_once_with("primary:50051", epoch=0)
         sync_request = storage_stub.SyncFullState.call_args.args[0]
         self.assertEqual(sync_request.requester_id, "backup:50051")
 
@@ -2196,6 +2467,23 @@ class StorageServiceTests(BackendTestCase):
         request = controller_stub.ReportSynchronizationComplete.call_args.args[0]
         self.assertEqual(request.replica_address, "backup:50051")
         self.assertEqual(request.source_primary_address, "primary:50051")
+        self.assertEqual(request.epoch, 0)
+
+    def test_synchronize_from_primary_rpc_replaces_state_for_supplied_epoch(self):
+        judge = make_judge(role="backup", address="backup:50051")
+        with mock.patch.object(
+            judge, "_synchronize_from_primary", return_value=True
+        ) as synchronize:
+            response = judge.SynchronizeFromPrimary(
+                pb2.SynchronizeFromPrimaryRequest(
+                    primary_address="promoting-primary:50051",
+                    epoch=7,
+                ),
+                NoopContext(),
+            )
+
+        self.assertTrue(response.success)
+        synchronize.assert_called_once_with("promoting-primary:50051", epoch=7)
 
     def test_failed_synchronize_from_primary_does_not_report_completion(self):
         judge = make_judge(role="backup", address="backup:50051")

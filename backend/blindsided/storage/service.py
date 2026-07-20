@@ -34,6 +34,8 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
         self.prepared_mutations: dict[str, pb2.PrepareMutationRequest] = {}
         self.aborted_mutations: dict[str, pb2.MutationDecisionRequest] = {}
         self.pending_backup_commits: dict[str, pb2.CommitDecision] = {}
+        self.current_epoch = 0
+        self.promotion_ready = False
 
         raw_address = os.getenv("POD_IP", "localhost")
         if "storage-" in raw_address and ".storage-service" not in raw_address:
@@ -57,6 +59,8 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                         timeout=2.0,
                     )
                     self.replica_role = "primary" if resp.is_primary else "backup"
+                    self.current_epoch = resp.epoch
+                    self.promotion_ready = self.replica_role == "primary"
 
                     if self.replica_role == "backup":
                         p_resp = stub.GetPrimary(pb2.GetPrimaryRequest())
@@ -77,6 +81,12 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                     success=False,
                     failure_reason=pb2.MUTATION_FAILURE_REASON_INVALID_STATE,
                     message="Auction mutations require the primary replica.",
+                )
+            if not self.promotion_ready:
+                return pb2.AuctionMutationResponse(
+                    success=False,
+                    failure_reason=pb2.MUTATION_FAILURE_REASON_INVALID_STATE,
+                    message="Primary promotion is not ready for mutations.",
                 )
             if request.request_id and request.request_id in self.aborted_mutations:
                 return pb2.AuctionMutationResponse(
@@ -539,6 +549,11 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 return pb2.GetStoredAuctionResponse(
                     ok=False,
                     message="Authoritative auction reads require the primary replica.",
+                )
+            if not self.promotion_ready:
+                return pb2.GetStoredAuctionResponse(
+                    ok=False,
+                    message="Primary promotion is not ready for authoritative reads.",
                 )
             auction = self.auction_store.get(request.auction_id)
             if auction:
@@ -1064,12 +1079,184 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 message="Alive",
             )
 
-    def PromoteToPrimary(self, request, context):
+    def BeginPrimaryPromotion(self, request, context):
         with self.state_lock:
-            self.replica_role = "primary"
-            return pb2.PromotionResponse(success=True, message="Promoted to Primary")
+            if request.epoch <= 0:
+                return pb2.BeginPrimaryPromotionResponse(
+                    accepted=False,
+                    epoch=self.current_epoch,
+                    message="Promotion epoch must be positive.",
+                )
+            if request.epoch < self.current_epoch:
+                return pb2.BeginPrimaryPromotionResponse(
+                    accepted=False,
+                    epoch=self.current_epoch,
+                    message="Promotion epoch is older than the current epoch.",
+                )
+            if request.epoch == self.current_epoch:
+                return pb2.BeginPrimaryPromotionResponse(
+                    accepted=True,
+                    epoch=self.current_epoch,
+                    message="Primary promotion already begun for this epoch.",
+                )
 
-    def _synchronize_from_primary(self, primary_address) -> bool:
+            previous_role = self.replica_role
+            previous_epoch = self.current_epoch
+            previous_ready = self.promotion_ready
+            self.replica_role = "primary"
+            self.current_epoch = request.epoch
+            self.promotion_ready = False
+            try:
+                self._persist_state_to_disk()
+            except Exception as error:
+                self.replica_role = previous_role
+                self.current_epoch = previous_epoch
+                self.promotion_ready = previous_ready
+                return pb2.BeginPrimaryPromotionResponse(
+                    accepted=False,
+                    epoch=self.current_epoch,
+                    message=f"Could not persist promotion epoch: {error}",
+                )
+            return pb2.BeginPrimaryPromotionResponse(
+                accepted=True,
+                epoch=self.current_epoch,
+                message="Primary promotion begun.",
+            )
+
+    def ConfirmPromotionState(self, request, context):
+        with self.state_lock:
+            if request.epoch <= 0 or request.epoch != self.current_epoch:
+                return pb2.PromotionStateConfirmationResponse(
+                    confirmed=False,
+                    epoch=self.current_epoch,
+                    message="Confirmation epoch must match the current promotion epoch.",
+                )
+            if self.replica_role != "primary":
+                return pb2.PromotionStateConfirmationResponse(
+                    confirmed=False,
+                    epoch=self.current_epoch,
+                    message="Only the primary promotion candidate can confirm state.",
+                )
+            for auction in self.auction_store.values():
+                state_error = self._committed_state_error(auction)
+                if state_error:
+                    return pb2.PromotionStateConfirmationResponse(
+                        confirmed=False,
+                        epoch=self.current_epoch,
+                        message=f"Committed auction state is invalid: {state_error}",
+                    )
+            if self.prepared_mutations:
+                return pb2.PromotionStateConfirmationResponse(
+                    confirmed=False,
+                    epoch=self.current_epoch,
+                    message="Committed state has unresolved prepared mutations.",
+                )
+            if self.pending_backup_commits:
+                return pb2.PromotionStateConfirmationResponse(
+                    confirmed=False,
+                    epoch=self.current_epoch,
+                    message="Committed state has unresolved backup commit decisions.",
+                )
+            return pb2.PromotionStateConfirmationResponse(
+                confirmed=True,
+                epoch=self.current_epoch,
+                message="Committed state confirmed for promotion.",
+            )
+
+    def CompletePrimaryPromotion(self, request, context):
+        with self.state_lock:
+            backup_address = request.backup_address.strip()
+            if request.epoch != self.current_epoch:
+                return pb2.CompletePrimaryPromotionResponse(
+                    success=False,
+                    epoch=self.current_epoch,
+                    message="Completion epoch must match the current epoch.",
+                )
+            if self.replica_role != "primary":
+                return pb2.CompletePrimaryPromotionResponse(
+                    success=False,
+                    epoch=self.current_epoch,
+                    message="Only a primary promotion candidate can complete promotion.",
+                )
+            if not backup_address:
+                return pb2.CompletePrimaryPromotionResponse(
+                    success=False,
+                    epoch=self.current_epoch,
+                    message="Promotion completion requires a backup address.",
+                )
+            if backup_address == self.node_address:
+                return pb2.CompletePrimaryPromotionResponse(
+                    success=False,
+                    epoch=self.current_epoch,
+                    message="The synchronous backup must differ from the primary.",
+                )
+            if self.promotion_ready:
+                if self.synchronous_backup_address == backup_address:
+                    return pb2.CompletePrimaryPromotionResponse(
+                        success=True,
+                        epoch=self.current_epoch,
+                        message="Primary promotion already complete.",
+                    )
+                return pb2.CompletePrimaryPromotionResponse(
+                    success=False,
+                    epoch=self.current_epoch,
+                    message="Primary promotion completed with a different backup.",
+                )
+
+            previous_backup = self.synchronous_backup_address
+            self.synchronous_backup_address = backup_address
+            self.promotion_ready = True
+            try:
+                self._persist_state_to_disk()
+            except Exception as error:
+                self.synchronous_backup_address = previous_backup
+                self.promotion_ready = False
+                return pb2.CompletePrimaryPromotionResponse(
+                    success=False,
+                    epoch=self.current_epoch,
+                    message=f"Could not persist promotion completion: {error}",
+                )
+            return pb2.CompletePrimaryPromotionResponse(
+                success=True,
+                epoch=self.current_epoch,
+                message="Primary promotion complete.",
+            )
+
+    def SynchronizeFromPrimary(self, request, context):
+        with self.state_lock:
+            if self.replica_role != "backup":
+                return pb2.SynchronizeFromPrimaryResponse(
+                    success=False,
+                    epoch=self.current_epoch,
+                    message="Only a backup can synchronize from a primary.",
+                )
+            if not request.primary_address.strip() or request.epoch <= 0:
+                return pb2.SynchronizeFromPrimaryResponse(
+                    success=False,
+                    epoch=self.current_epoch,
+                    message="Primary address and positive epoch are required.",
+                )
+            if request.epoch < self.current_epoch:
+                return pb2.SynchronizeFromPrimaryResponse(
+                    success=False,
+                    epoch=self.current_epoch,
+                    message="Synchronization epoch is older than the current epoch.",
+                )
+        synchronized = self._synchronize_from_primary(
+            request.primary_address,
+            epoch=request.epoch,
+        )
+        return pb2.SynchronizeFromPrimaryResponse(
+            success=synchronized,
+            epoch=self.current_epoch,
+            message=(
+                "Synchronization complete."
+                if synchronized
+                else "Synchronization failed."
+            ),
+        )
+
+    def _synchronize_from_primary(self, primary_address, epoch=None) -> bool:
         try:
             with grpc.insecure_channel(primary_address) as ch:
                 stub = pb2_grpc.StorageReplicaServiceStub(ch)
@@ -1077,14 +1264,17 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                     pb2.StateRequest(requester_id=self.node_address),
                     timeout=10.0,
                 )
-            if not self._replace_with_full_state(response):
+            if not self._replace_with_full_state(response, epoch=epoch):
                 return False
-            return self._report_synchronization_complete(primary_address)
+            return self._report_synchronization_complete(
+                primary_address,
+                epoch=self.current_epoch,
+            )
         except Exception as e:
             print(f"[Judge] Sync failed: {e}")
             return False
 
-    def _replace_with_full_state(self, response: pb2.StateResponse) -> bool:
+    def _replace_with_full_state(self, response: pb2.StateResponse, epoch=None) -> bool:
         if not response.ok:
             return False
 
@@ -1115,12 +1305,17 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 self.prepared_mutations,
                 self.aborted_mutations,
                 self.pending_backup_commits,
+                self.current_epoch,
+                self.promotion_ready,
             )
             self.auction_store = replacement_auctions
             self.idempotency_records = replacement_records
             self.prepared_mutations = {}
             self.aborted_mutations = {}
             self.pending_backup_commits = {}
+            if epoch is not None:
+                self.current_epoch = epoch
+            self.promotion_ready = False
             try:
                 self._persist_state_to_disk()
             except Exception as error:
@@ -1130,12 +1325,18 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                     self.prepared_mutations,
                     self.aborted_mutations,
                     self.pending_backup_commits,
+                    self.current_epoch,
+                    self.promotion_ready,
                 ) = previous_collections
                 print(f"[Judge] Could not persist synchronized state: {error}")
                 return False
         return True
 
-    def _report_synchronization_complete(self, primary_address: str) -> bool:
+    def _report_synchronization_complete(
+        self,
+        primary_address: str,
+        epoch: int | None = None,
+    ) -> bool:
         try:
             with grpc.insecure_channel(CONTROLLER_ADDRESS) as channel:
                 stub = pb2_grpc.ClusterControllerStub(channel)
@@ -1143,6 +1344,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                     pb2.SynchronizationCompleteRequest(
                         replica_address=self.node_address,
                         source_primary_address=primary_address,
+                        epoch=self.current_epoch if epoch is None else epoch,
                     ),
                     timeout=2.0,
                 )
@@ -1178,6 +1380,9 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 decision.request_id: decision
                 for decision in snapshot.pending_backup_commits
             }
+            self.current_epoch = snapshot.current_epoch
+            self.promotion_ready = snapshot.promotion_ready
+            self.synchronous_backup_address = snapshot.synchronous_backup_address
         except Exception as e:
             print(f"[Judge] Could not load local state snapshot: {e}")
 
@@ -1191,6 +1396,9 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             prepared_mutations=list(self.prepared_mutations.values()),
             aborted_mutations=list(self.aborted_mutations.values()),
             pending_backup_commits=list(self.pending_backup_commits.values()),
+            current_epoch=self.current_epoch,
+            promotion_ready=self.promotion_ready,
+            synchronous_backup_address=self.synchronous_backup_address,
             message="Local storage snapshot",
         )
         state_dir = os.path.dirname(self.state_file_path)

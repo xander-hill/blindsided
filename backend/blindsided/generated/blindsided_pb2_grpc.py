@@ -389,10 +389,10 @@ class StorageReplicaServiceStub(object):
                 request_serializer=blindsided__pb2.HealthCheckRequest.SerializeToString,
                 response_deserializer=blindsided__pb2.HealthCheckResponse.FromString,
                 _registered_method=True)
-        self.PromoteToPrimary = channel.unary_unary(
-                '/blindsided.StorageReplicaService/PromoteToPrimary',
-                request_serializer=blindsided__pb2.PromotionRequest.SerializeToString,
-                response_deserializer=blindsided__pb2.PromotionResponse.FromString,
+        self.BeginPrimaryPromotion = channel.unary_unary(
+                '/blindsided.StorageReplicaService/BeginPrimaryPromotion',
+                request_serializer=blindsided__pb2.BeginPrimaryPromotionRequest.SerializeToString,
+                response_deserializer=blindsided__pb2.BeginPrimaryPromotionResponse.FromString,
                 _registered_method=True)
         self.PrepareAuctionMutation = channel.unary_unary(
                 '/blindsided.StorageReplicaService/PrepareAuctionMutation',
@@ -408,6 +408,21 @@ class StorageReplicaServiceStub(object):
                 '/blindsided.StorageReplicaService/AbortPreparedMutation',
                 request_serializer=blindsided__pb2.MutationDecisionRequest.SerializeToString,
                 response_deserializer=blindsided__pb2.MutationDecisionResponse.FromString,
+                _registered_method=True)
+        self.ConfirmPromotionState = channel.unary_unary(
+                '/blindsided.StorageReplicaService/ConfirmPromotionState',
+                request_serializer=blindsided__pb2.PromotionStateConfirmationRequest.SerializeToString,
+                response_deserializer=blindsided__pb2.PromotionStateConfirmationResponse.FromString,
+                _registered_method=True)
+        self.SynchronizeFromPrimary = channel.unary_unary(
+                '/blindsided.StorageReplicaService/SynchronizeFromPrimary',
+                request_serializer=blindsided__pb2.SynchronizeFromPrimaryRequest.SerializeToString,
+                response_deserializer=blindsided__pb2.SynchronizeFromPrimaryResponse.FromString,
+                _registered_method=True)
+        self.CompletePrimaryPromotion = channel.unary_unary(
+                '/blindsided.StorageReplicaService/CompletePrimaryPromotion',
+                request_serializer=blindsided__pb2.CompletePrimaryPromotionRequest.SerializeToString,
+                response_deserializer=blindsided__pb2.CompletePrimaryPromotionResponse.FromString,
                 _registered_method=True)
 
 
@@ -444,7 +459,7 @@ class StorageReplicaServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def PromoteToPrimary(self, request, context):
+    def BeginPrimaryPromotion(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -463,6 +478,24 @@ class StorageReplicaServiceServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def AbortPreparedMutation(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ConfirmPromotionState(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def SynchronizeFromPrimary(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def CompletePrimaryPromotion(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -496,10 +529,10 @@ def add_StorageReplicaServiceServicer_to_server(servicer, server):
                     request_deserializer=blindsided__pb2.HealthCheckRequest.FromString,
                     response_serializer=blindsided__pb2.HealthCheckResponse.SerializeToString,
             ),
-            'PromoteToPrimary': grpc.unary_unary_rpc_method_handler(
-                    servicer.PromoteToPrimary,
-                    request_deserializer=blindsided__pb2.PromotionRequest.FromString,
-                    response_serializer=blindsided__pb2.PromotionResponse.SerializeToString,
+            'BeginPrimaryPromotion': grpc.unary_unary_rpc_method_handler(
+                    servicer.BeginPrimaryPromotion,
+                    request_deserializer=blindsided__pb2.BeginPrimaryPromotionRequest.FromString,
+                    response_serializer=blindsided__pb2.BeginPrimaryPromotionResponse.SerializeToString,
             ),
             'PrepareAuctionMutation': grpc.unary_unary_rpc_method_handler(
                     servicer.PrepareAuctionMutation,
@@ -515,6 +548,21 @@ def add_StorageReplicaServiceServicer_to_server(servicer, server):
                     servicer.AbortPreparedMutation,
                     request_deserializer=blindsided__pb2.MutationDecisionRequest.FromString,
                     response_serializer=blindsided__pb2.MutationDecisionResponse.SerializeToString,
+            ),
+            'ConfirmPromotionState': grpc.unary_unary_rpc_method_handler(
+                    servicer.ConfirmPromotionState,
+                    request_deserializer=blindsided__pb2.PromotionStateConfirmationRequest.FromString,
+                    response_serializer=blindsided__pb2.PromotionStateConfirmationResponse.SerializeToString,
+            ),
+            'SynchronizeFromPrimary': grpc.unary_unary_rpc_method_handler(
+                    servicer.SynchronizeFromPrimary,
+                    request_deserializer=blindsided__pb2.SynchronizeFromPrimaryRequest.FromString,
+                    response_serializer=blindsided__pb2.SynchronizeFromPrimaryResponse.SerializeToString,
+            ),
+            'CompletePrimaryPromotion': grpc.unary_unary_rpc_method_handler(
+                    servicer.CompletePrimaryPromotion,
+                    request_deserializer=blindsided__pb2.CompletePrimaryPromotionRequest.FromString,
+                    response_serializer=blindsided__pb2.CompletePrimaryPromotionResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -663,7 +711,7 @@ class StorageReplicaService(object):
             _registered_method=True)
 
     @staticmethod
-    def PromoteToPrimary(request,
+    def BeginPrimaryPromotion(request,
             target,
             options=(),
             channel_credentials=None,
@@ -676,9 +724,9 @@ class StorageReplicaService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/blindsided.StorageReplicaService/PromoteToPrimary',
-            blindsided__pb2.PromotionRequest.SerializeToString,
-            blindsided__pb2.PromotionResponse.FromString,
+            '/blindsided.StorageReplicaService/BeginPrimaryPromotion',
+            blindsided__pb2.BeginPrimaryPromotionRequest.SerializeToString,
+            blindsided__pb2.BeginPrimaryPromotionResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -760,6 +808,87 @@ class StorageReplicaService(object):
             '/blindsided.StorageReplicaService/AbortPreparedMutation',
             blindsided__pb2.MutationDecisionRequest.SerializeToString,
             blindsided__pb2.MutationDecisionResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ConfirmPromotionState(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/blindsided.StorageReplicaService/ConfirmPromotionState',
+            blindsided__pb2.PromotionStateConfirmationRequest.SerializeToString,
+            blindsided__pb2.PromotionStateConfirmationResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SynchronizeFromPrimary(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/blindsided.StorageReplicaService/SynchronizeFromPrimary',
+            blindsided__pb2.SynchronizeFromPrimaryRequest.SerializeToString,
+            blindsided__pb2.SynchronizeFromPrimaryResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def CompletePrimaryPromotion(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/blindsided.StorageReplicaService/CompletePrimaryPromotion',
+            blindsided__pb2.CompletePrimaryPromotionRequest.SerializeToString,
+            blindsided__pb2.CompletePrimaryPromotionResponse.FromString,
             options,
             channel_credentials,
             insecure,

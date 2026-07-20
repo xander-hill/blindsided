@@ -373,19 +373,37 @@ class HealthCheckResponse(_message.Message):
     message: str
     def __init__(self, alive: bool = ..., role: _Optional[str] = ..., message: _Optional[str] = ...) -> None: ...
 
-class PromotionRequest(_message.Message):
-    __slots__ = ("new_role",)
-    NEW_ROLE_FIELD_NUMBER: _ClassVar[int]
-    new_role: str
-    def __init__(self, new_role: _Optional[str] = ...) -> None: ...
+class BeginPrimaryPromotionRequest(_message.Message):
+    __slots__ = ("epoch",)
+    EPOCH_FIELD_NUMBER: _ClassVar[int]
+    epoch: int
+    def __init__(self, epoch: _Optional[int] = ...) -> None: ...
 
-class PromotionResponse(_message.Message):
-    __slots__ = ("success", "message")
-    SUCCESS_FIELD_NUMBER: _ClassVar[int]
+class BeginPrimaryPromotionResponse(_message.Message):
+    __slots__ = ("accepted", "epoch", "message")
+    ACCEPTED_FIELD_NUMBER: _ClassVar[int]
+    EPOCH_FIELD_NUMBER: _ClassVar[int]
     MESSAGE_FIELD_NUMBER: _ClassVar[int]
-    success: bool
+    accepted: bool
+    epoch: int
     message: str
-    def __init__(self, success: bool = ..., message: _Optional[str] = ...) -> None: ...
+    def __init__(self, accepted: bool = ..., epoch: _Optional[int] = ..., message: _Optional[str] = ...) -> None: ...
+
+class PromotionStateConfirmationRequest(_message.Message):
+    __slots__ = ("epoch",)
+    EPOCH_FIELD_NUMBER: _ClassVar[int]
+    epoch: int
+    def __init__(self, epoch: _Optional[int] = ...) -> None: ...
+
+class PromotionStateConfirmationResponse(_message.Message):
+    __slots__ = ("confirmed", "epoch", "message")
+    CONFIRMED_FIELD_NUMBER: _ClassVar[int]
+    EPOCH_FIELD_NUMBER: _ClassVar[int]
+    MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    confirmed: bool
+    epoch: int
+    message: str
+    def __init__(self, confirmed: bool = ..., epoch: _Optional[int] = ..., message: _Optional[str] = ...) -> None: ...
 
 class RegisterRequest(_message.Message):
     __slots__ = ("address",)
@@ -394,14 +412,16 @@ class RegisterRequest(_message.Message):
     def __init__(self, address: _Optional[str] = ...) -> None: ...
 
 class RegisterResponse(_message.Message):
-    __slots__ = ("success", "is_primary", "message")
+    __slots__ = ("success", "is_primary", "message", "epoch")
     SUCCESS_FIELD_NUMBER: _ClassVar[int]
     IS_PRIMARY_FIELD_NUMBER: _ClassVar[int]
     MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    EPOCH_FIELD_NUMBER: _ClassVar[int]
     success: bool
     is_primary: bool
     message: str
-    def __init__(self, success: bool = ..., is_primary: bool = ..., message: _Optional[str] = ...) -> None: ...
+    epoch: int
+    def __init__(self, success: bool = ..., is_primary: bool = ..., message: _Optional[str] = ..., epoch: _Optional[int] = ...) -> None: ...
 
 class GetPrimaryRequest(_message.Message):
     __slots__ = ("requester_id",)
@@ -494,7 +514,7 @@ class MutationDecisionResponse(_message.Message):
     def __init__(self, success: bool = ..., committed_version: _Optional[int] = ..., message: _Optional[str] = ...) -> None: ...
 
 class StorageSnapshot(_message.Message):
-    __slots__ = ("ok", "auctions", "message", "idempotency_records", "prepared_mutations", "aborted_mutations", "pending_backup_commits")
+    __slots__ = ("ok", "auctions", "message", "idempotency_records", "prepared_mutations", "aborted_mutations", "pending_backup_commits", "current_epoch", "promotion_ready", "synchronous_backup_address")
     OK_FIELD_NUMBER: _ClassVar[int]
     AUCTIONS_FIELD_NUMBER: _ClassVar[int]
     MESSAGE_FIELD_NUMBER: _ClassVar[int]
@@ -502,6 +522,9 @@ class StorageSnapshot(_message.Message):
     PREPARED_MUTATIONS_FIELD_NUMBER: _ClassVar[int]
     ABORTED_MUTATIONS_FIELD_NUMBER: _ClassVar[int]
     PENDING_BACKUP_COMMITS_FIELD_NUMBER: _ClassVar[int]
+    CURRENT_EPOCH_FIELD_NUMBER: _ClassVar[int]
+    PROMOTION_READY_FIELD_NUMBER: _ClassVar[int]
+    SYNCHRONOUS_BACKUP_ADDRESS_FIELD_NUMBER: _ClassVar[int]
     ok: bool
     auctions: _containers.RepeatedCompositeFieldContainer[Auction]
     message: str
@@ -509,7 +532,10 @@ class StorageSnapshot(_message.Message):
     prepared_mutations: _containers.RepeatedCompositeFieldContainer[PrepareMutationRequest]
     aborted_mutations: _containers.RepeatedCompositeFieldContainer[MutationDecisionRequest]
     pending_backup_commits: _containers.RepeatedCompositeFieldContainer[CommitDecision]
-    def __init__(self, ok: bool = ..., auctions: _Optional[_Iterable[_Union[Auction, _Mapping]]] = ..., message: _Optional[str] = ..., idempotency_records: _Optional[_Iterable[_Union[IdempotencyRecord, _Mapping]]] = ..., prepared_mutations: _Optional[_Iterable[_Union[PrepareMutationRequest, _Mapping]]] = ..., aborted_mutations: _Optional[_Iterable[_Union[MutationDecisionRequest, _Mapping]]] = ..., pending_backup_commits: _Optional[_Iterable[_Union[CommitDecision, _Mapping]]] = ...) -> None: ...
+    current_epoch: int
+    promotion_ready: bool
+    synchronous_backup_address: str
+    def __init__(self, ok: bool = ..., auctions: _Optional[_Iterable[_Union[Auction, _Mapping]]] = ..., message: _Optional[str] = ..., idempotency_records: _Optional[_Iterable[_Union[IdempotencyRecord, _Mapping]]] = ..., prepared_mutations: _Optional[_Iterable[_Union[PrepareMutationRequest, _Mapping]]] = ..., aborted_mutations: _Optional[_Iterable[_Union[MutationDecisionRequest, _Mapping]]] = ..., pending_backup_commits: _Optional[_Iterable[_Union[CommitDecision, _Mapping]]] = ..., current_epoch: _Optional[int] = ..., promotion_ready: bool = ..., synchronous_backup_address: _Optional[str] = ...) -> None: ...
 
 class CommitDecision(_message.Message):
     __slots__ = ("request_id", "auction", "idempotency_record", "primary_id", "backup_address")
@@ -526,12 +552,14 @@ class CommitDecision(_message.Message):
     def __init__(self, request_id: _Optional[str] = ..., auction: _Optional[_Union[Auction, _Mapping]] = ..., idempotency_record: _Optional[_Union[IdempotencyRecord, _Mapping]] = ..., primary_id: _Optional[str] = ..., backup_address: _Optional[str] = ...) -> None: ...
 
 class SynchronizationCompleteRequest(_message.Message):
-    __slots__ = ("replica_address", "source_primary_address")
+    __slots__ = ("replica_address", "source_primary_address", "epoch")
     REPLICA_ADDRESS_FIELD_NUMBER: _ClassVar[int]
     SOURCE_PRIMARY_ADDRESS_FIELD_NUMBER: _ClassVar[int]
+    EPOCH_FIELD_NUMBER: _ClassVar[int]
     replica_address: str
     source_primary_address: str
-    def __init__(self, replica_address: _Optional[str] = ..., source_primary_address: _Optional[str] = ...) -> None: ...
+    epoch: int
+    def __init__(self, replica_address: _Optional[str] = ..., source_primary_address: _Optional[str] = ..., epoch: _Optional[int] = ...) -> None: ...
 
 class SynchronizationCompleteResponse(_message.Message):
     __slots__ = ("success", "message")
@@ -540,3 +568,39 @@ class SynchronizationCompleteResponse(_message.Message):
     success: bool
     message: str
     def __init__(self, success: bool = ..., message: _Optional[str] = ...) -> None: ...
+
+class SynchronizeFromPrimaryRequest(_message.Message):
+    __slots__ = ("primary_address", "epoch")
+    PRIMARY_ADDRESS_FIELD_NUMBER: _ClassVar[int]
+    EPOCH_FIELD_NUMBER: _ClassVar[int]
+    primary_address: str
+    epoch: int
+    def __init__(self, primary_address: _Optional[str] = ..., epoch: _Optional[int] = ...) -> None: ...
+
+class SynchronizeFromPrimaryResponse(_message.Message):
+    __slots__ = ("success", "epoch", "message")
+    SUCCESS_FIELD_NUMBER: _ClassVar[int]
+    EPOCH_FIELD_NUMBER: _ClassVar[int]
+    MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    success: bool
+    epoch: int
+    message: str
+    def __init__(self, success: bool = ..., epoch: _Optional[int] = ..., message: _Optional[str] = ...) -> None: ...
+
+class CompletePrimaryPromotionRequest(_message.Message):
+    __slots__ = ("epoch", "backup_address")
+    EPOCH_FIELD_NUMBER: _ClassVar[int]
+    BACKUP_ADDRESS_FIELD_NUMBER: _ClassVar[int]
+    epoch: int
+    backup_address: str
+    def __init__(self, epoch: _Optional[int] = ..., backup_address: _Optional[str] = ...) -> None: ...
+
+class CompletePrimaryPromotionResponse(_message.Message):
+    __slots__ = ("success", "epoch", "message")
+    SUCCESS_FIELD_NUMBER: _ClassVar[int]
+    EPOCH_FIELD_NUMBER: _ClassVar[int]
+    MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    success: bool
+    epoch: int
+    message: str
+    def __init__(self, success: bool = ..., epoch: _Optional[int] = ..., message: _Optional[str] = ...) -> None: ...

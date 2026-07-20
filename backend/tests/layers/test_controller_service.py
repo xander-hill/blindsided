@@ -2,11 +2,13 @@ from unittest import mock
 
 from blindsided.controller.service import (
     ControllerService,
+    PrimaryAssignment,
+    PrimaryStatus,
     ReplicaRecord,
     ReplicaSyncStatus,
 )
 from blindsided.generated import blindsided_pb2 as pb2
-from backend.tests.helpers import BackendTestCase, NoopContext
+from backend.tests.helpers import BackendTestCase, ChannelContext, NoopContext
 
 
 class ControllerServiceTests(BackendTestCase):
@@ -29,6 +31,8 @@ class ControllerServiceTests(BackendTestCase):
         self.assertTrue(second.success)
         self.assertFalse(second.is_primary)
         self.assertEqual(primary_address.primary_address, "storage-0:50051")
+        self.assertEqual(service.primary_assignment.epoch, 1)
+        self.assertEqual(service.primary_assignment.status, PrimaryStatus.READY)
         self.assertEqual(service.nodes["storage-0:50051"].address, "storage-0:50051")
         self.assertGreater(service.nodes["storage-0:50051"].last_seen, 0)
         self.assertEqual(
@@ -58,6 +62,7 @@ class ControllerServiceTests(BackendTestCase):
             pb2.SynchronizationCompleteRequest(
                 replica_address="storage-1:50051",
                 source_primary_address="storage-0:50051",
+                epoch=1,
             ),
             NoopContext(),
         )
@@ -77,6 +82,7 @@ class ControllerServiceTests(BackendTestCase):
             pb2.SynchronizationCompleteRequest(
                 replica_address="storage-1:50051",
                 source_primary_address="storage-0:50051",
+                epoch=1,
             ),
             NoopContext(),
         )
@@ -103,6 +109,7 @@ class ControllerServiceTests(BackendTestCase):
             pb2.SynchronizationCompleteRequest(
                 replica_address="unknown:50051",
                 source_primary_address="storage-0:50051",
+                epoch=1,
             ),
             NoopContext(),
         )
@@ -120,6 +127,7 @@ class ControllerServiceTests(BackendTestCase):
             pb2.SynchronizationCompleteRequest(
                 replica_address="storage-1:50051",
                 source_primary_address="old-primary:50051",
+                epoch=1,
             ),
             NoopContext(),
         )
@@ -146,6 +154,7 @@ class ControllerServiceTests(BackendTestCase):
                     pb2.SynchronizationCompleteRequest(
                         replica_address=replica_address,
                         source_primary_address=source_address,
+                        epoch=1,
                     ),
                     NoopContext(),
                 )
@@ -175,8 +184,10 @@ class ControllerServiceTests(BackendTestCase):
         with mock.patch.object(service, "_notify_promotion") as notify:
             service._elect_new_primary()
 
-        self.assertEqual(service.primary_address, "storage-1:50051")
-        notify.assert_called_once_with("storage-1:50051")
+        self.assertEqual(service.primary_assignment.node_id, "storage-1:50051")
+        self.assertEqual(service.primary_assignment.epoch, 1)
+        self.assertEqual(service.primary_assignment.status, PrimaryStatus.PROMOTING)
+        notify.assert_called_once_with("storage-1:50051", 1)
 
     def test_controller_flow_skips_first_unsynchronized_backup_during_election(self):
         service = ControllerService()
@@ -193,11 +204,12 @@ class ControllerServiceTests(BackendTestCase):
             pb2.SynchronizationCompleteRequest(
                 replica_address="backup-synchronized:50051",
                 source_primary_address="primary:50051",
+                epoch=1,
             ),
             NoopContext(),
         )
         del service.nodes["primary:50051"]
-        service.primary_address = None
+        service.primary_assignment = None
 
         with mock.patch.object(service, "_notify_promotion") as notify:
             service._elect_new_primary()
@@ -206,8 +218,12 @@ class ControllerServiceTests(BackendTestCase):
         self.assertFalse(
             service.nodes["backup-unsynchronized:50051"].promotion_eligible
         )
-        self.assertEqual(service.primary_address, "backup-synchronized:50051")
-        notify.assert_called_once_with("backup-synchronized:50051")
+        self.assertEqual(
+            service.primary_assignment.node_id, "backup-synchronized:50051"
+        )
+        self.assertEqual(service.primary_assignment.epoch, 2)
+        self.assertEqual(service.primary_assignment.status, PrimaryStatus.PROMOTING)
+        notify.assert_called_once_with("backup-synchronized:50051", 2)
 
     def test_election_rejects_when_no_synchronized_replica_exists(self):
         service = ControllerService()
@@ -222,5 +238,460 @@ class ControllerServiceTests(BackendTestCase):
         with mock.patch.object(service, "_notify_promotion") as notify:
             service._elect_new_primary()
 
-        self.assertIsNone(service.primary_address)
+        self.assertIsNone(service.primary_assignment)
         notify.assert_not_called()
+
+    def test_controller_sends_primary_assignment_epoch_and_remains_promoting(self):
+        service = ControllerService()
+        service.primary_assignment = PrimaryAssignment(
+            node_id="storage-1:50051",
+            epoch=7,
+            status=PrimaryStatus.PROMOTING,
+        )
+        service.nodes["storage-1:50051"] = ReplicaRecord(
+            address="storage-1:50051",
+            last_seen=1.0,
+            sync_status=ReplicaSyncStatus.SYNCHRONIZED,
+        )
+        storage_stub = mock.Mock()
+        storage_stub.BeginPrimaryPromotion.return_value = (
+            pb2.BeginPrimaryPromotionResponse(accepted=True, epoch=7)
+        )
+        storage_stub.ConfirmPromotionState.return_value = (
+            pb2.PromotionStateConfirmationResponse(confirmed=True, epoch=7)
+        )
+
+        promoting = service.GetPrimary(pb2.GetPrimaryRequest(), NoopContext())
+        with (
+            mock.patch(
+                "blindsided.controller.service.grpc.insecure_channel",
+                return_value=ChannelContext(),
+            ),
+            mock.patch(
+                "blindsided.controller.service.pb2_grpc.StorageReplicaServiceStub",
+                return_value=storage_stub,
+            ),
+        ):
+            service._notify_promotion("storage-1:50051", 7)
+        still_promoting = service.GetPrimary(pb2.GetPrimaryRequest(), NoopContext())
+
+        self.assertFalse(promoting.success)
+        self.assertIn("not complete", promoting.message)
+        self.assertEqual(service.primary_assignment.status, PrimaryStatus.PROMOTING)
+        self.assertFalse(still_promoting.success)
+        promotion_request = storage_stub.BeginPrimaryPromotion.call_args.args[0]
+        self.assertEqual(promotion_request.epoch, 7)
+        confirmation_request = storage_stub.ConfirmPromotionState.call_args.args[0]
+        self.assertEqual(confirmation_request.epoch, 7)
+
+    def test_stale_promotion_ack_cannot_mark_newer_assignment_ready(self):
+        service = ControllerService()
+        service.primary_assignment = PrimaryAssignment(
+            node_id="storage-1:50051",
+            epoch=8,
+            status=PrimaryStatus.PROMOTING,
+        )
+        storage_stub = mock.Mock()
+        storage_stub.BeginPrimaryPromotion.return_value = (
+            pb2.BeginPrimaryPromotionResponse(accepted=True, epoch=7)
+        )
+
+        with (
+            mock.patch(
+                "blindsided.controller.service.grpc.insecure_channel",
+                return_value=ChannelContext(),
+            ),
+            mock.patch(
+                "blindsided.controller.service.pb2_grpc.StorageReplicaServiceStub",
+                return_value=storage_stub,
+            ),
+        ):
+            service._notify_promotion("storage-1:50051", 7)
+
+        self.assertEqual(service.primary_assignment.epoch, 8)
+        self.assertEqual(service.primary_assignment.status, PrimaryStatus.PROMOTING)
+
+    def test_controller_does_not_confirm_candidate_that_lost_synchronized_status(self):
+        service = ControllerService()
+        service.primary_assignment = PrimaryAssignment(
+            node_id="storage-1:50051",
+            epoch=7,
+            status=PrimaryStatus.PROMOTING,
+        )
+        service.nodes["storage-1:50051"] = ReplicaRecord(
+            address="storage-1:50051",
+            last_seen=1.0,
+            sync_status=ReplicaSyncStatus.UNSYNCHRONIZED,
+        )
+
+        with mock.patch(
+            "blindsided.controller.service.grpc.insecure_channel"
+        ) as channel:
+            service._notify_promotion("storage-1:50051", 7)
+
+        channel.assert_not_called()
+        self.assertEqual(service.primary_assignment.status, PrimaryStatus.PROMOTING)
+
+    def test_controller_does_not_continue_promotion_after_failed_confirmation(self):
+        service = ControllerService()
+        service.primary_assignment = PrimaryAssignment(
+            node_id="storage-1:50051",
+            epoch=7,
+            status=PrimaryStatus.PROMOTING,
+        )
+        service.nodes["storage-1:50051"] = ReplicaRecord(
+            address="storage-1:50051",
+            last_seen=1.0,
+            sync_status=ReplicaSyncStatus.SYNCHRONIZED,
+        )
+        storage_stub = mock.Mock()
+        storage_stub.BeginPrimaryPromotion.return_value = (
+            pb2.BeginPrimaryPromotionResponse(accepted=True, epoch=7)
+        )
+        storage_stub.ConfirmPromotionState.return_value = (
+            pb2.PromotionStateConfirmationResponse(confirmed=False, epoch=7)
+        )
+
+        with (
+            mock.patch(
+                "blindsided.controller.service.grpc.insecure_channel",
+                return_value=ChannelContext(),
+            ),
+            mock.patch(
+                "blindsided.controller.service.pb2_grpc.StorageReplicaServiceStub",
+                return_value=storage_stub,
+            ),
+        ):
+            service._notify_promotion("storage-1:50051", 7)
+
+        storage_stub.BeginPrimaryPromotion.assert_called_once()
+        storage_stub.ConfirmPromotionState.assert_called_once()
+        self.assertEqual(service.primary_assignment.status, PrimaryStatus.PROMOTING)
+
+    def test_controller_designates_and_synchronizes_non_primary_after_confirmation(self):
+        service = ControllerService()
+        service.primary_assignment = PrimaryAssignment(
+            node_id="candidate:50051",
+            epoch=7,
+            status=PrimaryStatus.PROMOTING,
+        )
+        service.nodes = {
+            "candidate:50051": ReplicaRecord(
+                address="candidate:50051",
+                last_seen=2.0,
+                sync_status=ReplicaSyncStatus.SYNCHRONIZED,
+            ),
+            "backup:50051": ReplicaRecord(
+                address="backup:50051",
+                last_seen=1.0,
+                sync_status=ReplicaSyncStatus.SYNCHRONIZED,
+            ),
+        }
+        candidate_stub = mock.Mock()
+        candidate_stub.BeginPrimaryPromotion.return_value = (
+            pb2.BeginPrimaryPromotionResponse(accepted=True, epoch=7)
+        )
+        candidate_stub.ConfirmPromotionState.return_value = (
+            pb2.PromotionStateConfirmationResponse(confirmed=True, epoch=7)
+        )
+        backup_stub = mock.Mock()
+
+        def synchronize(request):
+            self.assertEqual(
+                service.nodes["backup:50051"].sync_status,
+                ReplicaSyncStatus.UNSYNCHRONIZED,
+            )
+            self.assertEqual(
+                service.primary_assignment.sync_backup_address,
+                "backup:50051",
+            )
+            return pb2.SynchronizeFromPrimaryResponse(success=True, epoch=7)
+
+        backup_stub.SynchronizeFromPrimary.side_effect = synchronize
+
+        with (
+            mock.patch(
+                "blindsided.controller.service.grpc.insecure_channel",
+                return_value=ChannelContext(),
+            ),
+            mock.patch(
+                "blindsided.controller.service.pb2_grpc.StorageReplicaServiceStub",
+                side_effect=[candidate_stub, backup_stub],
+            ),
+        ):
+            service._notify_promotion("candidate:50051", 7)
+
+        self.assertEqual(
+            service.nodes["backup:50051"].sync_status,
+            ReplicaSyncStatus.UNSYNCHRONIZED,
+        )
+        self.assertEqual(
+            service.primary_assignment.sync_backup_address,
+            "backup:50051",
+        )
+        request = backup_stub.SynchronizeFromPrimary.call_args.args[0]
+        self.assertEqual(request.primary_address, "candidate:50051")
+        self.assertEqual(request.epoch, 7)
+        self.assertEqual(service.primary_assignment.status, PrimaryStatus.PROMOTING)
+
+    def test_matching_completion_marks_designated_promotion_backup_synchronized(self):
+        service = ControllerService()
+        service.primary_assignment = PrimaryAssignment(
+            node_id="candidate:50051",
+            epoch=7,
+            status=PrimaryStatus.PROMOTING,
+            sync_backup_address="backup:50051",
+        )
+        service.nodes = {
+            "candidate:50051": ReplicaRecord(
+                address="candidate:50051",
+                last_seen=2.0,
+                sync_status=ReplicaSyncStatus.SYNCHRONIZED,
+            ),
+            "backup:50051": ReplicaRecord(
+                address="backup:50051",
+                last_seen=1.0,
+                sync_status=ReplicaSyncStatus.UNSYNCHRONIZED,
+            ),
+        }
+        storage_stub = mock.Mock()
+
+        def complete(request):
+            self.assertEqual(service.primary_assignment.status, PrimaryStatus.PROMOTING)
+            return pb2.CompletePrimaryPromotionResponse(success=True, epoch=7)
+
+        storage_stub.CompletePrimaryPromotion.side_effect = complete
+
+        with (
+            mock.patch(
+                "blindsided.controller.service.grpc.insecure_channel",
+                return_value=ChannelContext(),
+            ),
+            mock.patch(
+                "blindsided.controller.service.pb2_grpc.StorageReplicaServiceStub",
+                return_value=storage_stub,
+            ),
+        ):
+            response = service.ReportSynchronizationComplete(
+                pb2.SynchronizationCompleteRequest(
+                    replica_address="backup:50051",
+                    source_primary_address="candidate:50051",
+                    epoch=7,
+                ),
+                NoopContext(),
+            )
+
+        self.assertTrue(response.success)
+        self.assertEqual(
+            service.nodes["backup:50051"].sync_status,
+            ReplicaSyncStatus.SYNCHRONIZED,
+        )
+        completion_request = storage_stub.CompletePrimaryPromotion.call_args.args[0]
+        self.assertEqual(completion_request.epoch, 7)
+        self.assertEqual(completion_request.backup_address, "backup:50051")
+        self.assertEqual(service.primary_assignment.status, PrimaryStatus.READY)
+
+    def test_controller_remains_promoting_when_storage_activation_fails(self):
+        service = ControllerService()
+        service.primary_assignment = PrimaryAssignment(
+            node_id="candidate:50051",
+            epoch=7,
+            status=PrimaryStatus.PROMOTING,
+            sync_backup_address="backup:50051",
+        )
+        service.nodes = {
+            "candidate:50051": ReplicaRecord(
+                address="candidate:50051",
+                last_seen=2.0,
+                sync_status=ReplicaSyncStatus.SYNCHRONIZED,
+            ),
+            "backup:50051": ReplicaRecord(
+                address="backup:50051",
+                last_seen=1.0,
+                sync_status=ReplicaSyncStatus.UNSYNCHRONIZED,
+            ),
+        }
+        storage_stub = mock.Mock()
+        storage_stub.CompletePrimaryPromotion.return_value = (
+            pb2.CompletePrimaryPromotionResponse(success=False, epoch=7)
+        )
+
+        with (
+            mock.patch(
+                "blindsided.controller.service.grpc.insecure_channel",
+                return_value=ChannelContext(),
+            ),
+            mock.patch(
+                "blindsided.controller.service.pb2_grpc.StorageReplicaServiceStub",
+                return_value=storage_stub,
+            ),
+        ):
+            response = service.ReportSynchronizationComplete(
+                pb2.SynchronizationCompleteRequest(
+                    replica_address="backup:50051",
+                    source_primary_address="candidate:50051",
+                    epoch=7,
+                ),
+                NoopContext(),
+            )
+
+        self.assertFalse(response.success)
+        self.assertEqual(service.primary_assignment.status, PrimaryStatus.PROMOTING)
+
+    def test_stale_completion_cannot_activate_newer_primary_assignment(self):
+        service = ControllerService()
+        service.primary_assignment = PrimaryAssignment(
+            node_id="candidate:50051",
+            epoch=7,
+            status=PrimaryStatus.PROMOTING,
+            sync_backup_address="backup:50051",
+        )
+        service.nodes = {
+            "candidate:50051": ReplicaRecord(
+                address="candidate:50051",
+                last_seen=2.0,
+                sync_status=ReplicaSyncStatus.SYNCHRONIZED,
+            ),
+            "backup:50051": ReplicaRecord(
+                address="backup:50051",
+                last_seen=1.0,
+                sync_status=ReplicaSyncStatus.UNSYNCHRONIZED,
+            ),
+        }
+        storage_stub = mock.Mock()
+
+        def complete(_request):
+            service.primary_assignment = PrimaryAssignment(
+                node_id="new-candidate:50051",
+                epoch=8,
+                status=PrimaryStatus.PROMOTING,
+            )
+            return pb2.CompletePrimaryPromotionResponse(success=True, epoch=7)
+
+        storage_stub.CompletePrimaryPromotion.side_effect = complete
+
+        with (
+            mock.patch(
+                "blindsided.controller.service.grpc.insecure_channel",
+                return_value=ChannelContext(),
+            ),
+            mock.patch(
+                "blindsided.controller.service.pb2_grpc.StorageReplicaServiceStub",
+                return_value=storage_stub,
+            ),
+        ):
+            response = service.ReportSynchronizationComplete(
+                pb2.SynchronizationCompleteRequest(
+                    replica_address="backup:50051",
+                    source_primary_address="candidate:50051",
+                    epoch=7,
+                ),
+                NoopContext(),
+            )
+
+        self.assertFalse(response.success)
+        self.assertEqual(service.primary_assignment.epoch, 8)
+        self.assertEqual(service.primary_assignment.status, PrimaryStatus.PROMOTING)
+
+    def test_get_primary_exposes_address_only_after_assignment_is_ready(self):
+        service = ControllerService()
+        service.primary_assignment = PrimaryAssignment(
+            node_id="candidate:50051",
+            epoch=7,
+            status=PrimaryStatus.PROMOTING,
+        )
+
+        promoting = service.GetPrimary(pb2.GetPrimaryRequest(), NoopContext())
+        service.primary_assignment.status = PrimaryStatus.READY
+        ready = service.GetPrimary(pb2.GetPrimaryRequest(), NoopContext())
+
+        self.assertFalse(promoting.success)
+        self.assertEqual(promoting.primary_address, "")
+        self.assertTrue(ready.success)
+        self.assertEqual(ready.primary_address, "candidate:50051")
+
+    def test_wrong_backup_source_or_epoch_cannot_complete_promotion_sync(self):
+        cases = (
+            ("other:50051", "candidate:50051", 7),
+            ("backup:50051", "old-primary:50051", 7),
+            ("backup:50051", "candidate:50051", 6),
+        )
+        for replica_address, source_address, epoch in cases:
+            with self.subTest(
+                replica=replica_address, source=source_address, epoch=epoch
+            ):
+                service = ControllerService()
+                service.primary_assignment = PrimaryAssignment(
+                    node_id="candidate:50051",
+                    epoch=7,
+                    status=PrimaryStatus.PROMOTING,
+                    sync_backup_address="backup:50051",
+                )
+                service.nodes = {
+                    "candidate:50051": ReplicaRecord(
+                        address="candidate:50051",
+                        last_seen=2.0,
+                        sync_status=ReplicaSyncStatus.SYNCHRONIZED,
+                    ),
+                    "backup:50051": ReplicaRecord(
+                        address="backup:50051",
+                        last_seen=1.0,
+                        sync_status=ReplicaSyncStatus.UNSYNCHRONIZED,
+                    ),
+                    "other:50051": ReplicaRecord(
+                        address="other:50051",
+                        last_seen=1.0,
+                        sync_status=ReplicaSyncStatus.UNSYNCHRONIZED,
+                    ),
+                }
+
+                response = service.ReportSynchronizationComplete(
+                    pb2.SynchronizationCompleteRequest(
+                        replica_address=replica_address,
+                        source_primary_address=source_address,
+                        epoch=epoch,
+                    ),
+                    NoopContext(),
+                )
+
+                self.assertFalse(response.success)
+                self.assertEqual(
+                    service.nodes["backup:50051"].sync_status,
+                    ReplicaSyncStatus.UNSYNCHRONIZED,
+                )
+
+    def test_no_available_backup_leaves_promotion_incomplete(self):
+        service = ControllerService()
+        service.primary_assignment = PrimaryAssignment(
+            node_id="candidate:50051",
+            epoch=7,
+            status=PrimaryStatus.PROMOTING,
+        )
+        service.nodes["candidate:50051"] = ReplicaRecord(
+            address="candidate:50051",
+            last_seen=1.0,
+            sync_status=ReplicaSyncStatus.SYNCHRONIZED,
+        )
+        candidate_stub = mock.Mock()
+        candidate_stub.BeginPrimaryPromotion.return_value = (
+            pb2.BeginPrimaryPromotionResponse(accepted=True, epoch=7)
+        )
+        candidate_stub.ConfirmPromotionState.return_value = (
+            pb2.PromotionStateConfirmationResponse(confirmed=True, epoch=7)
+        )
+
+        with (
+            mock.patch(
+                "blindsided.controller.service.grpc.insecure_channel",
+                return_value=ChannelContext(),
+            ),
+            mock.patch(
+                "blindsided.controller.service.pb2_grpc.StorageReplicaServiceStub",
+                return_value=candidate_stub,
+            ),
+        ):
+            service._notify_promotion("candidate:50051", 7)
+
+        self.assertEqual(service.primary_assignment.status, PrimaryStatus.PROMOTING)
+        self.assertIsNone(service.primary_assignment.sync_backup_address)
+        candidate_stub.SynchronizeFromPrimary.assert_not_called()
