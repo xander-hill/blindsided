@@ -29,6 +29,7 @@ import type { StateResponse } from "./blindsided";
 import type { StateRequest } from "./blindsided";
 import type { GetStoredAuctionsResponse } from "./blindsided";
 import type { GetStoredAuctionResponse } from "./blindsided";
+import type { StorageGetAuctionRequest } from "./blindsided";
 import type { AuctionMutationResponse } from "./blindsided";
 import type { AuctionMutationRequest } from "./blindsided";
 import type { RpcTransport } from "@protobuf-ts/runtime-rpc";
@@ -155,7 +156,7 @@ export interface IStorageReplicaServiceClient {
     /**
      * @generated from protobuf rpc: GetAuction
      */
-    getAuction(input: GetAuctionRequest, options?: RpcOptions): UnaryCall<GetAuctionRequest, GetStoredAuctionResponse>;
+    getAuction(input: StorageGetAuctionRequest, options?: RpcOptions): UnaryCall<StorageGetAuctionRequest, GetStoredAuctionResponse>;
     /**
      * @generated from protobuf rpc: SearchAuctions
      */
@@ -216,9 +217,9 @@ export class StorageReplicaServiceClient implements IStorageReplicaServiceClient
     /**
      * @generated from protobuf rpc: GetAuction
      */
-    getAuction(input: GetAuctionRequest, options?: RpcOptions): UnaryCall<GetAuctionRequest, GetStoredAuctionResponse> {
+    getAuction(input: StorageGetAuctionRequest, options?: RpcOptions): UnaryCall<StorageGetAuctionRequest, GetStoredAuctionResponse> {
         const method = this.methods[1], opt = this._transport.mergeOptions(options);
-        return stackIntercept<GetAuctionRequest, GetStoredAuctionResponse>("unary", this._transport, method, opt, input);
+        return stackIntercept<StorageGetAuctionRequest, GetStoredAuctionResponse>("unary", this._transport, method, opt, input);
     }
     /**
      * @generated from protobuf rpc: SearchAuctions

@@ -206,5 +206,84 @@ def running_backend_stack():
         stack.close()
 
 
+@contextmanager
+def running_replicated_backend_stack():
+    """Run a real controller, primary, and backup commit path over gRPC."""
+    stack = ExitStack()
+    servers: list[grpc.Server] = []
+
+    def start_servicer(servicer, add_servicer, address, workers=20):
+        server = grpc.server(futures.ThreadPoolExecutor(max_workers=workers))
+        add_servicer(servicer, server)
+        server.add_insecure_port(address)
+        server.start()
+        servers.append(server)
+
+    try:
+        controller_service = ControllerService()
+        controller_addr = f"127.0.0.1:{free_port()}"
+        start_servicer(
+            controller_service,
+            pb2_grpc.add_ClusterControllerServicer_to_server,
+            controller_addr,
+        )
+        stack.enter_context(mock.patch.object(
+            storage_service_module, "CONTROLLER_ADDRESS", controller_addr
+        ))
+
+        primary_addr = f"127.0.0.1:{free_port()}"
+        with mock.patch.dict(os.environ, {
+            "POD_IP": primary_addr,
+            "NODE_PORT": primary_addr.rsplit(":", 1)[1],
+            "NODE_ROLE": "backup",
+            "PEER_ADDRESSES": "",
+            "AUCTION_STORE_PATH": "",
+        }, clear=False):
+            primary = StorageReplicaService()
+        start_servicer(
+            primary,
+            pb2_grpc.add_StorageReplicaServiceServicer_to_server,
+            primary_addr,
+            workers=40,
+        )
+
+        backup_addr = f"127.0.0.1:{free_port()}"
+        with mock.patch.dict(os.environ, {
+            "POD_IP": backup_addr,
+            "NODE_PORT": backup_addr.rsplit(":", 1)[1],
+            "NODE_ROLE": "backup",
+            "PEER_ADDRESSES": primary_addr,
+            "AUCTION_STORE_PATH": "",
+        }, clear=False):
+            backup = StorageReplicaService()
+        start_servicer(
+            backup,
+            pb2_grpc.add_StorageReplicaServiceServicer_to_server,
+            backup_addr,
+            workers=40,
+        )
+
+        auction_addr = f"127.0.0.1:{free_port()}"
+        stack.enter_context(mock.patch.object(
+            auction_service_module, "CONTROLLER_ADDRESS", controller_addr
+        ))
+        start_servicer(
+            AuctionService(),
+            pb2_grpc.add_AuctionServiceServicer_to_server,
+            auction_addr,
+            workers=40,
+        )
+        yield {
+            "auction_addr": auction_addr,
+            "controller_service": controller_service,
+            "primary": primary,
+            "backup": backup,
+        }
+    finally:
+        for server in reversed(servers):
+            server.stop(0).wait(timeout=5)
+        stack.close()
+
+
 class BackendTestCase(unittest.TestCase):
     maxDiff = None

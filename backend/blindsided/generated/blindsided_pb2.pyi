@@ -41,6 +41,15 @@ class MutationFailureReason(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     MUTATION_FAILURE_REASON_IDEMPOTENCY_CONFLICT: _ClassVar[MutationFailureReason]
     MUTATION_FAILURE_REASON_ACKNOWLEDGEMENT_PENDING: _ClassVar[MutationFailureReason]
     MUTATION_FAILURE_REASON_STALE_EPOCH: _ClassVar[MutationFailureReason]
+
+class ReadFailureReason(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    READ_FAILURE_REASON_UNSPECIFIED: _ClassVar[ReadFailureReason]
+    READ_FAILURE_REASON_NOT_FOUND: _ClassVar[ReadFailureReason]
+    READ_FAILURE_REASON_NOT_PRIMARY: _ClassVar[ReadFailureReason]
+    READ_FAILURE_REASON_PROMOTION_NOT_READY: _ClassVar[ReadFailureReason]
+    READ_FAILURE_REASON_STALE_EPOCH: _ClassVar[ReadFailureReason]
+    READ_FAILURE_REASON_INTERNAL: _ClassVar[ReadFailureReason]
 AUCTION_STATE_UNSPECIFIED: AuctionState
 AUCTION_STATE_OPEN: AuctionState
 AUCTION_STATE_REVEALED: AuctionState
@@ -61,6 +70,12 @@ MUTATION_FAILURE_REASON_REPLICATION_FAILED: MutationFailureReason
 MUTATION_FAILURE_REASON_IDEMPOTENCY_CONFLICT: MutationFailureReason
 MUTATION_FAILURE_REASON_ACKNOWLEDGEMENT_PENDING: MutationFailureReason
 MUTATION_FAILURE_REASON_STALE_EPOCH: MutationFailureReason
+READ_FAILURE_REASON_UNSPECIFIED: ReadFailureReason
+READ_FAILURE_REASON_NOT_FOUND: ReadFailureReason
+READ_FAILURE_REASON_NOT_PRIMARY: ReadFailureReason
+READ_FAILURE_REASON_PROMOTION_NOT_READY: ReadFailureReason
+READ_FAILURE_REASON_STALE_EPOCH: ReadFailureReason
+READ_FAILURE_REASON_INTERNAL: ReadFailureReason
 
 class Auction(_message.Message):
     __slots__ = ("auction_id", "seller_id", "title", "category", "description", "reserve_price", "bids", "state", "version", "ends_at", "next_bid_sequence", "result")
@@ -175,6 +190,16 @@ class GetAuctionRequest(_message.Message):
     bidder_id: str
     def __init__(self, auction_id: _Optional[str] = ..., bidder_id: _Optional[str] = ...) -> None: ...
 
+class StorageGetAuctionRequest(_message.Message):
+    __slots__ = ("auction_id", "bidder_id", "epoch")
+    AUCTION_ID_FIELD_NUMBER: _ClassVar[int]
+    BIDDER_ID_FIELD_NUMBER: _ClassVar[int]
+    EPOCH_FIELD_NUMBER: _ClassVar[int]
+    auction_id: str
+    bidder_id: str
+    epoch: int
+    def __init__(self, auction_id: _Optional[str] = ..., bidder_id: _Optional[str] = ..., epoch: _Optional[int] = ...) -> None: ...
+
 class GetAuctionResponse(_message.Message):
     __slots__ = ("ok", "auction", "message", "own_active_bid_amount")
     OK_FIELD_NUMBER: _ClassVar[int]
@@ -188,14 +213,16 @@ class GetAuctionResponse(_message.Message):
     def __init__(self, ok: bool = ..., auction: _Optional[_Union[PublicAuction, _Mapping]] = ..., message: _Optional[str] = ..., own_active_bid_amount: _Optional[float] = ...) -> None: ...
 
 class GetStoredAuctionResponse(_message.Message):
-    __slots__ = ("ok", "auction", "message")
+    __slots__ = ("ok", "auction", "message", "failure_reason")
     OK_FIELD_NUMBER: _ClassVar[int]
     AUCTION_FIELD_NUMBER: _ClassVar[int]
     MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    FAILURE_REASON_FIELD_NUMBER: _ClassVar[int]
     ok: bool
     auction: Auction
     message: str
-    def __init__(self, ok: bool = ..., auction: _Optional[_Union[Auction, _Mapping]] = ..., message: _Optional[str] = ...) -> None: ...
+    failure_reason: ReadFailureReason
+    def __init__(self, ok: bool = ..., auction: _Optional[_Union[Auction, _Mapping]] = ..., message: _Optional[str] = ..., failure_reason: _Optional[_Union[ReadFailureReason, str]] = ...) -> None: ...
 
 class SearchAuctionsRequest(_message.Message):
     __slots__ = ("query", "category")
@@ -394,14 +421,20 @@ class HealthCheckRequest(_message.Message):
     def __init__(self, request_source: _Optional[str] = ...) -> None: ...
 
 class HealthCheckResponse(_message.Message):
-    __slots__ = ("alive", "role", "message")
+    __slots__ = ("alive", "role", "message", "epoch", "promotion_ready", "synchronous_backup_address")
     ALIVE_FIELD_NUMBER: _ClassVar[int]
     ROLE_FIELD_NUMBER: _ClassVar[int]
     MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    EPOCH_FIELD_NUMBER: _ClassVar[int]
+    PROMOTION_READY_FIELD_NUMBER: _ClassVar[int]
+    SYNCHRONOUS_BACKUP_ADDRESS_FIELD_NUMBER: _ClassVar[int]
     alive: bool
     role: str
     message: str
-    def __init__(self, alive: bool = ..., role: _Optional[str] = ..., message: _Optional[str] = ...) -> None: ...
+    epoch: int
+    promotion_ready: bool
+    synchronous_backup_address: str
+    def __init__(self, alive: bool = ..., role: _Optional[str] = ..., message: _Optional[str] = ..., epoch: _Optional[int] = ..., promotion_ready: bool = ..., synchronous_backup_address: _Optional[str] = ...) -> None: ...
 
 class BeginPrimaryPromotionRequest(_message.Message):
     __slots__ = ("epoch",)
@@ -436,10 +469,18 @@ class PromotionStateConfirmationResponse(_message.Message):
     def __init__(self, confirmed: bool = ..., epoch: _Optional[int] = ..., message: _Optional[str] = ...) -> None: ...
 
 class RegisterRequest(_message.Message):
-    __slots__ = ("address",)
+    __slots__ = ("address", "role", "epoch", "promotion_ready", "synchronous_backup_address")
     ADDRESS_FIELD_NUMBER: _ClassVar[int]
+    ROLE_FIELD_NUMBER: _ClassVar[int]
+    EPOCH_FIELD_NUMBER: _ClassVar[int]
+    PROMOTION_READY_FIELD_NUMBER: _ClassVar[int]
+    SYNCHRONOUS_BACKUP_ADDRESS_FIELD_NUMBER: _ClassVar[int]
     address: str
-    def __init__(self, address: _Optional[str] = ...) -> None: ...
+    role: str
+    epoch: int
+    promotion_ready: bool
+    synchronous_backup_address: str
+    def __init__(self, address: _Optional[str] = ..., role: _Optional[str] = ..., epoch: _Optional[int] = ..., promotion_ready: bool = ..., synchronous_backup_address: _Optional[str] = ...) -> None: ...
 
 class RegisterResponse(_message.Message):
     __slots__ = ("success", "is_primary", "message", "epoch")

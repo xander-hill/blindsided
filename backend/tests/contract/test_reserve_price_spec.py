@@ -190,7 +190,10 @@ class ReservePriceSpecificationTests(BackendTestCase):
         reveal = judge.ApplyAuctionMutation(
             pb2.AuctionMutationRequest(
                 mutation_type=pb2.AUCTION_MUTATION_TYPE_REVEAL,
-                auction=pb2.Auction(auction_id="reserve-hidden-rule-data"),
+                auction=pb2.Auction(
+                    auction_id="reserve-hidden-rule-data",
+                    seller_id="seller-a",
+                ),
                 expected_version=1,
             ),
             NoopContext(),

@@ -211,6 +211,23 @@ export interface GetAuctionRequest {
     bidderId: string;
 }
 /**
+ * @generated from protobuf message blindsided.StorageGetAuctionRequest
+ */
+export interface StorageGetAuctionRequest {
+    /**
+     * @generated from protobuf field: string auction_id = 1
+     */
+    auctionId: string;
+    /**
+     * @generated from protobuf field: string bidder_id = 2
+     */
+    bidderId: string;
+    /**
+     * @generated from protobuf field: int64 epoch = 3
+     */
+    epoch: bigint;
+}
+/**
  * @generated from protobuf message blindsided.GetAuctionResponse
  */
 export interface GetAuctionResponse {
@@ -247,6 +264,10 @@ export interface GetStoredAuctionResponse {
      * @generated from protobuf field: string message = 3
      */
     message: string;
+    /**
+     * @generated from protobuf field: optional blindsided.ReadFailureReason failure_reason = 4
+     */
+    failureReason?: ReadFailureReason;
 }
 /**
  * @generated from protobuf message blindsided.SearchAuctionsRequest
@@ -1117,6 +1138,35 @@ export enum MutationFailureReason {
      */
     STALE_EPOCH = 7
 }
+/**
+ * @generated from protobuf enum blindsided.ReadFailureReason
+ */
+export enum ReadFailureReason {
+    /**
+     * @generated from protobuf enum value: READ_FAILURE_REASON_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: READ_FAILURE_REASON_NOT_FOUND = 1;
+     */
+    NOT_FOUND = 1,
+    /**
+     * @generated from protobuf enum value: READ_FAILURE_REASON_NOT_PRIMARY = 2;
+     */
+    NOT_PRIMARY = 2,
+    /**
+     * @generated from protobuf enum value: READ_FAILURE_REASON_PROMOTION_NOT_READY = 3;
+     */
+    PROMOTION_NOT_READY = 3,
+    /**
+     * @generated from protobuf enum value: READ_FAILURE_REASON_STALE_EPOCH = 4;
+     */
+    STALE_EPOCH = 4,
+    /**
+     * @generated from protobuf enum value: READ_FAILURE_REASON_INTERNAL = 5;
+     */
+    INTERNAL = 5
+}
 // @generated message type with reflection information, may provide speed optimized methods
 class Auction$Type extends MessageType<Auction> {
     constructor() {
@@ -1693,6 +1743,69 @@ class GetAuctionRequest$Type extends MessageType<GetAuctionRequest> {
  */
 export const GetAuctionRequest = new GetAuctionRequest$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class StorageGetAuctionRequest$Type extends MessageType<StorageGetAuctionRequest> {
+    constructor() {
+        super("blindsided.StorageGetAuctionRequest", [
+            { no: 1, name: "auction_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "bidder_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "epoch", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<StorageGetAuctionRequest>): StorageGetAuctionRequest {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.auctionId = "";
+        message.bidderId = "";
+        message.epoch = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<StorageGetAuctionRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: StorageGetAuctionRequest): StorageGetAuctionRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string auction_id */ 1:
+                    message.auctionId = reader.string();
+                    break;
+                case /* string bidder_id */ 2:
+                    message.bidderId = reader.string();
+                    break;
+                case /* int64 epoch */ 3:
+                    message.epoch = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: StorageGetAuctionRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string auction_id = 1; */
+        if (message.auctionId !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.auctionId);
+        /* string bidder_id = 2; */
+        if (message.bidderId !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.bidderId);
+        /* int64 epoch = 3; */
+        if (message.epoch !== 0n)
+            writer.tag(3, WireType.Varint).int64(message.epoch);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message blindsided.StorageGetAuctionRequest
+ */
+export const StorageGetAuctionRequest = new StorageGetAuctionRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class GetAuctionResponse$Type extends MessageType<GetAuctionResponse> {
     constructor() {
         super("blindsided.GetAuctionResponse", [
@@ -1767,7 +1880,8 @@ class GetStoredAuctionResponse$Type extends MessageType<GetStoredAuctionResponse
         super("blindsided.GetStoredAuctionResponse", [
             { no: 1, name: "ok", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
             { no: 2, name: "auction", kind: "message", T: () => Auction },
-            { no: 3, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+            { no: 3, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "failure_reason", kind: "enum", opt: true, T: () => ["blindsided.ReadFailureReason", ReadFailureReason, "READ_FAILURE_REASON_"] }
         ]);
     }
     create(value?: PartialMessage<GetStoredAuctionResponse>): GetStoredAuctionResponse {
@@ -1792,6 +1906,9 @@ class GetStoredAuctionResponse$Type extends MessageType<GetStoredAuctionResponse
                 case /* string message */ 3:
                     message.message = reader.string();
                     break;
+                case /* optional blindsided.ReadFailureReason failure_reason */ 4:
+                    message.failureReason = reader.int32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -1813,6 +1930,9 @@ class GetStoredAuctionResponse$Type extends MessageType<GetStoredAuctionResponse
         /* string message = 3; */
         if (message.message !== "")
             writer.tag(3, WireType.LengthDelimited).string(message.message);
+        /* optional blindsided.ReadFailureReason failure_reason = 4; */
+        if (message.failureReason !== undefined)
+            writer.tag(4, WireType.Varint).int32(message.failureReason);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -4558,7 +4678,7 @@ export const AuctionService = new ServiceType("blindsided.AuctionService", [
  */
 export const StorageReplicaService = new ServiceType("blindsided.StorageReplicaService", [
     { name: "ApplyAuctionMutation", options: {}, I: AuctionMutationRequest, O: AuctionMutationResponse },
-    { name: "GetAuction", options: {}, I: GetAuctionRequest, O: GetStoredAuctionResponse },
+    { name: "GetAuction", options: {}, I: StorageGetAuctionRequest, O: GetStoredAuctionResponse },
     { name: "SearchAuctions", options: {}, I: SearchAuctionsRequest, O: GetStoredAuctionsResponse },
     { name: "SyncFullState", options: {}, I: StateRequest, O: StateResponse },
     { name: "Heartbeat", options: {}, I: HealthCheckRequest, O: HealthCheckResponse },

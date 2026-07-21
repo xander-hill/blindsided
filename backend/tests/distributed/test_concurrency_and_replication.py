@@ -696,6 +696,7 @@ class DistributedBehaviorTests(BackendTestCase):
                 stub = pb2_grpc.AuctionServiceStub(channel)
                 gavel = stub.RevealAuction(pb2.RevealAuctionRequest(
                     auction_id=auction_id,
+                    seller_id="seller-a",
                     request_id="concurrent-auction-reveal",
                 ), timeout=20)
                 final_status = stub.GetAuction(pb2.GetAuctionRequest(
@@ -1016,7 +1017,7 @@ class DistributedBehaviorTests(BackendTestCase):
                 NoopContext(),
             )
             blocked_read = candidate.GetAuction(
-                pb2.GetAuctionRequest(auction_id="promotion-auction"),
+                pb2.StorageGetAuctionRequest(auction_id="promotion-auction", epoch=7),
                 NoopContext(),
             )
             available_sync = candidate.SyncFullState(
@@ -1033,7 +1034,7 @@ class DistributedBehaviorTests(BackendTestCase):
                 pb2.GetPrimaryRequest(), NoopContext()
             )
             ready_read = candidate.GetAuction(
-                pb2.GetAuctionRequest(auction_id="promotion-auction"),
+                pb2.StorageGetAuctionRequest(auction_id="promotion-auction", epoch=7),
                 NoopContext(),
             )
             ready_mutation = candidate.ApplyAuctionMutation(
@@ -1089,7 +1090,7 @@ class DistributedBehaviorTests(BackendTestCase):
 
             primary = controller.GetPrimary(pb2.GetPrimaryRequest(), NoopContext())
             blocked_read = candidate.GetAuction(
-                pb2.GetAuctionRequest(auction_id="promotion-auction"),
+                pb2.StorageGetAuctionRequest(auction_id="promotion-auction", epoch=7),
                 NoopContext(),
             )
             blocked_mutation = candidate.ApplyAuctionMutation(
@@ -1106,10 +1107,10 @@ class DistributedBehaviorTests(BackendTestCase):
                 NoopContext(),
             )
 
-        self.assertEqual(controller.primary_assignment.status, PrimaryStatus.PROMOTING)
+        self.assertIsNone(controller.primary_assignment)
         self.assertFalse(candidate.promotion_ready)
         self.assertFalse(primary.success)
         self.assertEqual(primary.primary_address, "")
-        self.assertEqual(primary.epoch, 7)
+        self.assertEqual(primary.epoch, 0)
         self.assertFalse(blocked_read.ok)
         self.assertFalse(blocked_mutation.success)

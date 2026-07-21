@@ -1,9 +1,14 @@
+import os
 from unittest import mock
 from uuid import UUID
 
 import grpc
 
-from blindsided.auction_service.service import AuctionService, PrimaryAssignment
+from blindsided.auction_service.service import (
+    AuctionService,
+    PrimaryAssignment,
+    _auction_id_for_request,
+)
 from blindsided.generated import blindsided_pb2 as pb2
 from backend.tests.helpers import (
     BackendTestCase,
@@ -23,8 +28,12 @@ class FakeJudgeStub:
         self.mutation_errors: list[grpc.RpcError] = []
         self.get_responses: list[pb2.GetStoredAuctionResponse] = []
         self.search_responses: list[pb2.GetStoredAuctionsResponse] = []
+        self.mutation_timeouts = []
+        self.get_timeouts = []
+        self.search_timeouts = []
 
     def ApplyAuctionMutation(self, request, timeout=None):
+        self.mutation_timeouts.append(timeout)
         self.mutations.append(request)
         if self.mutation_errors:
             raise self.mutation_errors.pop(0)
@@ -33,12 +42,14 @@ class FakeJudgeStub:
         return pb2.AuctionMutationResponse(success=True, current_version=1, message="ok")
 
     def GetAuction(self, request, timeout=None):
+        self.get_timeouts.append(timeout)
         self.gets.append(request)
         if self.get_responses:
             return self.get_responses.pop(0)
         return pb2.GetStoredAuctionResponse(ok=False)
 
     def SearchAuctions(self, request, timeout=None):
+        self.search_timeouts.append(timeout)
         self.searches.append(request)
         if self.search_responses:
             return self.search_responses.pop(0)
@@ -62,7 +73,7 @@ class TestableAuctionService(AuctionService):
             return None
         return PrimaryAssignment(self.primary_address, self.primary_epoch)
 
-    def _get_storage_node_addresses(self):
+    def _get_storage_node_addresses(self, timeout_seconds=3.0):
         return [self.primary_address] if self.primary_address else []
 
     def _create_storage_stub(self, address: str):
@@ -113,6 +124,78 @@ class ExpiredContext(NoopContext):
 
 
 class AuctionServiceTests(BackendTestCase):
+    def test_create_id_is_deterministic_across_service_instances(self):
+        first_stub = FakeJudgeStub()
+        second_stub = FakeJudgeStub()
+        request = pb2.CreateAuctionRequest(request_id="same-request", seller_id="seller")
+
+        TestableAuctionService(first_stub).CreateAuction(request, NoopContext())
+        TestableAuctionService(second_stub).CreateAuction(request, NoopContext())
+
+        self.assertEqual(first_stub.mutations[0].auction, second_stub.mutations[0].auction)
+        self.assertEqual(UUID(first_stub.mutations[0].auction.auction_id).version, 5)
+        self.assertNotEqual(
+            _auction_id_for_request("same-request"),
+            _auction_id_for_request("different-request"),
+        )
+
+    def test_get_retries_new_primary_after_stale_epoch(self):
+        stale = FakeJudgeStub()
+        stale.get_responses.append(pb2.GetStoredAuctionResponse(
+            ok=False,
+            failure_reason=pb2.READ_FAILURE_REASON_STALE_EPOCH,
+        ))
+        fresh = FakeJudgeStub()
+        fresh.get_responses.append(pb2.GetStoredAuctionResponse(
+            ok=True,
+            auction=pb2.Auction(auction_id="auction-1", version=4),
+        ))
+        service = FailoverRoutingAuctionService(
+            [PrimaryAssignment("old", 4), PrimaryAssignment("new", 5)],
+            {"old": stale, "new": fresh},
+        )
+
+        response = service.GetAuction(pb2.GetAuctionRequest(auction_id="auction-1"), NoopContext())
+
+        self.assertTrue(response.ok)
+        self.assertEqual(stale.gets[0].epoch, 4)
+        self.assertEqual(fresh.gets[0].epoch, 5)
+
+    def test_outbound_timeout_respects_shorter_client_deadline(self):
+        stub = FakeJudgeStub()
+        service = TestableAuctionService(stub)
+        context = mock.Mock()
+        context.time_remaining.return_value = 0.25
+
+        service.GetAuction(pb2.GetAuctionRequest(auction_id="missing"), context)
+
+        self.assertEqual(stub.get_timeouts, [0.25])
+
+    def test_invalid_timeout_configuration_fails_at_startup(self):
+        with mock.patch.dict(os.environ, {"READ_RPC_TIMEOUT_SECONDS": "not-a-number"}):
+            with self.assertRaisesRegex(ValueError, "READ_RPC_TIMEOUT_SECONDS"):
+                AuctionService()
+
+    def test_search_skips_application_failure_and_uses_next_replica(self):
+        stub = FakeJudgeStub()
+        stub.search_responses.extend([
+            pb2.GetStoredAuctionsResponse(ok=False, message="replica unavailable"),
+            pb2.GetStoredAuctionsResponse(
+                ok=True,
+                count=99,
+                auctions=[pb2.Auction(auction_id="auction-1")],
+            ),
+        ])
+        service = TestableAuctionService(stub)
+        with (
+            mock.patch.object(service, "_get_storage_node_addresses", return_value=["one", "two"]),
+            mock.patch("blindsided.auction_service.service.random.shuffle"),
+        ):
+            response = service.SearchAuctions(pb2.SearchAuctionsRequest(), NoopContext())
+
+        self.assertTrue(response.ok)
+        self.assertEqual(len(stub.searches), 2)
+        self.assertEqual(response.count, 1)
     def _public_field_names(self, message):
         return {field.name for field in message.DESCRIPTOR.fields}
 
@@ -232,8 +315,8 @@ class AuctionServiceTests(BackendTestCase):
                 second_logical.epoch = 0
                 self.assertEqual(first_logical, second_logical)
                 if operation == "create":
-                    self.assertEqual(first.auction.auction_id, "generated-auction-id")
-                    self.assertEqual(second.auction.auction_id, "generated-auction-id")
+                    self.assertEqual(first.auction.auction_id, _auction_id_for_request(first.request_id))
+                    self.assertEqual(second.auction.auction_id, _auction_id_for_request(second.request_id))
 
     def test_deadline_exceeded_mutation_is_retried(self):
         for operation in ("create", "bid", "withdrawal", "reveal"):
@@ -350,8 +433,8 @@ class AuctionServiceTests(BackendTestCase):
             )
 
         self.assertTrue(response.ok)
-        self.assertEqual(response.auction_id, "generated-auction-id")
-        self.assertEqual(stub.mutations[0].auction.auction_id, "generated-auction-id")
+        self.assertEqual(response.auction_id, _auction_id_for_request("open-auction-request"))
+        self.assertEqual(stub.mutations[0].auction.auction_id, _auction_id_for_request("open-auction-request"))
         self.assertEqual(stub.mutations[0].auction.seller_id, "seller-a")
         self.assertEqual(stub.mutations[0].auction.title, "Watch")
         self.assertEqual(stub.mutations[0].auction.category, "collectibles")
@@ -938,7 +1021,8 @@ class AuctionServiceTests(BackendTestCase):
             )
 
         self.assertFalse(response.success)
-        self.assertIn("Judge connection failed", response.message)
+        self.assertEqual(response.message, "Storage mutation failed.")
+        self.assertNotIn("temporary transport failure", response.message)
         self.assertEqual(len(stub.mutations), 1)
         recovery.assert_not_called()
 
@@ -1160,7 +1244,7 @@ class AuctionServiceTests(BackendTestCase):
         self.assertEqual(stub.mutations[0].request_id, "stable-request-id")
         self.assertEqual(stub.mutations[1].request_id, "stable-request-id")
         self.assertEqual(stub.mutations[0].auction, stub.mutations[1].auction)
-        self.assertEqual(stub.mutations[0].auction.auction_id, "generated-auction-id")
+        self.assertEqual(stub.mutations[0].auction.auction_id, _auction_id_for_request("stable-request-id"))
         self.assertEqual(stub.mutations[0].epoch, 7)
         self.assertEqual(stub.mutations[1].epoch, 8)
 

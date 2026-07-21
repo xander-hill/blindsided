@@ -1,5 +1,16 @@
 # Auction Specification
 
+> Simulation trust boundary: until authentication is introduced, `seller_id`,
+> `bidder_id`, and `user_id` are trusted simulation inputs. The service enforces
+> that reveal mutations match the auction's stored seller, but caller-supplied
+> bidder identity is not an authentication mechanism and must not be described
+> as protecting access to an authenticated user's own bid.
+
+> Money contract: the frontend API will use integer minor units (for example,
+> cents), not protobuf floating-point fields. The current float fields are a
+> compatibility-only simulation surface and must be replaced before publishing
+> the frontend contract.
+
 ## 1. Purpose
 
 This document defines the normative behavioral specification for the

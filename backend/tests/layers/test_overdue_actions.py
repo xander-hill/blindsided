@@ -57,7 +57,7 @@ class OverdueActionsTests(unittest.TestCase):
         return judge.ApplyAuctionMutation(
             pb2.AuctionMutationRequest(
                 mutation_type=pb2.AUCTION_MUTATION_TYPE_REVEAL,
-                auction=pb2.Auction(auction_id=auction_id),
+                auction=pb2.Auction(auction_id=auction_id, seller_id="seller-1"),
                 expected_version=4,
                 request_id=judge._overdue_request_id(auction_id),
                 epoch=judge.current_epoch,
