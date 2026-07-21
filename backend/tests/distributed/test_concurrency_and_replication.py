@@ -1106,10 +1106,10 @@ class DistributedBehaviorTests(BackendTestCase):
                 NoopContext(),
             )
 
-        self.assertEqual(controller.primary_assignment.status, PrimaryStatus.PROMOTING)
+        self.assertIsNone(controller.primary_assignment)
         self.assertFalse(candidate.promotion_ready)
         self.assertFalse(primary.success)
         self.assertEqual(primary.primary_address, "")
-        self.assertEqual(primary.epoch, 7)
+        self.assertEqual(primary.epoch, 0)
         self.assertFalse(blocked_read.ok)
         self.assertFalse(blocked_mutation.success)

@@ -1,5 +1,7 @@
 from unittest import mock
 
+import grpc
+
 from blindsided.controller.service import (
     ControllerService,
     PrimaryAssignment,
@@ -12,6 +14,17 @@ from backend.tests.helpers import BackendTestCase, ChannelContext, NoopContext
 
 
 class ControllerServiceTests(BackendTestCase):
+    def test_rejects_blank_registration_address(self):
+        service = ControllerService()
+
+        response = service.RegisterNode(
+            pb2.RegisterRequest(address="   "), NoopContext()
+        )
+
+        self.assertFalse(response.success)
+        self.assertEqual(service.nodes, {})
+        self.assertIsNone(service.primary_assignment)
+
     def test_registers_first_node_as_primary_and_reports_cluster(self):
         service = ControllerService()
 
@@ -333,9 +346,9 @@ class ControllerServiceTests(BackendTestCase):
         self.assertFalse(promoting.success)
         self.assertEqual(promoting.epoch, 7)
         self.assertIn("not complete", promoting.message)
-        self.assertEqual(service.primary_assignment.status, PrimaryStatus.PROMOTING)
+        self.assertIsNone(service.primary_assignment)
         self.assertFalse(still_promoting.success)
-        self.assertEqual(still_promoting.epoch, 7)
+        self.assertEqual(still_promoting.epoch, 0)
         promotion_request = storage_stub.BeginPrimaryPromotion.call_args.args[0]
         self.assertEqual(promotion_request.epoch, 7)
         confirmation_request = storage_stub.ConfirmPromotionState.call_args.args[0]
@@ -423,7 +436,7 @@ class ControllerServiceTests(BackendTestCase):
 
         storage_stub.BeginPrimaryPromotion.assert_called_once()
         storage_stub.ConfirmPromotionState.assert_called_once()
-        self.assertEqual(service.primary_assignment.status, PrimaryStatus.PROMOTING)
+        self.assertIsNone(service.primary_assignment)
 
     def test_controller_designates_and_synchronizes_non_primary_after_confirmation(self):
         service = ControllerService()
@@ -453,7 +466,8 @@ class ControllerServiceTests(BackendTestCase):
         )
         backup_stub = mock.Mock()
 
-        def synchronize(request):
+        def synchronize(request, **kwargs):
+            self.assertGreater(kwargs["timeout"], 0)
             self.assertEqual(
                 service.nodes["backup:50051"].sync_status,
                 ReplicaSyncStatus.UNSYNCHRONIZED,
@@ -513,7 +527,8 @@ class ControllerServiceTests(BackendTestCase):
         }
         storage_stub = mock.Mock()
 
-        def complete(request):
+        def complete(request, **kwargs):
+            self.assertGreater(kwargs["timeout"], 0)
             self.assertEqual(service.primary_assignment.status, PrimaryStatus.PROMOTING)
             return pb2.CompletePrimaryPromotionResponse(success=True, epoch=7)
 
@@ -593,7 +608,8 @@ class ControllerServiceTests(BackendTestCase):
             )
 
         self.assertFalse(response.success)
-        self.assertEqual(service.primary_assignment.status, PrimaryStatus.PROMOTING)
+        self.assertIsNone(service.primary_assignment)
+        self.assertNotIn("candidate:50051", service.nodes)
 
     def test_stale_completion_cannot_activate_newer_primary_assignment(self):
         service = ControllerService()
@@ -617,7 +633,8 @@ class ControllerServiceTests(BackendTestCase):
         }
         storage_stub = mock.Mock()
 
-        def complete(_request):
+        def complete(_request, **kwargs):
+            self.assertGreater(kwargs["timeout"], 0)
             service.primary_assignment = PrimaryAssignment(
                 node_id="new-candidate:50051",
                 epoch=8,
@@ -751,6 +768,420 @@ class ControllerServiceTests(BackendTestCase):
         ):
             service._notify_promotion("candidate:50051", 7)
 
-        self.assertEqual(service.primary_assignment.status, PrimaryStatus.PROMOTING)
-        self.assertIsNone(service.primary_assignment.sync_backup_address)
+        self.assertIsNone(service.primary_assignment)
         candidate_stub.SynchronizeFromPrimary.assert_not_called()
+
+    def test_candidate_and_backup_selection_are_deterministic(self):
+        service = ControllerService()
+        service.nodes = {
+            address: ReplicaRecord(
+                address=address,
+                last_seen=1.0,
+                sync_status=ReplicaSyncStatus.SYNCHRONIZED,
+            )
+            for address in ("z:1", "a:1", "m:1")
+        }
+        assignment = PrimaryAssignment(
+            node_id="a:1",
+            epoch=2,
+            status=PrimaryStatus.PROMOTING,
+            eligible_backup_addresses=("z:1", "m:1", "a:1"),
+        )
+
+        with service.lock:
+            candidate = service._select_primary_candidate_locked()
+            backup = service._select_backup_locked("a:1", assignment)
+
+        self.assertEqual(candidate, "a:1")
+        self.assertEqual(backup, "m:1")
+
+    def test_heartbeat_rpc_runs_without_controller_lock_and_has_deadline(self):
+        service = ControllerService()
+        service.nodes["replica:1"] = ReplicaRecord(
+            address="replica:1",
+            last_seen=1.0,
+            sync_status=ReplicaSyncStatus.UNSYNCHRONIZED,
+        )
+        stub = mock.Mock()
+
+        def heartbeat(_request, **kwargs):
+            acquired = service.lock.acquire(blocking=False)
+            self.assertTrue(acquired)
+            service.lock.release()
+            self.assertEqual(kwargs["timeout"], service._heartbeat_timeout)
+            return pb2.HealthCheckResponse(alive=True)
+
+        stub.Heartbeat.side_effect = heartbeat
+        with (
+            mock.patch(
+                "blindsided.controller.service.grpc.insecure_channel",
+                return_value=ChannelContext(),
+            ),
+            mock.patch(
+                "blindsided.controller.service.pb2_grpc.StorageReplicaServiceStub",
+                return_value=stub,
+            ),
+            mock.patch(
+                "blindsided.controller.service.time.sleep",
+                side_effect=[None, StopIteration],
+            ),
+        ):
+            with self.assertRaises(StopIteration):
+                service._monitor_heartbeats()
+
+    def test_promotion_rpcs_run_without_lock_and_have_deadlines(self):
+        service = ControllerService()
+        service.primary_assignment = PrimaryAssignment(
+            node_id="candidate:1",
+            epoch=7,
+            status=PrimaryStatus.PROMOTING,
+            eligible_backup_addresses=("candidate:1", "backup:1"),
+        )
+        service.nodes = {
+            address: ReplicaRecord(
+                address=address,
+                last_seen=1.0,
+                sync_status=ReplicaSyncStatus.UNSYNCHRONIZED,
+            )
+            for address in ("candidate:1", "backup:1")
+        }
+
+        def unlocked(response, expected_timeout):
+            def call(_request, **kwargs):
+                acquired = service.lock.acquire(blocking=False)
+                self.assertTrue(acquired)
+                service.lock.release()
+                self.assertEqual(kwargs["timeout"], expected_timeout)
+                return response
+            return call
+
+        candidate_stub = mock.Mock()
+        candidate_stub.BeginPrimaryPromotion.side_effect = unlocked(
+            pb2.BeginPrimaryPromotionResponse(accepted=True, epoch=7),
+            service._promotion_timeout,
+        )
+        candidate_stub.ConfirmPromotionState.side_effect = unlocked(
+            pb2.PromotionStateConfirmationResponse(confirmed=True, epoch=7),
+            service._promotion_timeout,
+        )
+        backup_stub = mock.Mock()
+        backup_stub.SynchronizeFromPrimary.side_effect = unlocked(
+            pb2.SynchronizeFromPrimaryResponse(success=True, epoch=7),
+            service._synchronization_timeout,
+        )
+        with (
+            mock.patch(
+                "blindsided.controller.service.grpc.insecure_channel",
+                return_value=ChannelContext(),
+            ),
+            mock.patch(
+                "blindsided.controller.service.pb2_grpc.StorageReplicaServiceStub",
+                side_effect=[candidate_stub, backup_stub],
+            ),
+        ):
+            service._notify_promotion("candidate:1", 7)
+
+        backup_stub.SynchronizeFromPrimary.assert_called_once()
+
+    def test_primary_failure_starts_only_one_election(self):
+        service = ControllerService()
+        service.primary_assignment = PrimaryAssignment(
+            node_id="primary:1", epoch=1, status=PrimaryStatus.READY
+        )
+        service.nodes = {
+            "primary:1": ReplicaRecord(
+                "primary:1", 1.0, ReplicaSyncStatus.UNSYNCHRONIZED
+            ),
+            "backup:1": ReplicaRecord(
+                "backup:1", 1.0, ReplicaSyncStatus.SYNCHRONIZED, 1
+            ),
+        }
+
+        with mock.patch.object(service, "_elect_new_primary") as elect:
+            service._handle_replica_failure("primary:1")
+            service._handle_replica_failure("primary:1")
+
+        elect.assert_called_once()
+
+    def test_removing_selected_backup_repairs_assignment_reference(self):
+        service = ControllerService()
+        service.primary_assignment = PrimaryAssignment(
+            node_id="candidate:1",
+            epoch=2,
+            status=PrimaryStatus.PROMOTING,
+            sync_backup_address="backup:1",
+            eligible_backup_addresses=("candidate:1", "backup:1"),
+        )
+        service.nodes = {
+            "candidate:1": ReplicaRecord(
+                "candidate:1", 1.0, ReplicaSyncStatus.UNSYNCHRONIZED
+            ),
+            "backup:1": ReplicaRecord(
+                "backup:1", 1.0, ReplicaSyncStatus.UNSYNCHRONIZED
+            ),
+        }
+
+        service._handle_replica_failure("backup:1")
+
+        self.assertNotIn("backup:1", service.nodes)
+        self.assertIn("candidate:1", service.nodes)
+        self.assertIsNone(service.primary_assignment)
+
+    def test_new_assignment_invalidates_old_epoch_synchronization(self):
+        service = ControllerService()
+        service.last_primary_epoch = 1
+        service.nodes = {
+            address: ReplicaRecord(
+                address, 1.0, ReplicaSyncStatus.SYNCHRONIZED, 1
+            )
+            for address in ("candidate:1", "backup:1")
+        }
+
+        with mock.patch.object(service, "_notify_promotion"):
+            service._elect_new_primary()
+
+        self.assertEqual(service.primary_assignment.epoch, 2)
+        self.assertTrue(
+            all(
+                replica.sync_status == ReplicaSyncStatus.UNSYNCHRONIZED
+                and replica.synchronized_epoch == 0
+                for replica in service.nodes.values()
+            )
+        )
+
+    def test_candidate_rejection_evicts_candidate_and_tries_next(self):
+        for rejected_stage in ("begin", "confirm"):
+            with self.subTest(stage=rejected_stage):
+                service = ControllerService()
+                service.last_primary_epoch = 7
+                service.primary_assignment = PrimaryAssignment(
+                    node_id="a:1",
+                    epoch=7,
+                    status=PrimaryStatus.PROMOTING,
+                    eligible_backup_addresses=("a:1", "b:1", "c:1"),
+                )
+                service.nodes = {
+                    address: ReplicaRecord(
+                        address, 1.0, ReplicaSyncStatus.UNSYNCHRONIZED
+                    )
+                    for address in ("a:1", "b:1", "c:1")
+                }
+                stub = mock.Mock()
+                stub.BeginPrimaryPromotion.return_value = (
+                    pb2.BeginPrimaryPromotionResponse(
+                        accepted=rejected_stage != "begin", epoch=7
+                    )
+                )
+                stub.ConfirmPromotionState.return_value = (
+                    pb2.PromotionStateConfirmationResponse(
+                        confirmed=False, epoch=7
+                    )
+                )
+                run_promotion = service._notify_promotion
+                with (
+                    mock.patch(
+                        "blindsided.controller.service.grpc.insecure_channel",
+                        return_value=ChannelContext(),
+                    ),
+                    mock.patch(
+                        "blindsided.controller.service.pb2_grpc.StorageReplicaServiceStub",
+                        return_value=stub,
+                    ),
+                    mock.patch.object(service, "_notify_promotion") as notify,
+                ):
+                    run_promotion("a:1", 7)
+
+                self.assertNotIn("a:1", service.nodes)
+                self.assertEqual(service.primary_assignment.primary_address, "b:1")
+                self.assertEqual(service.primary_assignment.epoch, 8)
+                notify.assert_called_once_with("b:1", 8)
+
+    def test_candidate_rpc_timeout_uses_candidate_failure_recovery(self):
+        service = ControllerService()
+        service.last_primary_epoch = 3
+        service.primary_assignment = PrimaryAssignment(
+            node_id="a:1",
+            epoch=3,
+            status=PrimaryStatus.PROMOTING,
+            eligible_backup_addresses=("a:1", "b:1"),
+        )
+        service.nodes = {
+            address: ReplicaRecord(
+                address, 1.0, ReplicaSyncStatus.UNSYNCHRONIZED
+            )
+            for address in ("a:1", "b:1")
+        }
+        stub = mock.Mock()
+        stub.BeginPrimaryPromotion.side_effect = grpc.RpcError("timeout")
+        run_promotion = service._notify_promotion
+
+        with (
+            mock.patch(
+                "blindsided.controller.service.grpc.insecure_channel",
+                return_value=ChannelContext(),
+            ),
+            mock.patch(
+                "blindsided.controller.service.pb2_grpc.StorageReplicaServiceStub",
+                return_value=stub,
+            ),
+            mock.patch.object(service, "_notify_promotion"),
+        ):
+            run_promotion("a:1", 3)
+
+        self.assertNotIn("a:1", service.nodes)
+        self.assertEqual(service.primary_assignment.primary_address, "b:1")
+        self.assertEqual(service.primary_assignment.epoch, 4)
+
+    def test_backup_failures_retry_once_each_in_deterministic_order(self):
+        for first_failure in ("rejection", "timeout"):
+            with self.subTest(failure=first_failure):
+                service = ControllerService()
+                service.primary_assignment = PrimaryAssignment(
+                    node_id="candidate:1",
+                    epoch=5,
+                    status=PrimaryStatus.PROMOTING,
+                    eligible_backup_addresses=("z:1", "candidate:1", "b:1"),
+                )
+                service.nodes = {
+                    address: ReplicaRecord(
+                        address, 1.0, ReplicaSyncStatus.UNSYNCHRONIZED
+                    )
+                    for address in ("candidate:1", "z:1", "b:1")
+                }
+                failed_stub = mock.Mock()
+                if first_failure == "timeout":
+                    failed_stub.SynchronizeFromPrimary.side_effect = grpc.RpcError(
+                        "timeout"
+                    )
+                else:
+                    failed_stub.SynchronizeFromPrimary.return_value = (
+                        pb2.SynchronizeFromPrimaryResponse(success=False, epoch=5)
+                    )
+                successful_stub = mock.Mock()
+                successful_stub.SynchronizeFromPrimary.return_value = (
+                    pb2.SynchronizeFromPrimaryResponse(success=True, epoch=5)
+                )
+                with (
+                    mock.patch(
+                        "blindsided.controller.service.grpc.insecure_channel",
+                        return_value=ChannelContext(),
+                    ),
+                    mock.patch(
+                        "blindsided.controller.service.pb2_grpc.StorageReplicaServiceStub",
+                        side_effect=[failed_stub, successful_stub],
+                    ),
+                ):
+                    service._try_next_promotion_backup("candidate:1", 5)
+
+                self.assertNotIn("b:1", service.nodes)
+                self.assertIn("candidate:1", service.nodes)
+                self.assertEqual(service.primary_assignment.sync_backup_address, "z:1")
+                self.assertEqual(
+                    service.primary_assignment.attempted_backup_addresses,
+                    {"b:1", "z:1"},
+                )
+                failed_stub.SynchronizeFromPrimary.assert_called_once()
+                successful_stub.SynchronizeFromPrimary.assert_called_once()
+
+    def test_exhausted_backups_leave_cluster_unavailable_without_candidate_eviction(self):
+        service = ControllerService()
+        service.last_primary_epoch = 9
+        service.primary_assignment = PrimaryAssignment(
+            node_id="candidate:1",
+            epoch=9,
+            status=PrimaryStatus.PROMOTING,
+            eligible_backup_addresses=("candidate:1",),
+        )
+        service.nodes["candidate:1"] = ReplicaRecord(
+            "candidate:1", 1.0, ReplicaSyncStatus.UNSYNCHRONIZED
+        )
+
+        with mock.patch.object(service, "_elect_new_primary") as elect:
+            service._try_next_promotion_backup("candidate:1", 9)
+
+        self.assertIn("candidate:1", service.nodes)
+        self.assertIsNone(service.primary_assignment)
+        self.assertFalse(service._election_in_progress)
+        elect.assert_not_called()
+        self.assertFalse(service.GetPrimary(pb2.GetPrimaryRequest(), NoopContext()).success)
+
+    def test_stale_failure_handlers_cannot_change_newer_assignment(self):
+        service = ControllerService()
+        service.primary_assignment = PrimaryAssignment(
+            node_id="new:1",
+            epoch=11,
+            status=PrimaryStatus.PROMOTING,
+            sync_backup_address="new-backup:1",
+        )
+        service.nodes = {
+            address: ReplicaRecord(
+                address, 1.0, ReplicaSyncStatus.UNSYNCHRONIZED
+            )
+            for address in ("old:1", "old-backup:1", "new:1", "new-backup:1")
+        }
+
+        service._handle_candidate_promotion_failure("old:1", 10, "stale")
+        service._handle_promotion_backup_failure(
+            "old:1", 10, "old-backup:1", "stale"
+        )
+
+        self.assertEqual(service.primary_assignment.primary_address, "new:1")
+        self.assertEqual(service.primary_assignment.sync_backup_address, "new-backup:1")
+        self.assertIn("old:1", service.nodes)
+        self.assertIn("old-backup:1", service.nodes)
+
+    def test_completion_timeout_abandons_without_ready_or_candidate_eviction(self):
+        service = ControllerService()
+        service.last_primary_epoch = 7
+        service.primary_assignment = PrimaryAssignment(
+            node_id="candidate:1",
+            epoch=7,
+            status=PrimaryStatus.PROMOTING,
+            sync_backup_address="backup:1",
+        )
+        service.nodes = {
+            "candidate:1": ReplicaRecord(
+                "candidate:1", 1.0, ReplicaSyncStatus.UNSYNCHRONIZED
+            ),
+            "backup:1": ReplicaRecord(
+                "backup:1", 1.0, ReplicaSyncStatus.UNSYNCHRONIZED
+            ),
+        }
+        stub = mock.Mock()
+        stub.CompletePrimaryPromotion.side_effect = grpc.RpcError("timeout")
+        with (
+            mock.patch(
+                "blindsided.controller.service.grpc.insecure_channel",
+                return_value=ChannelContext(),
+            ),
+            mock.patch(
+                "blindsided.controller.service.pb2_grpc.StorageReplicaServiceStub",
+                return_value=stub,
+            ),
+        ):
+            response = service.ReportSynchronizationComplete(
+                pb2.SynchronizationCompleteRequest(
+                    replica_address="backup:1",
+                    source_primary_address="candidate:1",
+                    epoch=7,
+                ),
+                NoopContext(),
+            )
+
+        self.assertFalse(response.success)
+        self.assertIsNone(service.primary_assignment)
+        self.assertIn("candidate:1", service.nodes)
+
+    def test_recovery_registration_does_not_bypass_promotion(self):
+        service = ControllerService()
+        service.last_primary_epoch = 4
+
+        response = service.RegisterNode(
+            pb2.RegisterRequest(address="new:1"), NoopContext()
+        )
+
+        self.assertTrue(response.success)
+        self.assertFalse(response.is_primary)
+        self.assertEqual(response.epoch, 4)
+        self.assertIsNone(service.primary_assignment)
+        self.assertFalse(service.nodes["new:1"].promotion_eligible)
