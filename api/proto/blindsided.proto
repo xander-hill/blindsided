@@ -33,6 +33,7 @@ enum MutationFailureReason {
     MUTATION_FAILURE_REASON_REPLICATION_FAILED = 4;
     MUTATION_FAILURE_REASON_IDEMPOTENCY_CONFLICT = 5;
     MUTATION_FAILURE_REASON_ACKNOWLEDGEMENT_PENDING = 6;
+    MUTATION_FAILURE_REASON_STALE_EPOCH = 7;
 }
 
 message Auction {
@@ -196,6 +197,7 @@ message AuctionMutationRequest {
     string bidder_id = 3;
     int32 expected_version = 4;
     string request_id = 5;
+    int64 epoch = 6;
 }
 message AuctionMutationResponse { 
     bool success = 1; 
@@ -206,7 +208,7 @@ message AuctionMutationResponse {
     bool replayed = 6;
 }
 
-message StateRequest { string requester_id = 1; }
+message StateRequest { string requester_id = 1; int64 epoch = 2; }
 message StateResponse { bool ok = 1; repeated Auction auctions = 2; string message = 3; repeated IdempotencyRecord idempotency_records = 4; }
 
 
@@ -231,7 +233,13 @@ message RegisterRequest { string address = 1; }
 message RegisterResponse { bool success = 1; bool is_primary = 2; string message = 3; int64 epoch = 4; }
 
 message GetPrimaryRequest { string requester_id = 1; }
-message GetPrimaryResponse { bool success = 1; string primary_address = 2; string message = 3; }
+
+message GetPrimaryResponse {
+    bool success = 1;
+    string primary_address = 2;
+    string message = 3;
+    int64 epoch = 4;
+}
 
 message ClusterInfoRequest {}
 message ClusterInfoResponse { bool success = 1; repeated string node_addresses = 2; string message = 3; }
@@ -252,6 +260,7 @@ message PrepareMutationRequest {
     Auction candidate_auction = 2;
     IdempotencyRecord idempotency_record = 3;
     string primary_id = 4;
+    int64 epoch = 5;
 }
 
 message PrepareMutationResponse {
@@ -264,6 +273,7 @@ message MutationDecisionRequest {
     string request_id = 1;
     string auction_id = 2;
     string primary_id = 3;
+    int64 epoch = 4;
 }
 
 message MutationDecisionResponse {
@@ -291,6 +301,7 @@ message CommitDecision {
     IdempotencyRecord idempotency_record = 3;
     string primary_id = 4;
     string backup_address = 5;
+    int64 epoch = 6;
 }
 
 message SynchronizationCompleteRequest {

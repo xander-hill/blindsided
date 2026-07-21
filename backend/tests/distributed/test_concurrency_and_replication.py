@@ -38,6 +38,7 @@ def running_storage_pair():
             address=backup_address,
             state_file_path=backup_state_path,
         )
+        backup.current_epoch = 1
         server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
         pb2_grpc.add_StorageReplicaServiceServicer_to_server(backup, server)
         server.add_insecure_port(backup_address)
@@ -310,6 +311,7 @@ class DistributedBehaviorTests(BackendTestCase):
                             request_id=decision.request_id,
                             auction_id=decision.auction.auction_id,
                             primary_id=decision.primary_id,
+                            epoch=decision.epoch,
                         ),
                         timeout=5,
                     )
@@ -411,12 +413,14 @@ class DistributedBehaviorTests(BackendTestCase):
                     current_version=1,
                 ),
             )
+            backup.current_epoch = 1
             prepared = backup.PrepareAuctionMutation(
                 pb2.PrepareMutationRequest(
                     request_id=mutation.request_id,
                     candidate_auction=candidate,
                     idempotency_record=record,
                     primary_id="primary:50051",
+                    epoch=1,
                 ),
                 NoopContext(),
             )
@@ -427,6 +431,7 @@ class DistributedBehaviorTests(BackendTestCase):
                     request_id=mutation.request_id,
                     auction_id=candidate.auction_id,
                     primary_id="primary:50051",
+                    epoch=1,
                 ),
                 NoopContext(),
             )
@@ -500,7 +505,7 @@ class DistributedBehaviorTests(BackendTestCase):
             request = self._mutation_case("create", "promoted-replay")[1]
             acknowledged = pair["primary"].ApplyAuctionMutation(request, NoopContext())
             promoted = pair["backup"].BeginPrimaryPromotion(
-                pb2.BeginPrimaryPromotionRequest(epoch=1), NoopContext()
+                pb2.BeginPrimaryPromotionRequest(epoch=2), NoopContext()
             )
             pair["backup"].promotion_ready = True
             retry = pair["backup"].ApplyAuctionMutation(request, NoopContext())
@@ -610,6 +615,8 @@ class DistributedBehaviorTests(BackendTestCase):
             )
 
     def _coordinate_to_backup(self, primary, backup):
+        backup.current_epoch = primary.current_epoch
+
         def coordinate(
             request_id,
             candidate,
@@ -623,6 +630,7 @@ class DistributedBehaviorTests(BackendTestCase):
                     candidate_auction=candidate,
                     idempotency_record=idempotency_record,
                     primary_id=primary.node_address,
+                    epoch=primary.current_epoch,
                 ),
                 NoopContext(),
             )
@@ -639,6 +647,7 @@ class DistributedBehaviorTests(BackendTestCase):
                     request_id=request_id,
                     auction_id=candidate.auction_id,
                     primary_id=primary.node_address,
+                    epoch=primary.current_epoch,
                 ),
                 NoopContext(),
             )
@@ -786,7 +795,7 @@ class DistributedBehaviorTests(BackendTestCase):
         )
         primary.auction_store[auction.auction_id] = auction
 
-        state = primary.SyncFullState(pb2.StateRequest(), NoopContext())
+        state = primary.SyncFullState(pb2.StateRequest(epoch=1), NoopContext())
 
         self.assertTrue(state.ok)
         self.assertEqual(state.auctions[0].auction_id, "synced-auction")
@@ -821,7 +830,7 @@ class DistributedBehaviorTests(BackendTestCase):
             side_effect=self._coordinate_to_backup(primary, backup),
         ):
             original = primary.ApplyAuctionMutation(request, NoopContext())
-        backup.BeginPrimaryPromotion(pb2.BeginPrimaryPromotionRequest(epoch=1), NoopContext())
+        backup.BeginPrimaryPromotion(pb2.BeginPrimaryPromotionRequest(epoch=2), NoopContext())
         backup.promotion_ready = True
         replay = backup.ApplyAuctionMutation(request, NoopContext())
 
@@ -888,7 +897,7 @@ class DistributedBehaviorTests(BackendTestCase):
         )
 
         original = primary.ApplyAuctionMutation(request, NoopContext())
-        state = primary.SyncFullState(pb2.StateRequest(), NoopContext())
+        state = primary.SyncFullState(pb2.StateRequest(epoch=1), NoopContext())
         for auction in state.auctions:
             backup.auction_store[auction.auction_id] = auction
         backup.idempotency_records = {
@@ -947,7 +956,7 @@ class DistributedBehaviorTests(BackendTestCase):
             side_effect=self._coordinate_to_backup(primary, backup),
         ):
             original = primary.ApplyAuctionMutation(original_request, NoopContext())
-        backup.BeginPrimaryPromotion(pb2.BeginPrimaryPromotionRequest(epoch=1), NoopContext())
+        backup.BeginPrimaryPromotion(pb2.BeginPrimaryPromotionRequest(epoch=2), NoopContext())
         backup.promotion_ready = True
         conflict = backup.ApplyAuctionMutation(conflicting_request, NoopContext())
 
@@ -1008,7 +1017,10 @@ class DistributedBehaviorTests(BackendTestCase):
                 NoopContext(),
             )
             available_sync = candidate.SyncFullState(
-                pb2.StateRequest(requester_id=cluster["replacement_address"]),
+                pb2.StateRequest(
+                    requester_id=cluster["replacement_address"],
+                    epoch=7,
+                ),
                 NoopContext(),
             )
 
@@ -1039,6 +1051,7 @@ class DistributedBehaviorTests(BackendTestCase):
         self.assertTrue(begun.accepted)
         self.assertFalse(before_primary.success)
         self.assertEqual(before_primary.primary_address, "")
+        self.assertEqual(before_primary.epoch, 7)
         self.assertFalse(blocked_mutation.success)
         self.assertIn("not ready", blocked_mutation.message)
         self.assertFalse(blocked_read.ok)
@@ -1056,6 +1069,7 @@ class DistributedBehaviorTests(BackendTestCase):
         )
         self.assertTrue(after_primary.success)
         self.assertEqual(after_primary.primary_address, candidate_address)
+        self.assertEqual(after_primary.epoch, 7)
         self.assertTrue(ready_read.ok)
         self.assertTrue(ready_mutation.success)
 
@@ -1093,5 +1107,6 @@ class DistributedBehaviorTests(BackendTestCase):
         self.assertFalse(candidate.promotion_ready)
         self.assertFalse(primary.success)
         self.assertEqual(primary.primary_address, "")
+        self.assertEqual(primary.epoch, 7)
         self.assertFalse(blocked_read.ok)
         self.assertFalse(blocked_mutation.success)

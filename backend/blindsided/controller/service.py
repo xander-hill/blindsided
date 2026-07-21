@@ -77,11 +77,13 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
             if assignment.status != PrimaryStatus.READY:
                 return pb2.GetPrimaryResponse(
                     success=False,
+                    epoch=assignment.epoch,
                     message="Primary promotion is not complete.",
                 )
             return pb2.GetPrimaryResponse(
                 success=True, 
                 primary_address=assignment.node_id,
+                epoch=assignment.epoch,
                 message="Primary retrieved"
             )
 

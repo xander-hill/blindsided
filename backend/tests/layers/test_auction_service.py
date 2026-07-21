@@ -3,7 +3,7 @@ from uuid import UUID
 
 import grpc
 
-from blindsided.auction_service.service import AuctionService
+from blindsided.auction_service.service import AuctionService, PrimaryAssignment
 from blindsided.generated import blindsided_pb2 as pb2
 from backend.tests.helpers import (
     BackendTestCase,
@@ -46,13 +46,21 @@ class FakeJudgeStub:
 
 
 class TestableAuctionService(AuctionService):
-    def __init__(self, stub: FakeJudgeStub, primary_address: str | None = "judge:50051"):
+    def __init__(
+        self,
+        stub: FakeJudgeStub,
+        primary_address: str | None = "judge:50051",
+        primary_epoch: int = 7,
+    ):
         self.stub = stub
         self.primary_address = primary_address
+        self.primary_epoch = primary_epoch
         self.storage_addresses: list[str] = []
 
-    def _get_primary_address(self, force_refresh=False):
-        return self.primary_address
+    def _get_primary_assignment(self):
+        if not self.primary_address:
+            return None
+        return PrimaryAssignment(self.primary_address, self.primary_epoch)
 
     def _get_storage_node_addresses(self):
         return [self.primary_address] if self.primary_address else []
@@ -113,6 +121,7 @@ class AuctionServiceTests(BackendTestCase):
         self.assertEqual(stub.mutations[0].auction.state, pb2.AUCTION_STATE_OPEN)
         self.assertEqual(dict(stub.mutations[0].auction.bids), {})
         self.assertEqual(stub.mutations[0].auction.version, 0)
+        self.assertEqual(stub.mutations[0].epoch, 7)
         self.assertEqual(
             stub.mutations[0].mutation_type,
             pb2.AUCTION_MUTATION_TYPE_CREATE,
@@ -566,6 +575,8 @@ class AuctionServiceTests(BackendTestCase):
         )
         self.assertEqual(stub.mutations[1].auction.version, 7)
         self.assertEqual(stub.mutations[1].expected_version, 7)
+        self.assertEqual(stub.mutations[0].epoch, 7)
+        self.assertEqual(stub.mutations[1].epoch, 7)
         self.assertEqual(stub.gets, [])
 
     def test_withdraw_bid_retries_with_latest_version_after_stale_conflict(self):
@@ -600,6 +611,8 @@ class AuctionServiceTests(BackendTestCase):
         self.assertEqual(stub.mutations[0].bidder_id, "buyer-a")
         self.assertEqual(stub.mutations[0].expected_version, 7)
         self.assertEqual(stub.mutations[1].expected_version, 8)
+        self.assertEqual(stub.mutations[0].epoch, 7)
+        self.assertEqual(stub.mutations[1].epoch, 7)
         self.assertEqual(stub.gets, [])
 
     def test_drop_gavel_returns_public_gavel_response(self):
@@ -655,6 +668,8 @@ class AuctionServiceTests(BackendTestCase):
         self.assertEqual(stub.mutations[0].expected_version, 2)
         self.assertEqual(stub.mutations[1].expected_version, 3)
         self.assertEqual(stub.mutations[1].auction.version, 3)
+        self.assertEqual(stub.mutations[0].epoch, 7)
+        self.assertEqual(stub.mutations[1].epoch, 7)
         self.assertEqual(stub.gets, [])
 
     def test_bid_does_not_retry_ambiguous_rpc_errors(self):

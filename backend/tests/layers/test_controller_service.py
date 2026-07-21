@@ -28,9 +28,12 @@ class ControllerServiceTests(BackendTestCase):
 
         self.assertTrue(first.success)
         self.assertTrue(first.is_primary)
+        self.assertEqual(first.epoch, 1)
         self.assertTrue(second.success)
         self.assertFalse(second.is_primary)
+        self.assertEqual(second.epoch, 1)
         self.assertEqual(primary_address.primary_address, "storage-0:50051")
+        self.assertEqual(primary_address.epoch, 1)
         self.assertEqual(service.primary_assignment.epoch, 1)
         self.assertEqual(service.primary_assignment.status, PrimaryStatus.READY)
         self.assertEqual(service.nodes["storage-0:50051"].address, "storage-0:50051")
@@ -51,6 +54,7 @@ class ControllerServiceTests(BackendTestCase):
         primary_address = service.GetPrimary(pb2.GetPrimaryRequest(), NoopContext())
 
         self.assertFalse(primary_address.success)
+        self.assertEqual(primary_address.epoch, 0)
         self.assertEqual(primary_address.message, "No Primary Judge available")
 
     def test_reports_registered_backup_synchronized_with_current_primary(self):
@@ -100,6 +104,57 @@ class ControllerServiceTests(BackendTestCase):
             ReplicaSyncStatus.UNSYNCHRONIZED,
         )
         self.assertFalse(service.nodes["storage-1:50051"].promotion_eligible)
+
+    def test_former_primary_must_resynchronize_before_becoming_promotion_eligible(self):
+        service = ControllerService()
+        initial = service.RegisterNode(
+            pb2.RegisterRequest(address="former-primary:50051"),
+            NoopContext(),
+        )
+        service.RegisterNode(
+            pb2.RegisterRequest(address="current-primary:50051"),
+            NoopContext(),
+        )
+        service.primary_assignment = PrimaryAssignment(
+            node_id="current-primary:50051",
+            epoch=2,
+            status=PrimaryStatus.READY,
+        )
+        service.last_primary_epoch = 2
+
+        reregistered = service.RegisterNode(
+            pb2.RegisterRequest(address="former-primary:50051"),
+            NoopContext(),
+        )
+
+        self.assertTrue(initial.is_primary)
+        self.assertFalse(reregistered.is_primary)
+        self.assertEqual(reregistered.epoch, 2)
+        self.assertEqual(
+            service.nodes["former-primary:50051"].sync_status,
+            ReplicaSyncStatus.UNSYNCHRONIZED,
+        )
+        self.assertFalse(
+            service.nodes["former-primary:50051"].promotion_eligible
+        )
+
+        synchronized = service.ReportSynchronizationComplete(
+            pb2.SynchronizationCompleteRequest(
+                replica_address="former-primary:50051",
+                source_primary_address="current-primary:50051",
+                epoch=2,
+            ),
+            NoopContext(),
+        )
+
+        self.assertTrue(synchronized.success)
+        self.assertEqual(
+            service.nodes["former-primary:50051"].sync_status,
+            ReplicaSyncStatus.SYNCHRONIZED,
+        )
+        self.assertTrue(
+            service.nodes["former-primary:50051"].promotion_eligible
+        )
 
     def test_rejects_synchronization_for_unknown_backup(self):
         service = ControllerService()
@@ -276,9 +331,11 @@ class ControllerServiceTests(BackendTestCase):
         still_promoting = service.GetPrimary(pb2.GetPrimaryRequest(), NoopContext())
 
         self.assertFalse(promoting.success)
+        self.assertEqual(promoting.epoch, 7)
         self.assertIn("not complete", promoting.message)
         self.assertEqual(service.primary_assignment.status, PrimaryStatus.PROMOTING)
         self.assertFalse(still_promoting.success)
+        self.assertEqual(still_promoting.epoch, 7)
         promotion_request = storage_stub.BeginPrimaryPromotion.call_args.args[0]
         self.assertEqual(promotion_request.epoch, 7)
         confirmation_request = storage_stub.ConfirmPromotionState.call_args.args[0]
@@ -607,8 +664,10 @@ class ControllerServiceTests(BackendTestCase):
 
         self.assertFalse(promoting.success)
         self.assertEqual(promoting.primary_address, "")
+        self.assertEqual(promoting.epoch, 7)
         self.assertTrue(ready.success)
         self.assertEqual(ready.primary_address, "candidate:50051")
+        self.assertEqual(ready.epoch, 7)
 
     def test_wrong_backup_source_or_epoch_cannot_complete_promotion_sync(self):
         cases = (

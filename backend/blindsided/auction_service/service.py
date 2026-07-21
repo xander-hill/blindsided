@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import os
 import random
 import time
@@ -14,18 +15,26 @@ from blindsided.generated import blindsided_pb2_grpc as pb2_grpc
 controller_host = os.getenv("CONTROLLER_HOST", "localhost")
 CONTROLLER_ADDRESS = f"{controller_host}:{CONTROLLER_PORT}"
 
+@dataclass(frozen=True)
+class PrimaryAssignment:
+    address: str
+    epoch: int
+
 
 class AuctionService(pb2_grpc.AuctionServiceServicer):
     """API layer that hides sealed bid details until an auction is revealed."""
 
-    def _get_primary_address(self, force_refresh=False) -> str | None:
+    def _get_primary_assignment(self) -> PrimaryAssignment | None:
         """Ask the controller which storage replica owns authoritative writes."""
         try:
             with grpc.insecure_channel(CONTROLLER_ADDRESS) as ch:
                 stub = pb2_grpc.ClusterControllerStub(ch)
                 resp = stub.GetPrimary(pb2.GetPrimaryRequest(), timeout=2.0)
                 if resp.success:
-                    return resp.primary_address
+                    return PrimaryAssignment(
+                        address=resp.primary_address,
+                        epoch=resp.epoch,
+                    )
         except Exception as e:
             print(f"[BlindSided] Controller unreachable: {e}")
         return None
@@ -59,8 +68,8 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
 
     def CreateAuction(self, request: pb2.CreateAuctionRequest, context) -> pb2.CreateAuctionResponse:
         """Persist a new auction through the current primary replica."""
-        primary_address = self._get_primary_address()
-        if not primary_address:
+        assignment = self._get_primary_assignment()
+        if not assignment:
             return pb2.CreateAuctionResponse(ok=False, message="The Vault is unreachable")
 
         request_id = request.request_id or str(uuid4())
@@ -77,12 +86,13 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
             auction.ends_at.CopyFrom(request.ends_at)
 
         try:
-            stub, channel = self._create_storage_stub(primary_address)
+            stub, channel = self._create_storage_stub(assignment.address)
             with channel:
                 response = stub.ApplyAuctionMutation(pb2.AuctionMutationRequest(
                     mutation_type=pb2.AUCTION_MUTATION_TYPE_CREATE,
                     auction=auction,
                     request_id=request_id,
+                    epoch=assignment.epoch,
                 ), timeout=5.0)
 
                 if response.success:
@@ -103,13 +113,13 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
         request_id = request.request_id or str(uuid4())
 
         for attempt in range(mutation_retry_limit):
-            primary_address = self._get_primary_address()
-            if not primary_address:
+            assignment = self._get_primary_assignment()
+            if not assignment:
                 time.sleep(min(0.01 * (attempt + 1), 0.05))
                 continue
 
             try:
-                stub, channel = self._create_storage_stub(primary_address)
+                stub, channel = self._create_storage_stub(assignment.address)
                 with channel:
                     bid_mutation = pb2.Auction(
                         auction_id=request.auction_id,
@@ -123,6 +133,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                         bidder_id=request.bidder_id,
                         expected_version=current_attempt_version,
                         request_id=request_id,
+                        epoch=assignment.epoch,
                     ), timeout=3.0)
 
                     if response.success:
@@ -161,13 +172,13 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
         request_id = request.request_id or str(uuid4())
 
         for attempt in range(mutation_retry_limit):
-            primary_address = self._get_primary_address()
-            if not primary_address:
+            assignment = self._get_primary_assignment()
+            if not assignment:
                 time.sleep(min(0.01 * (attempt + 1), 0.05))
                 continue
 
             try:
-                stub, channel = self._create_storage_stub(primary_address)
+                stub, channel = self._create_storage_stub(assignment.address)
                 with channel:
                     response = stub.ApplyAuctionMutation(pb2.AuctionMutationRequest(
                         mutation_type=pb2.AUCTION_MUTATION_TYPE_WITHDRAW_BID,
@@ -175,6 +186,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                         bidder_id=request.bidder_id,
                         expected_version=current_attempt_version,
                         request_id=request_id,
+                        epoch=assignment.epoch,
                     ), timeout=3.0)
 
                     if response.success:
@@ -220,13 +232,13 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
         request_id = request.request_id or str(uuid4())
 
         for attempt in range(mutation_retry_limit):
-            primary_address = self._get_primary_address()
-            if not primary_address:
+            assignment = self._get_primary_assignment()
+            if not assignment:
                 time.sleep(min(0.01 * (attempt + 1), 0.05))
                 continue
 
             try:
-                stub, channel = self._create_storage_stub(primary_address)
+                stub, channel = self._create_storage_stub(assignment.address)
                 with channel:
                     reveal_mutation = pb2.Auction(
                         auction_id=request.auction_id,
@@ -240,6 +252,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                         auction=reveal_mutation,
                         expected_version=current_attempt_version,
                         request_id=request_id,
+                        epoch=assignment.epoch,
                     ))
 
                     if (
@@ -276,10 +289,10 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
         """Search available replicas and return only public auction fields."""
         candidates = self._get_storage_node_addresses()
         if not candidates:
-            primary_address = self._get_primary_address()
-            if not primary_address:
+            assignment = self._get_primary_assignment()
+            if not assignment:
                 return pb2.SearchAuctionsResponse(ok=False, message="No Judges active")
-            candidates = [primary_address]
+            candidates = [assignment.address]
         else:
             random.shuffle(candidates)
 
@@ -304,12 +317,12 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
 
     def GetAuction(self, request: pb2.GetAuctionRequest, context) -> pb2.GetAuctionResponse:
         """Fetch one auction from the primary and hide sealed bids while open."""
-        primary_address = self._get_primary_address()
-        if not primary_address:
+        assignment = self._get_primary_assignment()
+        if not assignment:
             return pb2.GetAuctionResponse(ok=False, message="Judge unreachable")
 
         try:
-            stub, channel = self._create_storage_stub(primary_address)
+            stub, channel = self._create_storage_stub(assignment.address)
             with channel:
                 response = stub.GetAuction(pb2.GetAuctionRequest(
                     auction_id=request.auction_id,
@@ -369,13 +382,13 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
         print(f"[Opaque Fog] Watcher joined for {auction_id}")
 
         while context.is_active():
-            primary_address = self._get_primary_address()
-            if not primary_address:
+            assignment = self._get_primary_assignment()
+            if not assignment:
                 time.sleep(1)
                 continue
 
             try:
-                stub, channel = self._create_storage_stub(primary_address)
+                stub, channel = self._create_storage_stub(assignment.address)
                 with channel:
                     response = stub.GetAuction(pb2.GetAuctionRequest(auction_id=auction_id))
 

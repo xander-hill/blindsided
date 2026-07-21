@@ -122,7 +122,7 @@ class TieBreakingSpecificationTests(BackendTestCase):
             },
         )
 
-        state = primary.SyncFullState(pb2.StateRequest(), NoopContext())
+        state = primary.SyncFullState(pb2.StateRequest(epoch=1), NoopContext())
         for auction in state.auctions:
             recovered.auction_store[auction.auction_id] = auction
 

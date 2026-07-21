@@ -467,6 +467,10 @@ export interface AuctionMutationRequest {
      * @generated from protobuf field: string request_id = 5
      */
     requestId: string;
+    /**
+     * @generated from protobuf field: int64 epoch = 6
+     */
+    epoch: bigint;
 }
 /**
  * @generated from protobuf message blindsided.AuctionMutationResponse
@@ -505,6 +509,10 @@ export interface StateRequest {
      * @generated from protobuf field: string requester_id = 1
      */
     requesterId: string;
+    /**
+     * @generated from protobuf field: int64 epoch = 2
+     */
+    epoch: bigint;
 }
 /**
  * @generated from protobuf message blindsided.StateResponse
@@ -660,6 +668,10 @@ export interface GetPrimaryResponse {
      * @generated from protobuf field: string message = 3
      */
     message: string;
+    /**
+     * @generated from protobuf field: int64 epoch = 4
+     */
+    epoch: bigint;
 }
 /**
  * @generated from protobuf message blindsided.ClusterInfoRequest
@@ -733,6 +745,10 @@ export interface PrepareMutationRequest {
      * @generated from protobuf field: string primary_id = 4
      */
     primaryId: string;
+    /**
+     * @generated from protobuf field: int64 epoch = 5
+     */
+    epoch: bigint;
 }
 /**
  * @generated from protobuf message blindsided.PrepareMutationResponse
@@ -767,6 +783,10 @@ export interface MutationDecisionRequest {
      * @generated from protobuf field: string primary_id = 3
      */
     primaryId: string;
+    /**
+     * @generated from protobuf field: int64 epoch = 4
+     */
+    epoch: bigint;
 }
 /**
  * @generated from protobuf message blindsided.MutationDecisionResponse
@@ -854,6 +874,10 @@ export interface CommitDecision {
      * @generated from protobuf field: string backup_address = 5
      */
     backupAddress: string;
+    /**
+     * @generated from protobuf field: int64 epoch = 6
+     */
+    epoch: bigint;
 }
 /**
  * @generated from protobuf message blindsided.SynchronizationCompleteRequest
@@ -1039,7 +1063,11 @@ export enum MutationFailureReason {
     /**
      * @generated from protobuf enum value: MUTATION_FAILURE_REASON_ACKNOWLEDGEMENT_PENDING = 6;
      */
-    ACKNOWLEDGEMENT_PENDING = 6
+    ACKNOWLEDGEMENT_PENDING = 6,
+    /**
+     * @generated from protobuf enum value: MUTATION_FAILURE_REASON_STALE_EPOCH = 7;
+     */
+    STALE_EPOCH = 7
 }
 // @generated message type with reflection information, may provide speed optimized methods
 class Auction$Type extends MessageType<Auction> {
@@ -2463,7 +2491,8 @@ class AuctionMutationRequest$Type extends MessageType<AuctionMutationRequest> {
             { no: 2, name: "auction", kind: "message", T: () => Auction },
             { no: 3, name: "bidder_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 4, name: "expected_version", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
-            { no: 5, name: "request_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+            { no: 5, name: "request_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "epoch", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<AuctionMutationRequest>): AuctionMutationRequest {
@@ -2472,6 +2501,7 @@ class AuctionMutationRequest$Type extends MessageType<AuctionMutationRequest> {
         message.bidderId = "";
         message.expectedVersion = 0;
         message.requestId = "";
+        message.epoch = 0n;
         if (value !== undefined)
             reflectionMergePartial<AuctionMutationRequest>(this, message, value);
         return message;
@@ -2495,6 +2525,9 @@ class AuctionMutationRequest$Type extends MessageType<AuctionMutationRequest> {
                     break;
                 case /* string request_id */ 5:
                     message.requestId = reader.string();
+                    break;
+                case /* int64 epoch */ 6:
+                    message.epoch = reader.int64().toBigInt();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -2523,6 +2556,9 @@ class AuctionMutationRequest$Type extends MessageType<AuctionMutationRequest> {
         /* string request_id = 5; */
         if (message.requestId !== "")
             writer.tag(5, WireType.LengthDelimited).string(message.requestId);
+        /* int64 epoch = 6; */
+        if (message.epoch !== 0n)
+            writer.tag(6, WireType.Varint).int64(message.epoch);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -2623,12 +2659,14 @@ export const AuctionMutationResponse = new AuctionMutationResponse$Type();
 class StateRequest$Type extends MessageType<StateRequest> {
     constructor() {
         super("blindsided.StateRequest", [
-            { no: 1, name: "requester_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+            { no: 1, name: "requester_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "epoch", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<StateRequest>): StateRequest {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.requesterId = "";
+        message.epoch = 0n;
         if (value !== undefined)
             reflectionMergePartial<StateRequest>(this, message, value);
         return message;
@@ -2640,6 +2678,9 @@ class StateRequest$Type extends MessageType<StateRequest> {
             switch (fieldNo) {
                 case /* string requester_id */ 1:
                     message.requesterId = reader.string();
+                    break;
+                case /* int64 epoch */ 2:
+                    message.epoch = reader.int64().toBigInt();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -2656,6 +2697,9 @@ class StateRequest$Type extends MessageType<StateRequest> {
         /* string requester_id = 1; */
         if (message.requesterId !== "")
             writer.tag(1, WireType.LengthDelimited).string(message.requesterId);
+        /* int64 epoch = 2; */
+        if (message.epoch !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.epoch);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -3238,7 +3282,8 @@ class GetPrimaryResponse$Type extends MessageType<GetPrimaryResponse> {
         super("blindsided.GetPrimaryResponse", [
             { no: 1, name: "success", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
             { no: 2, name: "primary_address", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 3, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+            { no: 3, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "epoch", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<GetPrimaryResponse>): GetPrimaryResponse {
@@ -3246,6 +3291,7 @@ class GetPrimaryResponse$Type extends MessageType<GetPrimaryResponse> {
         message.success = false;
         message.primaryAddress = "";
         message.message = "";
+        message.epoch = 0n;
         if (value !== undefined)
             reflectionMergePartial<GetPrimaryResponse>(this, message, value);
         return message;
@@ -3263,6 +3309,9 @@ class GetPrimaryResponse$Type extends MessageType<GetPrimaryResponse> {
                     break;
                 case /* string message */ 3:
                     message.message = reader.string();
+                    break;
+                case /* int64 epoch */ 4:
+                    message.epoch = reader.int64().toBigInt();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -3285,6 +3334,9 @@ class GetPrimaryResponse$Type extends MessageType<GetPrimaryResponse> {
         /* string message = 3; */
         if (message.message !== "")
             writer.tag(3, WireType.LengthDelimited).string(message.message);
+        /* int64 epoch = 4; */
+        if (message.epoch !== 0n)
+            writer.tag(4, WireType.Varint).int64(message.epoch);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -3520,13 +3572,15 @@ class PrepareMutationRequest$Type extends MessageType<PrepareMutationRequest> {
             { no: 1, name: "request_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 2, name: "candidate_auction", kind: "message", T: () => Auction },
             { no: 3, name: "idempotency_record", kind: "message", T: () => IdempotencyRecord },
-            { no: 4, name: "primary_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+            { no: 4, name: "primary_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "epoch", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<PrepareMutationRequest>): PrepareMutationRequest {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.requestId = "";
         message.primaryId = "";
+        message.epoch = 0n;
         if (value !== undefined)
             reflectionMergePartial<PrepareMutationRequest>(this, message, value);
         return message;
@@ -3547,6 +3601,9 @@ class PrepareMutationRequest$Type extends MessageType<PrepareMutationRequest> {
                     break;
                 case /* string primary_id */ 4:
                     message.primaryId = reader.string();
+                    break;
+                case /* int64 epoch */ 5:
+                    message.epoch = reader.int64().toBigInt();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -3572,6 +3629,9 @@ class PrepareMutationRequest$Type extends MessageType<PrepareMutationRequest> {
         /* string primary_id = 4; */
         if (message.primaryId !== "")
             writer.tag(4, WireType.LengthDelimited).string(message.primaryId);
+        /* int64 epoch = 5; */
+        if (message.epoch !== 0n)
+            writer.tag(5, WireType.Varint).int64(message.epoch);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -3651,7 +3711,8 @@ class MutationDecisionRequest$Type extends MessageType<MutationDecisionRequest> 
         super("blindsided.MutationDecisionRequest", [
             { no: 1, name: "request_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 2, name: "auction_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 3, name: "primary_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+            { no: 3, name: "primary_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "epoch", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<MutationDecisionRequest>): MutationDecisionRequest {
@@ -3659,6 +3720,7 @@ class MutationDecisionRequest$Type extends MessageType<MutationDecisionRequest> 
         message.requestId = "";
         message.auctionId = "";
         message.primaryId = "";
+        message.epoch = 0n;
         if (value !== undefined)
             reflectionMergePartial<MutationDecisionRequest>(this, message, value);
         return message;
@@ -3676,6 +3738,9 @@ class MutationDecisionRequest$Type extends MessageType<MutationDecisionRequest> 
                     break;
                 case /* string primary_id */ 3:
                     message.primaryId = reader.string();
+                    break;
+                case /* int64 epoch */ 4:
+                    message.epoch = reader.int64().toBigInt();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -3698,6 +3763,9 @@ class MutationDecisionRequest$Type extends MessageType<MutationDecisionRequest> 
         /* string primary_id = 3; */
         if (message.primaryId !== "")
             writer.tag(3, WireType.LengthDelimited).string(message.primaryId);
+        /* int64 epoch = 4; */
+        if (message.epoch !== 0n)
+            writer.tag(4, WireType.Varint).int64(message.epoch);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -3898,7 +3966,8 @@ class CommitDecision$Type extends MessageType<CommitDecision> {
             { no: 2, name: "auction", kind: "message", T: () => Auction },
             { no: 3, name: "idempotency_record", kind: "message", T: () => IdempotencyRecord },
             { no: 4, name: "primary_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 5, name: "backup_address", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+            { no: 5, name: "backup_address", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "epoch", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<CommitDecision>): CommitDecision {
@@ -3906,6 +3975,7 @@ class CommitDecision$Type extends MessageType<CommitDecision> {
         message.requestId = "";
         message.primaryId = "";
         message.backupAddress = "";
+        message.epoch = 0n;
         if (value !== undefined)
             reflectionMergePartial<CommitDecision>(this, message, value);
         return message;
@@ -3929,6 +3999,9 @@ class CommitDecision$Type extends MessageType<CommitDecision> {
                     break;
                 case /* string backup_address */ 5:
                     message.backupAddress = reader.string();
+                    break;
+                case /* int64 epoch */ 6:
+                    message.epoch = reader.int64().toBigInt();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -3957,6 +4030,9 @@ class CommitDecision$Type extends MessageType<CommitDecision> {
         /* string backup_address = 5; */
         if (message.backupAddress !== "")
             writer.tag(5, WireType.LengthDelimited).string(message.backupAddress);
+        /* int64 epoch = 6; */
+        if (message.epoch !== 0n)
+            writer.tag(6, WireType.Varint).int64(message.epoch);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
