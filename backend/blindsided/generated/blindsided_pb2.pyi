@@ -421,14 +421,20 @@ class HealthCheckRequest(_message.Message):
     def __init__(self, request_source: _Optional[str] = ...) -> None: ...
 
 class HealthCheckResponse(_message.Message):
-    __slots__ = ("alive", "role", "message")
+    __slots__ = ("alive", "role", "message", "epoch", "promotion_ready", "synchronous_backup_address")
     ALIVE_FIELD_NUMBER: _ClassVar[int]
     ROLE_FIELD_NUMBER: _ClassVar[int]
     MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    EPOCH_FIELD_NUMBER: _ClassVar[int]
+    PROMOTION_READY_FIELD_NUMBER: _ClassVar[int]
+    SYNCHRONOUS_BACKUP_ADDRESS_FIELD_NUMBER: _ClassVar[int]
     alive: bool
     role: str
     message: str
-    def __init__(self, alive: bool = ..., role: _Optional[str] = ..., message: _Optional[str] = ...) -> None: ...
+    epoch: int
+    promotion_ready: bool
+    synchronous_backup_address: str
+    def __init__(self, alive: bool = ..., role: _Optional[str] = ..., message: _Optional[str] = ..., epoch: _Optional[int] = ..., promotion_ready: bool = ..., synchronous_backup_address: _Optional[str] = ...) -> None: ...
 
 class BeginPrimaryPromotionRequest(_message.Message):
     __slots__ = ("epoch",)
@@ -463,10 +469,18 @@ class PromotionStateConfirmationResponse(_message.Message):
     def __init__(self, confirmed: bool = ..., epoch: _Optional[int] = ..., message: _Optional[str] = ...) -> None: ...
 
 class RegisterRequest(_message.Message):
-    __slots__ = ("address",)
+    __slots__ = ("address", "role", "epoch", "promotion_ready", "synchronous_backup_address")
     ADDRESS_FIELD_NUMBER: _ClassVar[int]
+    ROLE_FIELD_NUMBER: _ClassVar[int]
+    EPOCH_FIELD_NUMBER: _ClassVar[int]
+    PROMOTION_READY_FIELD_NUMBER: _ClassVar[int]
+    SYNCHRONOUS_BACKUP_ADDRESS_FIELD_NUMBER: _ClassVar[int]
     address: str
-    def __init__(self, address: _Optional[str] = ...) -> None: ...
+    role: str
+    epoch: int
+    promotion_ready: bool
+    synchronous_backup_address: str
+    def __init__(self, address: _Optional[str] = ..., role: _Optional[str] = ..., epoch: _Optional[int] = ..., promotion_ready: bool = ..., synchronous_backup_address: _Optional[str] = ...) -> None: ...
 
 class RegisterResponse(_message.Message):
     __slots__ = ("success", "is_primary", "message", "epoch")

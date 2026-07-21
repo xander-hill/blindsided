@@ -48,6 +48,7 @@ class ReplicaRecord:
     last_seen: float
     sync_status: ReplicaSyncStatus
     synchronized_epoch: int = 0
+    consecutive_heartbeat_failures: int = 0
 
     @property
     def promotion_eligible(self) -> bool:
@@ -83,12 +84,39 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
                 message="Replica address is required.",
             )
         with self.lock:
+            reported_epoch = max(0, request.epoch)
+            reported_synchronized = (
+                request.role == "backup" and reported_epoch > 0
+            )
             self.nodes[address] = ReplicaRecord(
                 address=address,
                 last_seen=time.time(),
-                sync_status=ReplicaSyncStatus.UNSYNCHRONIZED,
+                sync_status=(
+                    ReplicaSyncStatus.SYNCHRONIZED
+                    if reported_synchronized
+                    else ReplicaSyncStatus.UNSYNCHRONIZED
+                ),
+                synchronized_epoch=reported_epoch if reported_synchronized else 0,
             )
-            if self.primary_assignment is None and self.last_primary_epoch == 0:
+            if reported_epoch > self.last_primary_epoch:
+                self.last_primary_epoch = reported_epoch
+            if (
+                self.primary_assignment is None
+                and request.role == "primary"
+                and reported_epoch > 0
+                and reported_epoch == self.last_primary_epoch
+                and request.promotion_ready
+            ):
+                self.primary_assignment = PrimaryAssignment(
+                    node_id=address,
+                    epoch=reported_epoch,
+                    status=PrimaryStatus.READY,
+                    sync_backup_address=(
+                        request.synchronous_backup_address.strip() or None
+                    ),
+                )
+                LOGGER.info("Recovered primary assignment from %s", address)
+            elif self.primary_assignment is None and self.last_primary_epoch == 0:
                 self.last_primary_epoch += 1
                 self.primary_assignment = PrimaryAssignment(
                     node_id=address,
@@ -173,12 +201,15 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
             replica.sync_status = ReplicaSyncStatus.SYNCHRONIZED
             replica.synchronized_epoch = assignment.epoch
             if assignment.status == PrimaryStatus.READY:
+                assignment.sync_backup_address = replica_address
                 return pb2.SynchronizationCompleteResponse(
-                    success=True, message="Replica synchronization recorded."
+                    success=True,
+                    message="Replica synchronized and designated as synchronous backup.",
                 )
-            candidate_address = assignment.primary_address
-            epoch = assignment.epoch
-            backup_address = assignment.sync_backup_address
+            else:
+                candidate_address = assignment.primary_address
+                epoch = assignment.epoch
+                backup_address = assignment.sync_backup_address
 
         # Storage calls must stay outside the controller lock. The assignment
         # guard below prevents a delayed response from activating stale state.
@@ -553,20 +584,33 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
                         )
                 except grpc.RpcError as error:
                     LOGGER.warning("Heartbeat RPC to %s failed: %s", address, error)
-                    self._handle_replica_failure(address)
+                    self._record_heartbeat_failure(address)
                     continue
                 except Exception:
                     LOGGER.exception("Unexpected heartbeat error for %s", address)
+                    self._record_heartbeat_failure(address)
                     continue
                 if not response.alive:
                     LOGGER.warning("Replica %s reported an unhealthy status", address)
-                    self._handle_replica_failure(address)
+                    self._record_heartbeat_failure(address)
                     continue
                 with self.lock:
                     # The replica may have been evicted while its heartbeat ran.
                     replica = self.nodes.get(address)
                     if replica is not None:
                         replica.last_seen = time.time()
+                        replica.consecutive_heartbeat_failures = 0
+
+    def _record_heartbeat_failure(self, address: str) -> None:
+        """Evict only after a short run of failed health checks."""
+        with self.lock:
+            replica = self.nodes.get(address)
+            if replica is None:
+                return
+            replica.consecutive_heartbeat_failures += 1
+            should_evict = replica.consecutive_heartbeat_failures >= 3
+        if should_evict:
+            self._handle_replica_failure(address)
 
     def _handle_replica_failure(self, address: str):
         should_elect = False

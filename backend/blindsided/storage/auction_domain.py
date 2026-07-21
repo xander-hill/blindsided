@@ -1,3 +1,4 @@
+import math
 import time
 
 from blindsided.generated import blindsided_pb2 as pb2
@@ -71,7 +72,10 @@ class AuctionDomain:
             return self.mutation_error(
                 "Auction creation requires an immutable closing timestamp."
             )
-        if requested_auction.reserve_price <= 0:
+        if (
+            not math.isfinite(requested_auction.reserve_price)
+            or requested_auction.reserve_price <= 0
+        ):
             return self.mutation_error(
                 "Auction creation requires a positive reserve price."
             )
@@ -105,6 +109,14 @@ class AuctionDomain:
         ):
             return self.mutation_error(
                 "Reveal requires a reveal event.", current_version=current_version
+            )
+        if (
+            mutation_type == pb2.AUCTION_MUTATION_TYPE_REVEAL
+            and request.auction.seller_id.strip() != existing_auction.seller_id
+        ):
+            return self.mutation_error(
+                "Only the auction seller may reveal the auction.",
+                current_version=current_version,
             )
 
         state_error = self.acceptance_order_state_error(existing_auction)
@@ -147,6 +159,11 @@ class AuctionDomain:
             )
 
         bidder_id, requested_bid = next(iter(requested_bids.items()))
+        if not bidder_id.strip():
+            return None, self.mutation_error(
+                "Bid mutation requires a bidder id.",
+                current_version=current_version,
+            )
         if request.bidder_id.strip() and request.bidder_id != bidder_id:
             return None, self.mutation_error(
                 "Bid mutation bidder id must match its single bid.",
@@ -155,6 +172,11 @@ class AuctionDomain:
         if self.auction_has_ended(existing_auction):
             return None, self.mutation_error(
                 "Auction deadline has passed.", current_version=current_version
+            )
+        if not math.isfinite(requested_bid.amount) or requested_bid.amount <= 0:
+            return None, self.mutation_error(
+                "Bid amount must be a positive finite value.",
+                current_version=current_version,
             )
 
         current_bid = existing_auction.bids.get(bidder_id)

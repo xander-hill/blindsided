@@ -2,10 +2,37 @@ import grpc
 
 from blindsided.generated import blindsided_pb2 as pb2
 from blindsided.generated import blindsided_pb2_grpc as pb2_grpc
-from backend.tests.helpers import BackendTestCase, future_timestamp, running_backend_stack
+from backend.tests.helpers import (
+    BackendTestCase,
+    future_timestamp,
+    running_backend_stack,
+    running_replicated_backend_stack,
+)
 
 
 class BackendLifecycleTests(BackendTestCase):
+    def test_fresh_two_replica_cluster_commits_without_test_coordinator(self):
+        with running_replicated_backend_stack() as stack:
+            with grpc.insecure_channel(stack["auction_addr"]) as channel:
+                opened = pb2_grpc.AuctionServiceStub(channel).CreateAuction(
+                    pb2.CreateAuctionRequest(
+                        seller_id="seller-real",
+                        title="Real replicated startup",
+                        reserve_price=500.0,
+                        ends_at=future_timestamp(),
+                        request_id="real-two-replica-create",
+                    ),
+                    timeout=5,
+                )
+
+        self.assertTrue(opened.ok, opened.message)
+        self.assertEqual(
+            stack["primary"].synchronous_backup_address,
+            stack["backup"].node_address,
+        )
+        self.assertIn(opened.auction_id, stack["primary"].auction_store)
+        self.assertIn(opened.auction_id, stack["backup"].auction_store)
+
     def test_full_open_bid_status_reveal_flow_over_grpc(self):
         with running_backend_stack() as stack:
             with grpc.insecure_channel(stack["auction_addr"]) as channel:
@@ -42,6 +69,7 @@ class BackendLifecycleTests(BackendTestCase):
                 ), timeout=5)
                 gavel = stub.RevealAuction(pb2.RevealAuctionRequest(
                     auction_id=auction_id,
+                    seller_id="seller-a",
                     request_id="integration-reveal",
                 ), timeout=5)
                 revealed_status = stub.GetAuction(pb2.GetAuctionRequest(
@@ -110,6 +138,7 @@ class BackendLifecycleTests(BackendTestCase):
 
                 stub.RevealAuction(pb2.RevealAuctionRequest(
                     auction_id=auction_id,
+                    seller_id="seller-a",
                     request_id="integration-stream-reveal",
                 ), timeout=5)
 

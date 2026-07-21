@@ -32,4 +32,14 @@ class StorageSnapshotRepository:
         temp_path = f"{self.state_file_path}.tmp"
         with open(temp_path, "wb") as state_file:
             state_file.write(snapshot.SerializeToString())
+            state_file.flush()
+            os.fsync(state_file.fileno())
         os.replace(temp_path, self.state_file_path)
+        # The rename itself is not durable until the containing directory is
+        # synchronized. This matters for commit decisions after power loss.
+        directory = state_dir or "."
+        directory_fd = os.open(directory, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)

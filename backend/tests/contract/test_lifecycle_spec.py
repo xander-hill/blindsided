@@ -51,7 +51,11 @@ class AuctionLifecycleSpecificationTests(BackendTestCase):
 
         response = judge.ApplyAuctionMutation(
             pb2.AuctionMutationRequest(
-                auction=pb2.Auction(auction_id="lifecycle-reveal", version=1),
+                auction=pb2.Auction(
+                    auction_id="lifecycle-reveal",
+                    seller_id="seller-a",
+                    version=1,
+                ),
                 mutation_type=pb2.AUCTION_MUTATION_TYPE_REVEAL,
             ),
             NoopContext(),

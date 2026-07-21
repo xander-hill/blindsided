@@ -17,8 +17,7 @@ services:
     environment:
       - CONTROLLER_HOST=controller
       - NODE_PORT=50051
-      - POD_IP=storage-primary
-      - PEER_ADDRESSES=storage-backup:50051
+      - POD_IP=storage-primary:50051
       - AUCTION_STORE_PATH=/var/lib/blindsided/auction-state.pb
     volumes:
       - storage-primary-state:/var/lib/blindsided
@@ -33,8 +32,7 @@ services:
     environment:
       - CONTROLLER_HOST=controller
       - NODE_PORT=50051
-      - POD_IP=storage-backup
-      - PEER_ADDRESSES=storage-primary:50051
+      - POD_IP=storage-backup:50051
       - AUCTION_STORE_PATH=/var/lib/blindsided/auction-state.pb
     volumes:
       - storage-backup-state:/var/lib/blindsided

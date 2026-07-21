@@ -2916,6 +2916,9 @@ class StorageServiceTests(BackendTestCase):
             mock.patch.object(
                 judge, "_report_synchronization_complete", return_value=True
             ) as report,
+            mock.patch.object(
+                judge, "_configure_primary_backup", return_value=True
+            ) as configure,
         ):
             synchronized = judge._synchronize_from_primary(
                 "primary:50051",
@@ -2925,6 +2928,7 @@ class StorageServiceTests(BackendTestCase):
         self.assertTrue(synchronized)
         self.assertEqual(set(judge.auction_store), {"current-auction"})
         report.assert_called_once_with("primary:50051", epoch=7)
+        configure.assert_called_once_with("primary:50051", 7)
         sync_request = storage_stub.SyncFullState.call_args.args[0]
         self.assertEqual(sync_request.requester_id, "backup:50051")
         self.assertEqual(sync_request.epoch, 7)

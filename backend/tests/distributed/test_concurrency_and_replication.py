@@ -696,6 +696,7 @@ class DistributedBehaviorTests(BackendTestCase):
                 stub = pb2_grpc.AuctionServiceStub(channel)
                 gavel = stub.RevealAuction(pb2.RevealAuctionRequest(
                     auction_id=auction_id,
+                    seller_id="seller-a",
                     request_id="concurrent-auction-reveal",
                 ), timeout=20)
                 final_status = stub.GetAuction(pb2.GetAuctionRequest(

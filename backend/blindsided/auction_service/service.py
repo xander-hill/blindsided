@@ -217,6 +217,23 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
             ),
         }
 
+    def _acknowledgement_pending_fields(
+        self, response: pb2.AuctionMutationResponse, request_id: str
+    ) -> dict | None:
+        if (
+            response.failure_reason
+            != pb2.MUTATION_FAILURE_REASON_ACKNOWLEDGEMENT_PENDING
+        ):
+            return None
+        return {
+            "retryable": True,
+            "outcome_unknown": True,
+            "request_id": request_id,
+            "message": (
+                f"{response.message} Retry with the same request_id ({request_id})."
+            ),
+        }
+
     @staticmethod
     def _is_read_authority_failure(response: pb2.GetStoredAuctionResponse) -> bool:
         """Identify read failures that require fresh controller discovery."""
@@ -290,6 +307,9 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                             auction_id=response.auction_id or auction.auction_id,
                             message="Auction opened in the Vault.",
                         )
+                    pending = self._acknowledgement_pending_fields(response, request_id)
+                    if pending is not None:
+                        return pb2.CreateAuctionResponse(ok=False, **pending)
                     return pb2.CreateAuctionResponse(ok=False, message=response.message)
             except grpc.RpcError as error:
                 if self._is_failover_rpc_error(error):
@@ -362,6 +382,10 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
 
                     if response.success:
                         return pb2.BidResponse(success=True, message="Vault Updated.")
+
+                    pending = self._acknowledgement_pending_fields(response, request_id)
+                    if pending is not None:
+                        return pb2.BidResponse(success=False, **pending)
 
                     if (
                         self._is_version_conflict(response)
@@ -455,6 +479,14 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                             success=True,
                             final_version=response.current_version,
                             message="Vault Updated.",
+                        )
+
+                    pending = self._acknowledgement_pending_fields(response, request_id)
+                    if pending is not None:
+                        return pb2.WithdrawBidResponse(
+                            success=False,
+                            final_version=response.current_version,
+                            **pending,
                         )
 
                     if (
@@ -569,6 +601,14 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                         )
                         time.sleep(min(0.01 * (attempt + 1), 0.05))
                         continue
+
+                    pending = self._acknowledgement_pending_fields(response, request_id)
+                    if pending is not None:
+                        return pb2.RevealAuctionResponse(
+                            ok=False,
+                            final_version=response.current_version,
+                            **pending,
+                        )
 
                     return pb2.RevealAuctionResponse(
                         ok=response.success,

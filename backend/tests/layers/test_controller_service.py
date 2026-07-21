@@ -14,6 +14,31 @@ from backend.tests.helpers import BackendTestCase, ChannelContext, NoopContext
 
 
 class ControllerServiceTests(BackendTestCase):
+    def test_controller_restart_reconciles_primary_epoch_from_reregistration(self):
+        restarted = ControllerService()
+
+        backup = restarted.RegisterNode(pb2.RegisterRequest(
+            address="backup:50051",
+            role="backup",
+            epoch=7,
+        ), NoopContext())
+        primary = restarted.RegisterNode(pb2.RegisterRequest(
+            address="primary:50051",
+            role="primary",
+            epoch=7,
+            promotion_ready=True,
+            synchronous_backup_address="backup:50051",
+        ), NoopContext())
+
+        self.assertFalse(backup.is_primary)
+        self.assertTrue(primary.is_primary)
+        self.assertEqual(restarted.last_primary_epoch, 7)
+        self.assertEqual(restarted.primary_assignment.epoch, 7)
+        self.assertEqual(
+            restarted.primary_assignment.sync_backup_address,
+            "backup:50051",
+        )
+
     def test_rejects_blank_registration_address(self):
         service = ControllerService()
 

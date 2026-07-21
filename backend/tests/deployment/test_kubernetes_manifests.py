@@ -48,7 +48,7 @@ class KubernetesScalingAndReplicationManifestTests(BackendTestCase):
         self.assertRegex(service, r"port:\s*50051")
         self.assertRegex(service, r"targetPort:\s*50051")
 
-    def test_storage_statefulset_is_replicated_and_uses_stable_peer_dns(self):
+    def test_storage_statefulset_is_replicated_and_uses_controller_discovery(self):
         service = manifest_doc(
             "deploy/kubernetes/storage.yaml",
             kind="Service",
@@ -66,15 +66,8 @@ class KubernetesScalingAndReplicationManifestTests(BackendTestCase):
         self.assertRegex(statefulset, r'serviceName:\s*"storage-service"')
         self.assertIn('command: ["python", "-m", "blindsided.storage.server"]', statefulset)
 
-        peer_match = re.search(r'name:\s*PEER_ADDRESSES\s*\n\s*value:\s*"([^"]+)"', statefulset)
-        self.assertIsNotNone(peer_match)
-        peers = peer_match.group(1).split(",")
-
-        self.assertEqual(len(peers), replicas)
-        self.assertEqual(
-            peers,
-            [f"storage-{index}.storage-service:50051" for index in range(replicas)],
-        )
+        self.assertNotIn("PEER_ADDRESSES", statefulset)
+        self.assertRegex(statefulset, r'name:\s*CONTROLLER_HOST')
 
     def test_storage_pod_identity_comes_from_statefulset_pod_name(self):
         statefulset = manifest_doc(

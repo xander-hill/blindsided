@@ -248,7 +248,14 @@ message StateResponse { bool ok = 1; repeated Auction auctions = 2; string messa
 
 
 message HealthCheckRequest { string request_source = 1; }
-message HealthCheckResponse { bool alive = 1; string role = 2; string message = 3; }
+message HealthCheckResponse {
+    bool alive = 1;
+    string role = 2;
+    string message = 3;
+    int64 epoch = 4;
+    bool promotion_ready = 5;
+    string synchronous_backup_address = 6;
+}
 
 message BeginPrimaryPromotionRequest { int64 epoch = 1; }
 message BeginPrimaryPromotionResponse {
@@ -264,7 +271,13 @@ message PromotionStateConfirmationResponse {
     string message = 3;
 }
 
-message RegisterRequest { string address = 1; }
+message RegisterRequest {
+    string address = 1;
+    string role = 2;
+    int64 epoch = 3;
+    bool promotion_ready = 4;
+    string synchronous_backup_address = 5;
+}
 message RegisterResponse { bool success = 1; bool is_primary = 2; string message = 3; int64 epoch = 4; }
 
 message GetPrimaryRequest { string requester_id = 1; }

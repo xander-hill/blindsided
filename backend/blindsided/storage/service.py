@@ -47,8 +47,6 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
 
         self.port = os.getenv("NODE_PORT", "50051")
         self.replica_role = os.getenv("NODE_ROLE", "backup")
-        raw_peers = os.getenv("PEER_ADDRESSES", "")
-        self.peer_addresses = [p.strip() for p in raw_peers.split(",") if p.strip()]
         self.synchronous_backup_address = os.getenv(
             "SYNCHRONOUS_BACKUP_ADDRESS",
             "",
@@ -73,7 +71,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 with grpc.insecure_channel(CONTROLLER_ADDRESS) as channel:
                     stub = pb2_grpc.ClusterControllerStub(channel)
                     registration = stub.RegisterNode(
-                        pb2.RegisterRequest(address=self.node_address),
+                        self._registration_request(),
                         timeout=2.0,
                     )
                     self.replica_role = (
@@ -96,6 +94,26 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             except Exception as error:
                 print(f"[Judge] Booting... Controller not ready: {error}")
                 time.sleep(2)
+
+    def _registration_request(self) -> pb2.RegisterRequest:
+        return pb2.RegisterRequest(
+            address=self.node_address,
+            role=self.replica_role,
+            epoch=self.current_epoch,
+            promotion_ready=self.promotion_ready,
+            synchronous_backup_address=self.synchronous_backup_address,
+        )
+
+    def reregister_with_controller(self) -> bool:
+        """Refresh membership and reconcile controller state after its restart."""
+        try:
+            with grpc.insecure_channel(CONTROLLER_ADDRESS) as channel:
+                response = pb2_grpc.ClusterControllerStub(channel).RegisterNode(
+                    self._registration_request(), timeout=2.0
+                )
+            return response.success
+        except grpc.RpcError:
+            return False
 
     # Auction mutation and read RPCs
 
@@ -394,7 +412,10 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             return self.ApplyAuctionMutation(
                 pb2.AuctionMutationRequest(
                     mutation_type=pb2.AUCTION_MUTATION_TYPE_REVEAL,
-                    auction=pb2.Auction(auction_id=auction_id),
+                    auction=pb2.Auction(
+                        auction_id=auction_id,
+                        seller_id=auction.seller_id,
+                    ),
                     expected_version=auction.version,
                     request_id=self._overdue_request_id(auction_id),
                     epoch=epoch,
@@ -1143,11 +1164,12 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                         epoch=self.current_epoch,
                         message="Primary promotion already complete.",
                     )
-                return pb2.CompletePrimaryPromotionResponse(
-                    success=False,
-                    epoch=self.current_epoch,
-                    message="Primary promotion completed with a different backup.",
-                )
+                if self.synchronous_backup_address:
+                    return pb2.CompletePrimaryPromotionResponse(
+                        success=False,
+                        epoch=self.current_epoch,
+                        message="Primary promotion completed with a different backup.",
+                    )
 
             previous_backup = self.synchronous_backup_address
             self.synchronous_backup_address = backup_address
@@ -1237,12 +1259,31 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             )
             if not self._replace_with_full_state(response, epoch=epoch):
                 return False
-            return self._report_synchronization_complete(
+            if not self._report_synchronization_complete(
                 primary_address,
                 epoch=epoch,
-            )
+            ):
+                return False
+            return self._configure_primary_backup(primary_address, epoch)
         except Exception as error:
             print(f"[Judge] Sync failed: {error}")
+            return False
+
+    def _configure_primary_backup(self, primary_address: str, epoch: int) -> bool:
+        """Tell the synchronized primary to start using this replica."""
+        try:
+            with grpc.insecure_channel(primary_address) as channel:
+                response = pb2_grpc.StorageReplicaServiceStub(
+                    channel
+                ).CompletePrimaryPromotion(
+                    pb2.CompletePrimaryPromotionRequest(
+                        epoch=epoch,
+                        backup_address=self.node_address,
+                    ),
+                    timeout=5.0,
+                )
+            return response.success and response.epoch == epoch
+        except grpc.RpcError:
             return False
 
     def _replace_with_full_state(self, response: pb2.StateResponse, epoch=None) -> bool:
@@ -1328,6 +1369,9 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 alive=True,
                 role=self.replica_role,
                 message="Alive",
+                epoch=self.current_epoch,
+                promotion_ready=self.promotion_ready,
+                synchronous_backup_address=self.synchronous_backup_address,
             )
 
     def _load_state_from_disk(self) -> None:
