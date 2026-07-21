@@ -371,7 +371,7 @@ class StorageReplicaServiceStub(object):
                 _registered_method=True)
         self.GetAuction = channel.unary_unary(
                 '/blindsided.StorageReplicaService/GetAuction',
-                request_serializer=blindsided__pb2.GetAuctionRequest.SerializeToString,
+                request_serializer=blindsided__pb2.StorageGetAuctionRequest.SerializeToString,
                 response_deserializer=blindsided__pb2.GetStoredAuctionResponse.FromString,
                 _registered_method=True)
         self.SearchAuctions = channel.unary_unary(
@@ -511,7 +511,7 @@ def add_StorageReplicaServiceServicer_to_server(servicer, server):
             ),
             'GetAuction': grpc.unary_unary_rpc_method_handler(
                     servicer.GetAuction,
-                    request_deserializer=blindsided__pb2.GetAuctionRequest.FromString,
+                    request_deserializer=blindsided__pb2.StorageGetAuctionRequest.FromString,
                     response_serializer=blindsided__pb2.GetStoredAuctionResponse.SerializeToString,
             ),
             'SearchAuctions': grpc.unary_unary_rpc_method_handler(
@@ -617,7 +617,7 @@ class StorageReplicaService(object):
             request,
             target,
             '/blindsided.StorageReplicaService/GetAuction',
-            blindsided__pb2.GetAuctionRequest.SerializeToString,
+            blindsided__pb2.StorageGetAuctionRequest.SerializeToString,
             blindsided__pb2.GetStoredAuctionResponse.FromString,
             options,
             channel_credentials,

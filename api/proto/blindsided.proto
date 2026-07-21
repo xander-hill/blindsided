@@ -36,6 +36,15 @@ enum MutationFailureReason {
     MUTATION_FAILURE_REASON_STALE_EPOCH = 7;
 }
 
+enum ReadFailureReason {
+    READ_FAILURE_REASON_UNSPECIFIED = 0;
+    READ_FAILURE_REASON_NOT_FOUND = 1;
+    READ_FAILURE_REASON_NOT_PRIMARY = 2;
+    READ_FAILURE_REASON_PROMOTION_NOT_READY = 3;
+    READ_FAILURE_REASON_STALE_EPOCH = 4;
+    READ_FAILURE_REASON_INTERNAL = 5;
+}
+
 message Auction {
     string auction_id = 1;
     string seller_id = 2;
@@ -83,7 +92,7 @@ service AuctionService {
 
 service StorageReplicaService {
     rpc ApplyAuctionMutation (AuctionMutationRequest) returns (AuctionMutationResponse);
-    rpc GetAuction (GetAuctionRequest) returns (GetStoredAuctionResponse);
+    rpc GetAuction (StorageGetAuctionRequest) returns (GetStoredAuctionResponse);
     rpc SearchAuctions (SearchAuctionsRequest) returns (GetStoredAuctionsResponse);
     rpc SyncFullState (StateRequest) returns (StateResponse);
     rpc Heartbeat (HealthCheckRequest) returns (HealthCheckResponse);
@@ -128,6 +137,12 @@ message GetAuctionRequest {
     string bidder_id = 2;
 }
 
+message StorageGetAuctionRequest {
+    string auction_id = 1;
+    string bidder_id = 2;
+    int64 epoch = 3;
+}
+
 message GetAuctionResponse {
     bool ok = 1;
     PublicAuction auction = 2;
@@ -139,6 +154,7 @@ message GetStoredAuctionResponse {
     bool ok = 1;
     Auction auction = 2;
     string message = 3;
+    optional ReadFailureReason failure_reason = 4;
 }
 
 message SearchAuctionsRequest { string query = 1; string category = 2; }

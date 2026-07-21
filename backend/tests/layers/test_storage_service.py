@@ -2712,7 +2712,7 @@ class StorageServiceTests(BackendTestCase):
         )
 
         response = judge.GetAuction(
-            pb2.GetAuctionRequest(auction_id="auction-1"),
+            pb2.StorageGetAuctionRequest(auction_id="auction-1", epoch=judge.current_epoch),
             NoopContext(),
         )
 
@@ -2729,13 +2729,50 @@ class StorageServiceTests(BackendTestCase):
         )
 
         response = judge.GetAuction(
-            pb2.GetAuctionRequest(auction_id="auction-1"),
+            pb2.StorageGetAuctionRequest(auction_id="auction-1", epoch=judge.current_epoch),
             NoopContext(),
         )
 
         self.assertFalse(response.ok)
+        self.assertEqual(response.failure_reason, pb2.READ_FAILURE_REASON_NOT_PRIMARY)
         self.assertIn("primary replica", response.message)
         self.assertFalse(response.HasField("auction"))
+
+    def test_primary_refuses_authoritative_read_with_stale_epoch(self):
+        judge = make_judge(role="primary")
+        judge.auction_store["auction-1"] = pb2.Auction(auction_id="auction-1")
+
+        response = judge.GetAuction(
+            pb2.StorageGetAuctionRequest(auction_id="auction-1", epoch=judge.current_epoch + 1),
+            NoopContext(),
+        )
+
+        self.assertFalse(response.ok)
+        self.assertEqual(response.failure_reason, pb2.READ_FAILURE_REASON_STALE_EPOCH)
+        self.assertFalse(response.HasField("auction"))
+
+    def test_promoting_primary_refuses_authoritative_read(self):
+        judge = make_judge(role="primary")
+        judge.promotion_ready = False
+
+        response = judge.GetAuction(
+            pb2.StorageGetAuctionRequest(auction_id="missing", epoch=judge.current_epoch),
+            NoopContext(),
+        )
+
+        self.assertFalse(response.ok)
+        self.assertEqual(response.failure_reason, pb2.READ_FAILURE_REASON_PROMOTION_NOT_READY)
+
+    def test_ready_primary_distinguishes_not_found(self):
+        judge = make_judge(role="primary")
+
+        response = judge.GetAuction(
+            pb2.StorageGetAuctionRequest(auction_id="missing", epoch=judge.current_epoch),
+            NoopContext(),
+        )
+
+        self.assertFalse(response.ok)
+        self.assertEqual(response.failure_reason, pb2.READ_FAILURE_REASON_NOT_FOUND)
 
     def test_prepare_rejects_revealed_state_without_committed_result(self):
         judge = make_judge(role="backup")

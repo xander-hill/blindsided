@@ -1016,7 +1016,7 @@ class DistributedBehaviorTests(BackendTestCase):
                 NoopContext(),
             )
             blocked_read = candidate.GetAuction(
-                pb2.GetAuctionRequest(auction_id="promotion-auction"),
+                pb2.StorageGetAuctionRequest(auction_id="promotion-auction", epoch=7),
                 NoopContext(),
             )
             available_sync = candidate.SyncFullState(
@@ -1033,7 +1033,7 @@ class DistributedBehaviorTests(BackendTestCase):
                 pb2.GetPrimaryRequest(), NoopContext()
             )
             ready_read = candidate.GetAuction(
-                pb2.GetAuctionRequest(auction_id="promotion-auction"),
+                pb2.StorageGetAuctionRequest(auction_id="promotion-auction", epoch=7),
                 NoopContext(),
             )
             ready_mutation = candidate.ApplyAuctionMutation(
@@ -1089,7 +1089,7 @@ class DistributedBehaviorTests(BackendTestCase):
 
             primary = controller.GetPrimary(pb2.GetPrimaryRequest(), NoopContext())
             blocked_read = candidate.GetAuction(
-                pb2.GetAuctionRequest(auction_id="promotion-auction"),
+                pb2.StorageGetAuctionRequest(auction_id="promotion-auction", epoch=7),
                 NoopContext(),
             )
             blocked_mutation = candidate.ApplyAuctionMutation(

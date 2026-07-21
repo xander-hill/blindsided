@@ -432,7 +432,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
 
     def GetAuction(
         self,
-        request: pb2.GetAuctionRequest,
+        request: pb2.StorageGetAuctionRequest,
         context,
     ) -> pb2.GetStoredAuctionResponse:
         with self.state_lock:
@@ -440,16 +440,28 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 return pb2.GetStoredAuctionResponse(
                     ok=False,
                     message="Authoritative auction reads require the primary replica.",
+                    failure_reason=pb2.READ_FAILURE_REASON_NOT_PRIMARY,
                 )
             if not self.promotion_ready:
                 return pb2.GetStoredAuctionResponse(
                     ok=False,
                     message="Primary promotion is not ready for authoritative reads.",
+                    failure_reason=pb2.READ_FAILURE_REASON_PROMOTION_NOT_READY,
+                )
+            if request.epoch != self.current_epoch:
+                return pb2.GetStoredAuctionResponse(
+                    ok=False,
+                    message="Authoritative read epoch is stale.",
+                    failure_reason=pb2.READ_FAILURE_REASON_STALE_EPOCH,
                 )
             auction = self.auction_store.get(request.auction_id)
             if auction:
                 return pb2.GetStoredAuctionResponse(ok=True, auction=auction)
-            return pb2.GetStoredAuctionResponse(ok=False, message="Auction not found")
+            return pb2.GetStoredAuctionResponse(
+                ok=False,
+                message="Auction not found",
+                failure_reason=pb2.READ_FAILURE_REASON_NOT_FOUND,
+            )
 
     def SearchAuctions(
         self,

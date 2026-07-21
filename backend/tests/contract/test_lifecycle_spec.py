@@ -134,7 +134,7 @@ class AuctionLifecycleSpecificationTests(BackendTestCase):
             )
         with mock.patch("blindsided.storage.service.time.time", return_value=1000.0):
             response = judge.GetAuction(
-                pb2.GetAuctionRequest(auction_id="lifecycle-auto-reveal"),
+                pb2.StorageGetAuctionRequest(auction_id="lifecycle-auto-reveal", epoch=judge.current_epoch),
                 NoopContext(),
             )
             reveal = judge.ApplyAuctionMutation(
