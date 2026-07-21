@@ -184,6 +184,18 @@ export interface CreateAuctionResponse {
      * @generated from protobuf field: string message = 3
      */
     message: string;
+    /**
+     * @generated from protobuf field: bool retryable = 4
+     */
+    retryable: boolean;
+    /**
+     * @generated from protobuf field: bool outcome_unknown = 5
+     */
+    outcomeUnknown: boolean;
+    /**
+     * @generated from protobuf field: string request_id = 6
+     */
+    requestId: string;
 }
 /**
  * @generated from protobuf message blindsided.GetAuctionRequest
@@ -328,6 +340,18 @@ export interface RevealAuctionResponse {
      * @generated from protobuf field: string message = 3
      */
     message: string;
+    /**
+     * @generated from protobuf field: bool retryable = 4
+     */
+    retryable: boolean;
+    /**
+     * @generated from protobuf field: bool outcome_unknown = 5
+     */
+    outcomeUnknown: boolean;
+    /**
+     * @generated from protobuf field: string request_id = 6
+     */
+    requestId: string;
 }
 /**
  * @generated from protobuf message blindsided.BidRequest
@@ -366,6 +390,18 @@ export interface BidResponse {
      * @generated from protobuf field: string message = 2
      */
     message: string;
+    /**
+     * @generated from protobuf field: bool retryable = 3
+     */
+    retryable: boolean;
+    /**
+     * @generated from protobuf field: bool outcome_unknown = 4
+     */
+    outcomeUnknown: boolean;
+    /**
+     * @generated from protobuf field: string request_id = 5
+     */
+    requestId: string;
 }
 /**
  * @generated from protobuf message blindsided.WithdrawBidRequest
@@ -404,6 +440,18 @@ export interface WithdrawBidResponse {
      * @generated from protobuf field: string message = 3
      */
     message: string;
+    /**
+     * @generated from protobuf field: bool retryable = 4
+     */
+    retryable: boolean;
+    /**
+     * @generated from protobuf field: bool outcome_unknown = 5
+     */
+    outcomeUnknown: boolean;
+    /**
+     * @generated from protobuf field: string request_id = 6
+     */
+    requestId: string;
 }
 /**
  * @generated from protobuf message blindsided.AuctionRequest
@@ -1508,7 +1556,10 @@ class CreateAuctionResponse$Type extends MessageType<CreateAuctionResponse> {
         super("blindsided.CreateAuctionResponse", [
             { no: 1, name: "ok", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
             { no: 2, name: "auction_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 3, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+            { no: 3, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "retryable", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 5, name: "outcome_unknown", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 6, name: "request_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<CreateAuctionResponse>): CreateAuctionResponse {
@@ -1516,6 +1567,9 @@ class CreateAuctionResponse$Type extends MessageType<CreateAuctionResponse> {
         message.ok = false;
         message.auctionId = "";
         message.message = "";
+        message.retryable = false;
+        message.outcomeUnknown = false;
+        message.requestId = "";
         if (value !== undefined)
             reflectionMergePartial<CreateAuctionResponse>(this, message, value);
         return message;
@@ -1533,6 +1587,15 @@ class CreateAuctionResponse$Type extends MessageType<CreateAuctionResponse> {
                     break;
                 case /* string message */ 3:
                     message.message = reader.string();
+                    break;
+                case /* bool retryable */ 4:
+                    message.retryable = reader.bool();
+                    break;
+                case /* bool outcome_unknown */ 5:
+                    message.outcomeUnknown = reader.bool();
+                    break;
+                case /* string request_id */ 6:
+                    message.requestId = reader.string();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -1555,6 +1618,15 @@ class CreateAuctionResponse$Type extends MessageType<CreateAuctionResponse> {
         /* string message = 3; */
         if (message.message !== "")
             writer.tag(3, WireType.LengthDelimited).string(message.message);
+        /* bool retryable = 4; */
+        if (message.retryable !== false)
+            writer.tag(4, WireType.Varint).bool(message.retryable);
+        /* bool outcome_unknown = 5; */
+        if (message.outcomeUnknown !== false)
+            writer.tag(5, WireType.Varint).bool(message.outcomeUnknown);
+        /* string request_id = 6; */
+        if (message.requestId !== "")
+            writer.tag(6, WireType.LengthDelimited).string(message.requestId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -2025,7 +2097,10 @@ class RevealAuctionResponse$Type extends MessageType<RevealAuctionResponse> {
         super("blindsided.RevealAuctionResponse", [
             { no: 1, name: "ok", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
             { no: 2, name: "final_version", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
-            { no: 3, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+            { no: 3, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "retryable", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 5, name: "outcome_unknown", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 6, name: "request_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<RevealAuctionResponse>): RevealAuctionResponse {
@@ -2033,6 +2108,9 @@ class RevealAuctionResponse$Type extends MessageType<RevealAuctionResponse> {
         message.ok = false;
         message.finalVersion = 0;
         message.message = "";
+        message.retryable = false;
+        message.outcomeUnknown = false;
+        message.requestId = "";
         if (value !== undefined)
             reflectionMergePartial<RevealAuctionResponse>(this, message, value);
         return message;
@@ -2050,6 +2128,15 @@ class RevealAuctionResponse$Type extends MessageType<RevealAuctionResponse> {
                     break;
                 case /* string message */ 3:
                     message.message = reader.string();
+                    break;
+                case /* bool retryable */ 4:
+                    message.retryable = reader.bool();
+                    break;
+                case /* bool outcome_unknown */ 5:
+                    message.outcomeUnknown = reader.bool();
+                    break;
+                case /* string request_id */ 6:
+                    message.requestId = reader.string();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -2072,6 +2159,15 @@ class RevealAuctionResponse$Type extends MessageType<RevealAuctionResponse> {
         /* string message = 3; */
         if (message.message !== "")
             writer.tag(3, WireType.LengthDelimited).string(message.message);
+        /* bool retryable = 4; */
+        if (message.retryable !== false)
+            writer.tag(4, WireType.Varint).bool(message.retryable);
+        /* bool outcome_unknown = 5; */
+        if (message.outcomeUnknown !== false)
+            writer.tag(5, WireType.Varint).bool(message.outcomeUnknown);
+        /* string request_id = 6; */
+        if (message.requestId !== "")
+            writer.tag(6, WireType.LengthDelimited).string(message.requestId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -2166,13 +2262,19 @@ class BidResponse$Type extends MessageType<BidResponse> {
     constructor() {
         super("blindsided.BidResponse", [
             { no: 1, name: "success", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
-            { no: 2, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+            { no: 2, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "retryable", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 4, name: "outcome_unknown", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 5, name: "request_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<BidResponse>): BidResponse {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.success = false;
         message.message = "";
+        message.retryable = false;
+        message.outcomeUnknown = false;
+        message.requestId = "";
         if (value !== undefined)
             reflectionMergePartial<BidResponse>(this, message, value);
         return message;
@@ -2187,6 +2289,15 @@ class BidResponse$Type extends MessageType<BidResponse> {
                     break;
                 case /* string message */ 2:
                     message.message = reader.string();
+                    break;
+                case /* bool retryable */ 3:
+                    message.retryable = reader.bool();
+                    break;
+                case /* bool outcome_unknown */ 4:
+                    message.outcomeUnknown = reader.bool();
+                    break;
+                case /* string request_id */ 5:
+                    message.requestId = reader.string();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -2206,6 +2317,15 @@ class BidResponse$Type extends MessageType<BidResponse> {
         /* string message = 2; */
         if (message.message !== "")
             writer.tag(2, WireType.LengthDelimited).string(message.message);
+        /* bool retryable = 3; */
+        if (message.retryable !== false)
+            writer.tag(3, WireType.Varint).bool(message.retryable);
+        /* bool outcome_unknown = 4; */
+        if (message.outcomeUnknown !== false)
+            writer.tag(4, WireType.Varint).bool(message.outcomeUnknown);
+        /* string request_id = 5; */
+        if (message.requestId !== "")
+            writer.tag(5, WireType.LengthDelimited).string(message.requestId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -2293,7 +2413,10 @@ class WithdrawBidResponse$Type extends MessageType<WithdrawBidResponse> {
         super("blindsided.WithdrawBidResponse", [
             { no: 1, name: "success", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
             { no: 2, name: "final_version", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
-            { no: 3, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+            { no: 3, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "retryable", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 5, name: "outcome_unknown", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 6, name: "request_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<WithdrawBidResponse>): WithdrawBidResponse {
@@ -2301,6 +2424,9 @@ class WithdrawBidResponse$Type extends MessageType<WithdrawBidResponse> {
         message.success = false;
         message.finalVersion = 0;
         message.message = "";
+        message.retryable = false;
+        message.outcomeUnknown = false;
+        message.requestId = "";
         if (value !== undefined)
             reflectionMergePartial<WithdrawBidResponse>(this, message, value);
         return message;
@@ -2318,6 +2444,15 @@ class WithdrawBidResponse$Type extends MessageType<WithdrawBidResponse> {
                     break;
                 case /* string message */ 3:
                     message.message = reader.string();
+                    break;
+                case /* bool retryable */ 4:
+                    message.retryable = reader.bool();
+                    break;
+                case /* bool outcome_unknown */ 5:
+                    message.outcomeUnknown = reader.bool();
+                    break;
+                case /* string request_id */ 6:
+                    message.requestId = reader.string();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -2340,6 +2475,15 @@ class WithdrawBidResponse$Type extends MessageType<WithdrawBidResponse> {
         /* string message = 3; */
         if (message.message !== "")
             writer.tag(3, WireType.LengthDelimited).string(message.message);
+        /* bool retryable = 4; */
+        if (message.retryable !== false)
+            writer.tag(4, WireType.Varint).bool(message.retryable);
+        /* bool outcome_unknown = 5; */
+        if (message.outcomeUnknown !== false)
+            writer.tag(5, WireType.Varint).bool(message.outcomeUnknown);
+        /* string request_id = 6; */
+        if (message.requestId !== "")
+            writer.tag(6, WireType.LengthDelimited).string(message.requestId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

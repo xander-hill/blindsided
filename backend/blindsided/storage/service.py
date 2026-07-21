@@ -1156,15 +1156,18 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             previous_role = self.replica_role
             previous_epoch = self.current_epoch
             previous_ready = self.promotion_ready
+            previous_prepared_mutations = self.prepared_mutations
             self.replica_role = "primary"
             self.current_epoch = request.epoch
             self.promotion_ready = False
+            self.prepared_mutations = {}
             try:
                 self._persist_state_to_disk()
             except Exception as error:
                 self.replica_role = previous_role
                 self.current_epoch = previous_epoch
                 self.promotion_ready = previous_ready
+                self.prepared_mutations = previous_prepared_mutations
                 return pb2.BeginPrimaryPromotionResponse(
                     accepted=False,
                     epoch=self.current_epoch,

@@ -16,6 +16,7 @@ class BackendLifecycleTests(BackendTestCase):
                     title="Integration Watch",
                     reserve_price=500.0,
                     ends_at=future_timestamp(),
+                    request_id="integration-lifecycle-create",
                 ), timeout=5)
                 auction_id = opened.auction_id
                 opening_bid = stub.PlaceBid(pb2.BidRequest(
@@ -23,6 +24,7 @@ class BackendLifecycleTests(BackendTestCase):
                     bidder_id="opening",
                     amount=250.0,
                     expected_version=1,
+                    request_id="integration-opening-bid",
                 ), timeout=5)
                 hidden_status = stub.GetAuction(pb2.GetAuctionRequest(
                     auction_id=auction_id,
@@ -32,6 +34,7 @@ class BackendLifecycleTests(BackendTestCase):
                     bidder_id="buyer-a",
                     amount=750.0,
                     expected_version=1,
+                    request_id="integration-buyer-bid",
                 ), timeout=5)
                 post_bid_status = stub.GetAuction(pb2.GetAuctionRequest(
                     auction_id=auction_id,
@@ -39,6 +42,7 @@ class BackendLifecycleTests(BackendTestCase):
                 ), timeout=5)
                 gavel = stub.RevealAuction(pb2.RevealAuctionRequest(
                     auction_id=auction_id,
+                    request_id="integration-reveal",
                 ), timeout=5)
                 revealed_status = stub.GetAuction(pb2.GetAuctionRequest(
                     auction_id=auction_id,
@@ -87,6 +91,7 @@ class BackendLifecycleTests(BackendTestCase):
                     title="Streamed Auction",
                     reserve_price=300.0,
                     ends_at=future_timestamp(),
+                    request_id="integration-stream-create",
                 ), timeout=5)
                 auction_id = opened.auction_id
                 stub.PlaceBid(pb2.BidRequest(
@@ -94,6 +99,7 @@ class BackendLifecycleTests(BackendTestCase):
                     bidder_id="opening",
                     amount=125.0,
                     expected_version=1,
+                    request_id="integration-stream-opening-bid",
                 ), timeout=5)
 
                 first_stream = stub.WatchAuction(pb2.AuctionRequest(
@@ -104,6 +110,7 @@ class BackendLifecycleTests(BackendTestCase):
 
                 stub.RevealAuction(pb2.RevealAuctionRequest(
                     auction_id=auction_id,
+                    request_id="integration-stream-reveal",
                 ), timeout=5)
 
                 reveal_stream = stub.WatchAuction(pb2.AuctionRequest(

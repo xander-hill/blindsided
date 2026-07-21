@@ -670,6 +670,7 @@ class DistributedBehaviorTests(BackendTestCase):
                     title="Chaos Auction",
                     reserve_price=1000.0,
                     ends_at=future_timestamp(),
+                    request_id="concurrent-auction-create",
                 ), timeout=5)
                 self.assertTrue(opened.ok)
                 auction_id = opened.auction_id
@@ -685,6 +686,7 @@ class DistributedBehaviorTests(BackendTestCase):
                         bidder_id=f"buyer-{index}",
                         amount=100.0 + index,
                         expected_version=1,
+                        request_id=f"concurrent-bid-{index}",
                     ), timeout=20)
 
             with futures.ThreadPoolExecutor(max_workers=bidder_count) as executor:
@@ -694,6 +696,7 @@ class DistributedBehaviorTests(BackendTestCase):
                 stub = pb2_grpc.AuctionServiceStub(channel)
                 gavel = stub.RevealAuction(pb2.RevealAuctionRequest(
                     auction_id=auction_id,
+                    request_id="concurrent-auction-reveal",
                 ), timeout=20)
                 final_status = stub.GetAuction(pb2.GetAuctionRequest(
                     auction_id=auction_id,
