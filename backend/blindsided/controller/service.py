@@ -73,6 +73,8 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
         self._synchronization_timeout = synchronization_timeout
         self._election_in_progress = False
 
+    # Public controller RPCs
+
     def RegisterNode(self, request, context):
         address = request.address.strip()
         if not address:
@@ -178,6 +180,8 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
             epoch = assignment.epoch
             backup_address = assignment.sync_backup_address
 
+        # Storage calls must stay outside the controller lock. The assignment
+        # guard below prevents a delayed response from activating stale state.
         try:
             with grpc.insecure_channel(candidate_address) as channel:
                 completion = pb2_grpc.StorageReplicaServiceStub(
@@ -226,6 +230,8 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
             message="Replica synchronized and primary promotion completed.",
         )
 
+    # Assignment and election helpers
+
     def _assignment_matches_locked(
         self,
         primary_address: str,
@@ -245,38 +251,12 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
             )
         )
 
-    def _monitor_heartbeats(self):
-        while True:
-            time.sleep(5)
-            with self.lock:
-                addresses = sorted(self.nodes)
-            for address in addresses:
-                try:
-                    with grpc.insecure_channel(address) as channel:
-                        response = pb2_grpc.StorageReplicaServiceStub(channel).Heartbeat(
-                            pb2.HealthCheckRequest(request_source="CONTROLLER"),
-                            timeout=self._heartbeat_timeout,
-                        )
-                except grpc.RpcError as error:
-                    LOGGER.warning("Heartbeat RPC to %s failed: %s", address, error)
-                    self._handle_replica_failure(address)
-                    continue
-                except Exception:
-                    LOGGER.exception("Unexpected heartbeat error for %s", address)
-                    continue
-                if not response.alive:
-                    LOGGER.warning("Replica %s reported an unhealthy status", address)
-                    self._handle_replica_failure(address)
-                    continue
-                with self.lock:
-                    replica = self.nodes.get(address)
-                    if replica is not None:
-                        replica.last_seen = time.time()
-
     def _select_primary_candidate_locked(self, eligible_addresses=None) -> str | None:
         if eligible_addresses is None:
             assignment_epoch = (
-                self.primary_assignment.epoch if self.primary_assignment else self.last_primary_epoch
+                self.primary_assignment.epoch
+                if self.primary_assignment
+                else self.last_primary_epoch
             )
             eligible_addresses = (
                 address
@@ -284,9 +264,18 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
                 if replica.promotion_eligible
                 and replica.synchronized_epoch in (0, assignment_epoch)
             )
-        return next((address for address in sorted(eligible_addresses) if address in self.nodes), None)
+        return next(
+            (
+                address
+                for address in sorted(eligible_addresses)
+                if address in self.nodes
+            ),
+            None,
+        )
 
-    def _select_backup_locked(self, candidate_address: str, assignment: PrimaryAssignment) -> str | None:
+    def _select_backup_locked(
+        self, candidate_address: str, assignment: PrimaryAssignment
+    ) -> str | None:
         eligible = assignment.eligible_backup_addresses or tuple(
             address
             for address, replica in self.nodes.items()
@@ -296,7 +285,8 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
             (
                 address
                 for address in sorted(eligible)
-                if address != candidate_address and address in self.nodes
+                if address != candidate_address
+                and address in self.nodes
                 and address not in assignment.attempted_backup_addresses
             ),
             None,
@@ -339,6 +329,8 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
             args=(candidate_address, assignment.epoch),
             daemon=True,
         ).start()
+
+    # Promotion workflow
 
     def _validate_promotion_context(self, candidate_address: str, epoch: int) -> bool:
         with self.lock:
@@ -460,11 +452,13 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
             )
             return
         LOGGER.info(
-            "Backup %s synchronized from %s for epoch %s",
+                "Backup %s synchronized from %s for epoch %s",
             backup_address,
             candidate_address,
             epoch,
         )
+
+    # Promotion recovery
 
     def _handle_candidate_promotion_failure(
         self, candidate_address: str, epoch: int, reason: str
@@ -539,6 +533,40 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
             epoch,
             reason,
         )
+
+    # Heartbeat monitoring and replica eviction
+
+    def _monitor_heartbeats(self):
+        while True:
+            time.sleep(5)
+            with self.lock:
+                # Snapshot membership before making any network calls.
+                addresses = sorted(self.nodes)
+            for address in addresses:
+                try:
+                    with grpc.insecure_channel(address) as channel:
+                        response = pb2_grpc.StorageReplicaServiceStub(
+                            channel
+                        ).Heartbeat(
+                            pb2.HealthCheckRequest(request_source="CONTROLLER"),
+                            timeout=self._heartbeat_timeout,
+                        )
+                except grpc.RpcError as error:
+                    LOGGER.warning("Heartbeat RPC to %s failed: %s", address, error)
+                    self._handle_replica_failure(address)
+                    continue
+                except Exception:
+                    LOGGER.exception("Unexpected heartbeat error for %s", address)
+                    continue
+                if not response.alive:
+                    LOGGER.warning("Replica %s reported an unhealthy status", address)
+                    self._handle_replica_failure(address)
+                    continue
+                with self.lock:
+                    # The replica may have been evicted while its heartbeat ran.
+                    replica = self.nodes.get(address)
+                    if replica is not None:
+                        replica.last_seen = time.time()
 
     def _handle_replica_failure(self, address: str):
         should_elect = False
