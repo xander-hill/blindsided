@@ -628,4 +628,5 @@ and synchronized-backup guards; state/deadline revalidation; deterministic
 idempotency and retry recovery; all auction outcomes and active-bid rules;
 single-version mutation semantics; synchronous replication and backup failure;
 failover timing; post-reveal visibility; and exactly-once end-to-end failover
-finalization are covered by the overdue-actions test suite.
+finalization are covered by
+`backend/tests/layers/test_overdue_actions.py`.
