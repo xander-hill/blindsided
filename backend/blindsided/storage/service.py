@@ -1,5 +1,7 @@
+import copy
 import json
 import os
+from sqlite3.dbapi2 import Timestamp
 import threading
 import time
 
@@ -554,6 +556,96 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             return False
         deadline = auction.ends_at.seconds + (auction.ends_at.nanos / 1_000_000_000)
         return time.time() >= deadline
+
+    def _find_overdue_open_auction_ids(self, now_seconds: float) -> list[str]:
+        """Return a stable snapshot of open auctions whose deadline has passed."""
+        overdue_ids = []
+        for auction_id, auction in self.auction_store.items():
+            if auction.state != pb2.AUCTION_STATE_OPEN or not auction.HasField(
+                "ends_at"
+            ):
+                continue
+            deadline = auction.ends_at.seconds + (
+                auction.ends_at.nanos / 1_000_000_000
+            )
+            if now_seconds >= deadline:
+                overdue_ids.append(auction_id)
+        return sorted(overdue_ids)
+
+    def _overdue_reveal_request_id(self, auction_id: str) -> str:
+        return f"overdue-reveal:{auction_id}"
+
+    # Keep the shorter name available to callers that treat overdue actions
+    # generically rather than as reveal mutations.
+    def _overdue_request_id(self, auction_id: str) -> str:
+        return self._overdue_reveal_request_id(auction_id)
+
+    def _finalize_overdue_auction(
+        self,
+        auction_id: str,
+        epoch: int,
+        now_seconds: float | None = None,
+    ) -> pb2.AuctionMutationResponse | None:
+        """Reveal one overdue auction through the replicated mutation path."""
+        with self.state_lock:
+            if (
+                self.replica_role != "primary"
+                or not self.promotion_ready
+                or epoch != self.current_epoch
+                or not self.synchronous_backup_address
+            ):
+                return None
+            auction = self.auction_store.get(auction_id)
+            if (
+                auction is None
+                or auction.state != pb2.AUCTION_STATE_OPEN
+                or not auction.HasField("ends_at")
+            ):
+                return None
+            checked_at = time.time() if now_seconds is None else now_seconds
+            deadline = auction.ends_at.seconds + (
+                auction.ends_at.nanos / 1_000_000_000
+            )
+            if checked_at < deadline:
+                return None
+            return self.ApplyAuctionMutation(
+                pb2.AuctionMutationRequest(
+                    mutation_type=pb2.AUCTION_MUTATION_TYPE_REVEAL,
+                    auction=pb2.Auction(auction_id=auction_id),
+                    expected_version=auction.version,
+                    request_id=self._overdue_request_id(auction_id),
+                    epoch=epoch,
+                ),
+                None,
+            )
+
+    def _reconcile_overdue_auctions(
+        self,
+        epoch: int | None = None,
+        now_seconds: float | None = None,
+    ) -> list[pb2.AuctionMutationResponse]:
+        """Attempt every overdue reveal safe in the current primary epoch."""
+        with self.state_lock:
+            reconciliation_epoch = self.current_epoch if epoch is None else epoch
+            if (
+                self.replica_role != "primary"
+                or not self.promotion_ready
+                or reconciliation_epoch != self.current_epoch
+                or not self.synchronous_backup_address
+            ):
+                return []
+            scanned_at = time.time() if now_seconds is None else now_seconds
+            auction_ids = self._find_overdue_open_auction_ids(scanned_at)
+        results = []
+        for auction_id in auction_ids:
+            response = self._finalize_overdue_auction(
+                auction_id,
+                epoch=reconciliation_epoch,
+                now_seconds=scanned_at,
+            )
+            if response is not None:
+                results.append(response)
+        return results
 
     def GetAuction(self, request: pb2.GetAuctionRequest, context) -> pb2.GetStoredAuctionResponse:
         with self.state_lock:
@@ -1272,6 +1364,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                     epoch=self.current_epoch,
                     message=f"Could not persist promotion completion: {error}",
                 )
+            self._reconcile_overdue_auctions(epoch=request.epoch)
             return pb2.CompletePrimaryPromotionResponse(
                 success=True,
                 epoch=self.current_epoch,
