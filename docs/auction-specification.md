@@ -618,7 +618,15 @@ after validating:
 
 Required behavior:
 
-- Failover MUST NOT extend or reset auction deadlines.
-- Overdue auction finalization MUST obey the same reveal and visibility
+- ✅ Failover MUST NOT extend or reset auction deadlines.
+- ✅ Overdue auction finalization MUST obey the same reveal and visibility
   rules as request-initiated reveal.
-- Overdue auction finalization MUST be idempotent.
+- ✅ Overdue auction finalization MUST be idempotent.
+
+Test coverage: overdue discovery and deadline boundaries; promotion, epoch,
+and synchronized-backup guards; state/deadline revalidation; deterministic
+idempotency and retry recovery; all auction outcomes and active-bid rules;
+single-version mutation semantics; synchronous replication and backup failure;
+failover timing; post-reveal visibility; and exactly-once end-to-end failover
+finalization are covered by
+`backend/tests/layers/test_overdue_actions.py`.
