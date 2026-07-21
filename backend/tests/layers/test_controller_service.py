@@ -14,6 +14,63 @@ from backend.tests.helpers import BackendTestCase, ChannelContext, NoopContext
 
 
 class ControllerServiceTests(BackendTestCase):
+    def test_controller_restart_rejects_lower_epoch_primary_when_higher_epoch_primary_reregisters(self):
+        restarted = ControllerService()
+
+        stale = restarted.RegisterNode(pb2.RegisterRequest(
+            address="former-primary:50051",
+            role="primary",
+            epoch=5,
+            promotion_ready=True,
+        ), NoopContext())
+        current = restarted.RegisterNode(pb2.RegisterRequest(
+            address="current-primary:50051",
+            role="primary",
+            epoch=6,
+            promotion_ready=True,
+            synchronous_backup_address="backup:50051",
+        ), NoopContext())
+
+        self.assertTrue(stale.is_primary)
+        self.assertTrue(current.is_primary)
+        self.assertEqual(restarted.last_primary_epoch, 6)
+        self.assertEqual(
+            restarted.primary_assignment.primary_address,
+            "current-primary:50051",
+        )
+        self.assertEqual(restarted.primary_assignment.epoch, 6)
+
+    def test_controller_restart_recovery_is_independent_of_registration_order(self):
+        registrations = (
+            pb2.RegisterRequest(
+                address="former-primary:50051",
+                role="primary",
+                epoch=5,
+                promotion_ready=True,
+            ),
+            pb2.RegisterRequest(
+                address="current-primary:50051",
+                role="primary",
+                epoch=6,
+                promotion_ready=True,
+                synchronous_backup_address="backup:50051",
+            ),
+        )
+
+        for order in (registrations, tuple(reversed(registrations))):
+            with self.subTest(order=[request.address for request in order]):
+                restarted = ControllerService()
+                for request in order:
+                    restarted.RegisterNode(request, NoopContext())
+
+                primary = restarted.GetPrimary(
+                    pb2.GetPrimaryRequest(), NoopContext()
+                )
+                self.assertTrue(primary.success)
+                self.assertEqual(primary.primary_address, "current-primary:50051")
+                self.assertEqual(primary.epoch, 6)
+                self.assertEqual(restarted.last_primary_epoch, 6)
+
     def test_controller_restart_reconciles_primary_epoch_from_reregistration(self):
         restarted = ControllerService()
 

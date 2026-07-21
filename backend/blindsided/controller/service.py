@@ -98,6 +98,20 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
                 ),
                 synchronized_epoch=reported_epoch if reported_synchronized else 0,
             )
+            if (
+                self.primary_assignment is not None
+                and reported_epoch > self.primary_assignment.epoch
+            ):
+                LOGGER.warning(
+                    "Invalidating recovered primary %s at epoch %s after %s "
+                    "reported higher epoch %s",
+                    self.primary_assignment.primary_address,
+                    self.primary_assignment.epoch,
+                    address,
+                    reported_epoch,
+                )
+                self.primary_assignment = None
+                self._election_in_progress = False
             if reported_epoch > self.last_primary_epoch:
                 self.last_primary_epoch = reported_epoch
             if (
