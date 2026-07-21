@@ -148,7 +148,7 @@ class IdempotencySpecificationTests(BackendTestCase):
         self.assertEqual(judge.auction_store["idem-reveal"].version, 3)
         self.assertEqual(judge.auction_store["idem-reveal"].result, first_result)
 
-    def test_duplicate_creation_replays_original_auction_id_and_creates_once(self):
+    def test_duplicate_creation_with_different_auction_id_conflicts(self):
         judge = make_judge(role="primary")
         first = judge.ApplyAuctionMutation(
             pb2.AuctionMutationRequest(
@@ -184,10 +184,13 @@ class IdempotencySpecificationTests(BackendTestCase):
         )
 
         self.assertTrue(first.success)
-        self.assertTrue(second.success)
-        self.assertTrue(second.replayed)
+        self.assertFalse(second.success)
+        self.assertFalse(second.replayed)
+        self.assertEqual(
+            second.failure_reason,
+            pb2.MUTATION_FAILURE_REASON_IDEMPOTENCY_CONFLICT,
+        )
         self.assertEqual(first.auction_id, "created-a")
-        self.assertEqual(second.auction_id, "created-a")
         self.assertEqual(list(judge.auction_store), ["created-a"])
 
     def test_domain_rejections_do_not_create_permanent_idempotency_record(self):

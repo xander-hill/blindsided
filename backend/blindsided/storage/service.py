@@ -242,6 +242,26 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                             failure_reason=pb2.MUTATION_FAILURE_REASON_INVALID_STATE,
                             message="Bid mutation requires at least one bid.",
                         )
+                    if len(incoming_auction.bids) != 1:
+                        return pb2.AuctionMutationResponse(
+                            success=False,
+                            current_version=existing_auction.version,
+                            failure_reason=pb2.MUTATION_FAILURE_REASON_INVALID_STATE,
+                            message="Bid mutation requires exactly one bidder.",
+                        )
+                    incoming_bidder_id = next(iter(incoming_auction.bids))
+                    if (
+                        request.bidder_id.strip()
+                        and request.bidder_id != incoming_bidder_id
+                    ):
+                        return pb2.AuctionMutationResponse(
+                            success=False,
+                            current_version=existing_auction.version,
+                            failure_reason=pb2.MUTATION_FAILURE_REASON_INVALID_STATE,
+                            message=(
+                                "Bid mutation bidder id must match its single bid."
+                            ),
+                        )
                     if self._auction_has_ended(existing_auction):
                         return pb2.AuctionMutationResponse(
                             success=False,
@@ -368,6 +388,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
         if mutation_type == pb2.AUCTION_MUTATION_TYPE_CREATE:
             payload = {
                 "mutation_type": "CREATE",
+                "auction_id": auction.auction_id,
                 "seller_id": auction.seller_id,
                 "title": auction.title,
                 "category": auction.category,
@@ -1239,6 +1260,15 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                     message="Promotion epoch is older than the current epoch.",
                 )
             if request.epoch == self.current_epoch:
+                if self.replica_role != "primary":
+                    return pb2.BeginPrimaryPromotionResponse(
+                        accepted=False,
+                        epoch=self.current_epoch,
+                        message=(
+                            "Same-epoch promotion is valid only for the existing "
+                            "primary promotion candidate."
+                        ),
+                    )
                 return pb2.BeginPrimaryPromotionResponse(
                     accepted=True,
                     epoch=self.current_epoch,
@@ -1511,11 +1541,21 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             snapshot = pb2.StorageSnapshot()
             with open(self.state_file_path, "rb") as state_file:
                 snapshot.ParseFromString(state_file.read())
-            self.auction_store = {
-                auction.auction_id: auction
-                for auction in snapshot.auctions
-                if not self._committed_state_error(auction)
-            }
+            auction_store = {}
+            for auction in snapshot.auctions:
+                state_error = self._committed_state_error(auction)
+                if state_error:
+                    raise ValueError(
+                        f"invalid committed auction {auction.auction_id!r}: "
+                        f"{state_error}"
+                    )
+                if auction.auction_id in auction_store:
+                    raise ValueError(
+                        f"duplicate committed auction id {auction.auction_id!r}"
+                    )
+                auction_store[auction.auction_id] = auction
+
+            self.auction_store = auction_store
             self.idempotency_records = {
                 record.request_id: record
                 for record in snapshot.idempotency_records
@@ -1536,7 +1576,9 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             self.promotion_ready = snapshot.promotion_ready
             self.synchronous_backup_address = snapshot.synchronous_backup_address
         except Exception as e:
-            print(f"[Judge] Could not load local state snapshot: {e}")
+            raise RuntimeError(
+                f"Could not load local state snapshot {self.state_file_path!r}: {e}"
+            ) from e
 
     def _persist_state_to_disk(self) -> None:
         if not self.state_file_path:

@@ -3100,3 +3100,73 @@ class StorageServiceTests(BackendTestCase):
         self.assertEqual(set(judge.auction_store), {"stale-auction"})
         self.assertEqual(judge.auction_store["stale-auction"], stale)
         report.assert_not_called()
+
+    def test_place_bid_rejects_multiple_bidders_in_one_mutation(self):
+        judge = make_judge(role="primary")
+        judge.auction_store["auction-1"] = pb2.Auction(
+            auction_id="auction-1",
+            version=1,
+            state=pb2.AUCTION_STATE_OPEN,
+        )
+
+        response = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
+                mutation_type=pb2.AUCTION_MUTATION_TYPE_PLACE_BID,
+                auction=pb2.Auction(
+                    auction_id="auction-1",
+                    bids={
+                        "buyer-a": active_bid(200.0),
+                        "buyer-b": active_bid(300.0),
+                    },
+                ),
+                expected_version=1,
+            ),
+            NoopContext(),
+        )
+
+        self.assertFalse(response.success)
+        self.assertIn("exactly one bidder", response.message)
+        self.assertEqual(judge.auction_store["auction-1"].version, 1)
+
+    def test_create_fingerprint_includes_auction_id(self):
+        judge = make_judge(role="primary")
+        first = pb2.AuctionMutationRequest(
+            mutation_type=pb2.AUCTION_MUTATION_TYPE_CREATE,
+            auction=pb2.Auction(auction_id="auction-a", seller_id="seller-a"),
+        )
+        second = pb2.AuctionMutationRequest()
+        second.CopyFrom(first)
+        second.auction.auction_id = "auction-b"
+
+        self.assertNotEqual(
+            judge._request_fingerprint(first, first.mutation_type),
+            judge._request_fingerprint(second, second.mutation_type),
+        )
+
+    def test_same_epoch_promotion_is_rejected_for_backup(self):
+        judge = make_judge(role="backup")
+        judge.current_epoch = 5
+
+        response = judge.BeginPrimaryPromotion(
+            pb2.BeginPrimaryPromotionRequest(epoch=5), NoopContext()
+        )
+
+        self.assertFalse(response.accepted)
+        self.assertEqual(judge.replica_role, "backup")
+
+    def test_snapshot_loading_fails_closed_for_invalid_committed_state(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = f"{temp_dir}/invalid-state.pb"
+            snapshot = pb2.StorageSnapshot(
+                auctions=[pb2.Auction(
+                    auction_id="invalid-auction",
+                    version=2,
+                    state=pb2.AUCTION_STATE_REVEALED,
+                )]
+            )
+            with open(state_path, "wb") as state_file:
+                state_file.write(snapshot.SerializeToString())
+            judge = make_judge(role="backup", state_file_path=state_path)
+
+            with self.assertRaisesRegex(RuntimeError, "invalid committed auction"):
+                judge._load_state_from_disk()
