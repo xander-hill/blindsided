@@ -65,7 +65,10 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                     if self.replica_role == "backup":
                         p_resp = stub.GetPrimary(pb2.GetPrimaryRequest())
                         if p_resp.success and p_resp.primary_address != self.node_address:
-                            if not self._synchronize_from_primary(p_resp.primary_address):
+                            if not self._synchronize_from_primary(
+                                p_resp.primary_address,
+                                epoch=p_resp.epoch,
+                            ):
                                 raise RuntimeError(
                                     "Full synchronization did not complete successfully."
                                 )
@@ -87,6 +90,15 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                     success=False,
                     failure_reason=pb2.MUTATION_FAILURE_REASON_INVALID_STATE,
                     message="Primary promotion is not ready for mutations.",
+                )
+            if request.epoch != self.current_epoch:
+                return pb2.AuctionMutationResponse(
+                    success=False,
+                    failure_reason=pb2.MUTATION_FAILURE_REASON_STALE_EPOCH,
+                    message=(
+                        f"Mutation epoch {request.epoch} does not match "
+                        f"primary epoch {self.current_epoch}."
+                    ),
                 )
             if request.request_id and request.request_id in self.aborted_mutations:
                 return pb2.AuctionMutationResponse(
@@ -593,6 +605,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             candidate_auction=candidate_auction,
             idempotency_record=idempotency_record,
             primary_id=self.node_address,
+            epoch=self.current_epoch,
         )
         try:
             with grpc.insecure_channel(self.synchronous_backup_address) as channel:
@@ -637,6 +650,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             request_id=request_id,
             primary_id=self.node_address,
             backup_address=self.synchronous_backup_address,
+            epoch=self.current_epoch,
         )
         decision.auction.CopyFrom(candidate_auction)
         decision.idempotency_record.CopyFrom(idempotency_record)
@@ -685,6 +699,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 request_id=decision.request_id,
                 auction_id=decision.auction.auction_id,
                 primary_id=decision.primary_id,
+                epoch=decision.epoch,
             )
             try:
                 with grpc.insecure_channel(decision.backup_address) as channel:
@@ -721,6 +736,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             request_id=request_id,
             auction_id=auction_id,
             primary_id=self.node_address,
+            epoch=self.current_epoch,
         )
         try:
             with grpc.insecure_channel(self.synchronous_backup_address) as channel:
@@ -789,6 +805,14 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 return pb2.PrepareMutationResponse(
                     success=False,
                     message="Mutation preparation is allowed only on backup replicas.",
+                )
+            if request.epoch != self.current_epoch:
+                return pb2.PrepareMutationResponse(
+                    success=False,
+                    message=(
+                        f"Replication epoch {request.epoch} does not match "
+                        f"backup epoch {self.current_epoch}."
+                    ),
                 )
 
             request_id = request.request_id.strip()
@@ -889,6 +913,14 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                     success=False,
                     message="Prepared mutations can be committed only on backup replicas.",
                 )
+            if request.epoch != self.current_epoch:
+                return pb2.MutationDecisionResponse(
+                    success=False,
+                    message=(
+                        f"Replication epoch {request.epoch} does not match "
+                        f"backup epoch {self.current_epoch}."
+                    ),
+                )
 
             request_id = request.request_id.strip()
             auction_id = request.auction_id.strip()
@@ -987,6 +1019,14 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                     success=False,
                     message="Prepared mutations can be aborted only on backup replicas.",
                 )
+            if request.epoch != self.current_epoch:
+                return pb2.MutationDecisionResponse(
+                    success=False,
+                    message=(
+                        f"Replication epoch {request.epoch} does not match "
+                        f"backup epoch {self.current_epoch}."
+                    ),
+                )
 
             request_id = request.request_id.strip()
             auction_id = request.auction_id.strip()
@@ -1064,6 +1104,19 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
 
     def SyncFullState(self, request, context):
         with self.state_lock:
+            if self.replica_role != "primary":
+                return pb2.StateResponse(
+                    ok=False,
+                    message="Full state synchronization requires the primary replica.",
+                )
+            if request.epoch != self.current_epoch:
+                return pb2.StateResponse(
+                    ok=False,
+                    message=(
+                        f"Synchronization epoch {request.epoch} does not match "
+                        f"primary epoch {self.current_epoch}."
+                    ),
+                )
             return pb2.StateResponse(
                 ok=True,
                 auctions=list(self.auction_store.values()),
@@ -1256,19 +1309,22 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             ),
         )
 
-    def _synchronize_from_primary(self, primary_address, epoch=None) -> bool:
+    def _synchronize_from_primary(self, primary_address: str, epoch: int) -> bool:
         try:
             with grpc.insecure_channel(primary_address) as ch:
                 stub = pb2_grpc.StorageReplicaServiceStub(ch)
                 response = stub.SyncFullState(
-                    pb2.StateRequest(requester_id=self.node_address),
+                    pb2.StateRequest(
+                        requester_id=self.node_address,
+                        epoch=epoch,
+                    ),
                     timeout=10.0,
                 )
             if not self._replace_with_full_state(response, epoch=epoch):
                 return False
             return self._report_synchronization_complete(
                 primary_address,
-                epoch=self.current_epoch,
+                epoch=epoch,
             )
         except Exception as e:
             print(f"[Judge] Sync failed: {e}")
@@ -1335,7 +1391,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
     def _report_synchronization_complete(
         self,
         primary_address: str,
-        epoch: int | None = None,
+        epoch: int,
     ) -> bool:
         try:
             with grpc.insecure_channel(CONTROLLER_ADDRESS) as channel:
@@ -1344,7 +1400,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                     pb2.SynchronizationCompleteRequest(
                         replica_address=self.node_address,
                         source_primary_address=primary_address,
-                        epoch=self.current_epoch if epoch is None else epoch,
+                        epoch=epoch,
                     ),
                     timeout=2.0,
                 )

@@ -533,12 +533,32 @@ epoch.
 
 Required behavior:
 
-- Each primary assignment MUST have an epoch.
-- Epoch values MUST increase monotonically.
-- Mutations from older epochs MUST be rejected.
-- Replication requests from older epochs MUST be rejected.
-- A former primary MUST synchronize before becoming eligible for
+- ✅ Each primary assignment MUST have an epoch.
+- ✅ Epoch values MUST increase monotonically.
+- ✅ Mutations from older epochs MUST be rejected.
+- ✅ Replication requests from older epochs MUST be rejected.
+- ✅ A former primary MUST synchronize before becoming eligible for
   promotion again.
+
+#### Test Coverage
+
+Controller coverage verifies that initial and promoted assignments expose their
+epochs, promotion sends the controller's monotonically increasing assignment
+epoch, stale promotion acknowledgements and completion reports cannot affect a
+newer assignment, and a re-registered former primary remains unsynchronized and
+promotion-ineligible until it reports synchronization from the current primary
+at the matching epoch.
+
+Storage coverage verifies that a primary rejects both older and future mutation
+epochs before idempotency or domain processing, while the current epoch is
+accepted. Synchronous-backup coverage verifies that older epochs cannot
+prepare, commit, or abort a transaction and that each rejection leaves
+auctions, idempotency records, preparations, abort tombstones, and pending
+decisions unchanged. Full-state synchronization coverage verifies that source
+primaries reject older and future epochs, backups cannot act as synchronization
+sources, and the current primary can serve state during promotion readiness.
+These cases are exercised by `backend/tests/layers/test_controller_service.py`
+and `backend/tests/layers/test_storage_service.py`.
 
 ### In-Flight Requests
 

@@ -20,6 +20,187 @@ class PrepareRpcError(grpc.RpcError):
 
 
 class StorageServiceTests(BackendTestCase):
+    def _backup_transaction_state(self):
+        judge = make_judge(role="backup")
+        judge.current_epoch = 7
+        judge.auction_store["auction-1"] = pb2.Auction(
+            auction_id="auction-1",
+            version=1,
+            state=pb2.AUCTION_STATE_OPEN,
+        )
+        judge.idempotency_records["committed-request"] = pb2.IdempotencyRecord(
+            request_id="committed-request",
+        )
+        judge.prepared_mutations["prepared-request"] = pb2.PrepareMutationRequest(
+            request_id="prepared-request",
+            primary_id="primary-1",
+            epoch=7,
+            candidate_auction=pb2.Auction(
+                auction_id="auction-1",
+                version=2,
+                state=pb2.AUCTION_STATE_OPEN,
+            ),
+            idempotency_record=pb2.IdempotencyRecord(
+                request_id="prepared-request",
+            ),
+        )
+        judge.aborted_mutations["aborted-request"] = pb2.MutationDecisionRequest(
+            request_id="aborted-request",
+            auction_id="auction-1",
+            primary_id="primary-1",
+            epoch=7,
+        )
+        judge.pending_backup_commits["pending-request"] = pb2.CommitDecision(
+            request_id="pending-request",
+            epoch=7,
+        )
+        return judge
+
+    def _serialized_transaction_state(self, judge):
+        return tuple(
+            {
+                key: value.SerializeToString(deterministic=True)
+                for key, value in collection.items()
+            }
+            for collection in (
+                judge.auction_store,
+                judge.idempotency_records,
+                judge.prepared_mutations,
+                judge.aborted_mutations,
+                judge.pending_backup_commits,
+            )
+        )
+
+    def test_backup_rejects_old_epoch_before_preparing_without_state_changes(self):
+        judge = self._backup_transaction_state()
+        before = self._serialized_transaction_state(judge)
+        request = self._prepare_request(
+            request_id="new-request",
+            version=2,
+            epoch=6,
+        )
+
+        with mock.patch.object(judge, "_persist_state_to_disk") as persist:
+            response = judge.PrepareAuctionMutation(request, NoopContext())
+
+        self.assertFalse(response.success)
+        self.assertIn("backup epoch 7", response.message)
+        self.assertEqual(self._serialized_transaction_state(judge), before)
+        persist.assert_not_called()
+
+    def test_backup_rejects_old_epoch_before_committing_without_state_changes(self):
+        judge = self._backup_transaction_state()
+        before = self._serialized_transaction_state(judge)
+
+        with mock.patch.object(judge, "_persist_state_to_disk") as persist:
+            response = judge.CommitPreparedMutation(
+                pb2.MutationDecisionRequest(
+                    request_id="prepared-request",
+                    auction_id="auction-1",
+                    primary_id="primary-1",
+                    epoch=6,
+                ),
+                NoopContext(),
+            )
+
+        self.assertFalse(response.success)
+        self.assertIn("backup epoch 7", response.message)
+        self.assertEqual(self._serialized_transaction_state(judge), before)
+        persist.assert_not_called()
+
+    def test_backup_rejects_old_epoch_before_aborting_without_state_changes(self):
+        judge = self._backup_transaction_state()
+        before = self._serialized_transaction_state(judge)
+
+        with mock.patch.object(judge, "_persist_state_to_disk") as persist:
+            response = judge.AbortPreparedMutation(
+                pb2.MutationDecisionRequest(
+                    request_id="prepared-request",
+                    auction_id="auction-1",
+                    primary_id="primary-1",
+                    epoch=6,
+                ),
+                NoopContext(),
+            )
+
+        self.assertFalse(response.success)
+        self.assertIn("backup epoch 7", response.message)
+        self.assertEqual(self._serialized_transaction_state(judge), before)
+        persist.assert_not_called()
+
+    def test_primary_rejects_older_mutation_epoch_before_processing(self):
+        judge = make_judge(role="primary")
+        judge.current_epoch = 7
+        judge.idempotency_records["request-1"] = pb2.IdempotencyRecord(
+            request_id="request-1",
+            request_fingerprint=b"stored-fingerprint",
+            response=pb2.AuctionMutationResponse(success=True),
+        )
+
+        with mock.patch.object(judge, "_check_idempotency") as check_idempotency:
+            response = judge.ApplyAuctionMutation(
+                pb2.AuctionMutationRequest(
+                    request_id="request-1",
+                    epoch=6,
+                    auction=pb2.Auction(auction_id="auction-1"),
+                ),
+                NoopContext(),
+            )
+
+        self.assertFalse(response.success)
+        self.assertEqual(
+            response.failure_reason,
+            pb2.MUTATION_FAILURE_REASON_STALE_EPOCH,
+        )
+        self.assertIn("primary epoch 7", response.message)
+        check_idempotency.assert_not_called()
+
+    def test_primary_rejects_newer_mutation_epoch_before_processing(self):
+        judge = make_judge(role="primary")
+        judge.current_epoch = 7
+
+        with mock.patch.object(judge, "_effective_mutation_type") as domain_processing:
+            response = judge.ApplyAuctionMutation(
+                pb2.AuctionMutationRequest(
+                    request_id="request-1",
+                    epoch=8,
+                    auction=pb2.Auction(auction_id="auction-1"),
+                ),
+                NoopContext(),
+            )
+
+        self.assertFalse(response.success)
+        self.assertEqual(
+            response.failure_reason,
+            pb2.MUTATION_FAILURE_REASON_STALE_EPOCH,
+        )
+        self.assertIn("Mutation epoch 8", response.message)
+        domain_processing.assert_not_called()
+
+    def test_primary_accepts_current_mutation_epoch(self):
+        judge = make_judge(role="primary")
+        judge.current_epoch = 7
+
+        response = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
+                mutation_type=pb2.AUCTION_MUTATION_TYPE_CREATE,
+                request_id="request-1",
+                epoch=7,
+                auction=pb2.Auction(
+                    auction_id="auction-1",
+                    seller_id="seller-1",
+                    title="Current epoch auction",
+                    reserve_price=10,
+                    ends_at=future_timestamp(),
+                    state=pb2.AUCTION_STATE_OPEN,
+                ),
+            ),
+            NoopContext(),
+        )
+
+        self.assertTrue(response.success)
+        self.assertEqual(judge.auction_store["auction-1"].version, 1)
+
     def _call_primary_prepare(self, judge, response=None, error=None):
         stub = mock.Mock()
         if error is not None:
@@ -91,10 +272,12 @@ class StorageServiceTests(BackendTestCase):
         primary_id="primary-1",
         auction_id="auction-1",
         version=1,
+        epoch=0,
     ):
         return pb2.PrepareMutationRequest(
             request_id=request_id,
             primary_id=primary_id,
+            epoch=epoch,
             candidate_auction=pb2.Auction(
                 auction_id=auction_id,
                 version=version,
@@ -116,11 +299,13 @@ class StorageServiceTests(BackendTestCase):
         request_id="prepare-1",
         auction_id="auction-1",
         primary_id="primary-1",
+        epoch=0,
     ):
         return pb2.MutationDecisionRequest(
             request_id=request_id,
             auction_id=auction_id,
             primary_id=primary_id,
+            epoch=epoch,
         )
 
     def _coordinator_values(self):
@@ -177,6 +362,7 @@ class StorageServiceTests(BackendTestCase):
             request_id="pending-request",
             primary_id=judge.node_address,
             backup_address="backup:50051",
+            epoch=judge.current_epoch,
         )
         decision.auction.CopyFrom(committed)
         decision.idempotency_record.CopyFrom(record)
@@ -285,6 +471,7 @@ class StorageServiceTests(BackendTestCase):
         self.assertEqual(request.request_id, "prepare-1")
         self.assertEqual(request.auction_id, "auction-1")
         self.assertEqual(request.primary_id, "primary.storage:50051")
+        self.assertEqual(request.epoch, judge.current_epoch)
 
         stub.AbortPreparedMutation.side_effect = PrepareRpcError()
         with (
@@ -546,6 +733,7 @@ class StorageServiceTests(BackendTestCase):
         request = stub.PrepareAuctionMutation.call_args.args[0]
         self.assertEqual(request.request_id, "prepare-1")
         self.assertEqual(request.primary_id, "primary.storage:50051")
+        self.assertEqual(request.epoch, judge.current_epoch)
         self.assertEqual(request.candidate_auction.auction_id, "auction-1")
         self.assertEqual(request.candidate_auction.version, 5)
         self.assertTrue(request.HasField("idempotency_record"))
@@ -603,6 +791,7 @@ class StorageServiceTests(BackendTestCase):
         self.assertEqual(decision.request_id, "prepare-1")
         self.assertEqual(decision.primary_id, "primary.storage:50051")
         self.assertEqual(decision.backup_address, "backup.storage:50051")
+        self.assertEqual(decision.epoch, 1)
         self.assertEqual(decision.auction.title, "Committed candidate")
         self.assertEqual(decision.idempotency_record.request_id, "prepare-1")
         self.assertEqual(len(snapshot.pending_backup_commits), 1)
@@ -610,6 +799,7 @@ class StorageServiceTests(BackendTestCase):
             snapshot.pending_backup_commits[0].auction.title,
             "Committed candidate",
         )
+        self.assertEqual(snapshot.pending_backup_commits[0].epoch, 1)
         self.assertEqual(recovered.auction_store["auction-1"].version, 5)
         self.assertIn("prepare-1", recovered.idempotency_records)
         self.assertIn("prepare-1", recovered.pending_backup_commits)
@@ -637,6 +827,7 @@ class StorageServiceTests(BackendTestCase):
             request_id="prepare-1",
             primary_id="old-primary",
             backup_address="old-backup",
+            epoch=1,
         )
         previous_decision.auction.CopyFrom(previous_auction)
         previous_decision.idempotency_record.CopyFrom(previous_record)
@@ -688,6 +879,7 @@ class StorageServiceTests(BackendTestCase):
             judge.pending_backup_commits["prepare-1"].backup_address = (
                 "decision-backup:50051"
             )
+            judge.current_epoch = 9
 
             result, stub, channel = self._call_primary_completion(
                 judge,
@@ -707,6 +899,7 @@ class StorageServiceTests(BackendTestCase):
         self.assertEqual(commit_request.request_id, "prepare-1")
         self.assertEqual(commit_request.auction_id, "auction-1")
         self.assertEqual(commit_request.primary_id, "primary.storage:50051")
+        self.assertEqual(commit_request.epoch, 1)
         self.assertNotIn("prepare-1", judge.pending_backup_commits)
         self.assertEqual(len(snapshot.pending_backup_commits), 0)
         self.assertEqual(judge.auction_store["auction-1"].version, 5)
@@ -793,6 +986,7 @@ class StorageServiceTests(BackendTestCase):
         first_request = stub.CommitPreparedMutation.call_args_list[0].args[0]
         retry_request = stub.CommitPreparedMutation.call_args_list[1].args[0]
         self.assertEqual(retry_request, first_request)
+        self.assertEqual(retry_request.epoch, 1)
         self.assertEqual(judge.auction_store["auction-1"].version, 5)
         self.assertIn("prepare-1", judge.idempotency_records)
 
@@ -1061,6 +1255,7 @@ class StorageServiceTests(BackendTestCase):
                 request_id="prepare-1",
                 auction_id="auction-1",
                 primary_id="primary-1",
+                epoch=1,
             ),
             NoopContext(),
         )
@@ -1080,6 +1275,7 @@ class StorageServiceTests(BackendTestCase):
                     "request_id": "prepare-1",
                     "auction_id": "auction-1",
                     "primary_id": "primary-1",
+                    "epoch": 0,
                 }
                 decision[mismatched_field] = "different-id"
 
@@ -1113,6 +1309,7 @@ class StorageServiceTests(BackendTestCase):
                 request_id="prepare-1",
                 auction_id="auction-1",
                 primary_id="primary-1",
+                epoch=0,
             ),
             NoopContext(),
         )
@@ -1144,6 +1341,7 @@ class StorageServiceTests(BackendTestCase):
                     request_id="prepare-1",
                     auction_id="auction-1",
                     primary_id="primary-1",
+                    epoch=0,
                 ),
                 NoopContext(),
             )
@@ -1193,6 +1391,7 @@ class StorageServiceTests(BackendTestCase):
                     request_id="prepare-1",
                     auction_id="auction-1",
                     primary_id="primary-1",
+                    epoch=0,
                 ),
                 NoopContext(),
             )
@@ -1214,6 +1413,7 @@ class StorageServiceTests(BackendTestCase):
             request_id="prepare-1",
             auction_id="auction-1",
             primary_id="primary-1",
+            epoch=0,
         )
         first = judge.CommitPreparedMutation(decision, NoopContext())
 
@@ -2436,13 +2636,113 @@ class StorageServiceTests(BackendTestCase):
                 judge, "_report_synchronization_complete", return_value=True
             ) as report,
         ):
-            synchronized = judge._synchronize_from_primary("primary:50051")
+            synchronized = judge._synchronize_from_primary(
+                "primary:50051",
+                epoch=7,
+            )
 
         self.assertTrue(synchronized)
         self.assertEqual(set(judge.auction_store), {"current-auction"})
-        report.assert_called_once_with("primary:50051", epoch=0)
+        report.assert_called_once_with("primary:50051", epoch=7)
         sync_request = storage_stub.SyncFullState.call_args.args[0]
         self.assertEqual(sync_request.requester_id, "backup:50051")
+        self.assertEqual(sync_request.epoch, 7)
+
+    def test_full_state_source_rejects_older_epoch(self):
+        primary = make_judge(role="primary")
+        primary.current_epoch = 7
+        primary.auction_store["auction-1"] = pb2.Auction(auction_id="auction-1")
+
+        response = primary.SyncFullState(
+            pb2.StateRequest(requester_id="backup:50051", epoch=6),
+            NoopContext(),
+        )
+
+        self.assertFalse(response.ok)
+        self.assertIn("primary epoch 7", response.message)
+        self.assertEqual(list(response.auctions), [])
+        self.assertEqual(list(response.idempotency_records), [])
+
+    def test_full_state_source_rejects_future_epoch(self):
+        primary = make_judge(role="primary")
+        primary.current_epoch = 7
+        primary.auction_store["auction-1"] = pb2.Auction(auction_id="auction-1")
+
+        response = primary.SyncFullState(
+            pb2.StateRequest(requester_id="backup:50051", epoch=8),
+            NoopContext(),
+        )
+
+        self.assertFalse(response.ok)
+        self.assertIn("Synchronization epoch 8", response.message)
+        self.assertEqual(list(response.auctions), [])
+        self.assertEqual(list(response.idempotency_records), [])
+
+    def test_backup_cannot_serve_full_state_synchronization(self):
+        backup = make_judge(role="backup")
+        backup.current_epoch = 7
+        backup.auction_store["auction-1"] = pb2.Auction(auction_id="auction-1")
+
+        response = backup.SyncFullState(
+            pb2.StateRequest(requester_id="other-backup:50051", epoch=7),
+            NoopContext(),
+        )
+
+        self.assertFalse(response.ok)
+        self.assertIn("primary replica", response.message)
+        self.assertEqual(list(response.auctions), [])
+
+    def test_current_primary_serves_full_state_while_promotion_is_not_ready(self):
+        primary = make_judge(role="primary")
+        primary.current_epoch = 7
+        primary.promotion_ready = False
+        primary.auction_store["auction-1"] = pb2.Auction(
+            auction_id="auction-1",
+            version=3,
+            state=pb2.AUCTION_STATE_OPEN,
+        )
+
+        response = primary.SyncFullState(
+            pb2.StateRequest(requester_id="replacement:50051", epoch=7),
+            NoopContext(),
+        )
+
+        self.assertTrue(response.ok)
+        self.assertEqual([auction.auction_id for auction in response.auctions], ["auction-1"])
+
+    def test_backup_startup_forwards_controller_primary_epoch_to_synchronization(self):
+        judge = make_judge(role="backup", address="backup:50051")
+        controller_stub = mock.Mock()
+        controller_stub.RegisterNode.return_value = pb2.RegisterResponse(
+            success=True,
+            is_primary=False,
+            epoch=7,
+        )
+        controller_stub.GetPrimary.return_value = pb2.GetPrimaryResponse(
+            success=True,
+            primary_address="primary:50051",
+            epoch=7,
+        )
+
+        with (
+            mock.patch(
+                "blindsided.storage.service.grpc.insecure_channel",
+                return_value=ChannelContext(),
+            ),
+            mock.patch(
+                "blindsided.storage.service.pb2_grpc.ClusterControllerStub",
+                return_value=controller_stub,
+            ),
+            mock.patch.object(
+                judge,
+                "_synchronize_from_primary",
+                return_value=True,
+            ) as synchronize,
+        ):
+            judge._initialize_connection()
+
+        synchronize.assert_called_once_with("primary:50051", epoch=7)
+        self.assertEqual(judge.current_epoch, 7)
 
     def test_synchronization_report_identifies_backup_and_source_primary(self):
         judge = make_judge(role="backup", address="backup:50051")
@@ -2461,13 +2761,16 @@ class StorageServiceTests(BackendTestCase):
                 return_value=controller_stub,
             ),
         ):
-            reported = judge._report_synchronization_complete("primary:50051")
+            reported = judge._report_synchronization_complete(
+                "primary:50051",
+                epoch=7,
+            )
 
         self.assertTrue(reported)
         request = controller_stub.ReportSynchronizationComplete.call_args.args[0]
         self.assertEqual(request.replica_address, "backup:50051")
         self.assertEqual(request.source_primary_address, "primary:50051")
-        self.assertEqual(request.epoch, 0)
+        self.assertEqual(request.epoch, 7)
 
     def test_synchronize_from_primary_rpc_replaces_state_for_supplied_epoch(self):
         judge = make_judge(role="backup", address="backup:50051")
@@ -2505,7 +2808,10 @@ class StorageServiceTests(BackendTestCase):
                 return_value=controller_stub,
             ) as controller_stub_factory,
         ):
-            synchronized = judge._synchronize_from_primary("primary:50051")
+            synchronized = judge._synchronize_from_primary(
+                "primary:50051",
+                epoch=7,
+            )
 
         self.assertFalse(synchronized)
         controller_stub_factory.assert_not_called()
@@ -2541,7 +2847,10 @@ class StorageServiceTests(BackendTestCase):
             ),
             mock.patch.object(judge, "_report_synchronization_complete") as report,
         ):
-            synchronized = judge._synchronize_from_primary("primary:50051")
+            synchronized = judge._synchronize_from_primary(
+                "primary:50051",
+                epoch=7,
+            )
 
         self.assertFalse(synchronized)
         self.assertEqual(set(judge.auction_store), {"stale-auction"})

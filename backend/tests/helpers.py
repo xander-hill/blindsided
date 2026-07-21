@@ -73,10 +73,13 @@ def make_judge(
     production_apply = judge.ApplyAuctionMutation
 
     def apply_with_request_id(request, context):
-        if not request.request_id:
+        if not request.request_id or not request.epoch:
             request_copy = pb2.AuctionMutationRequest()
             request_copy.CopyFrom(request)
-            request_copy.request_id = f"test-request-{next(request_sequence)}"
+            if not request_copy.request_id:
+                request_copy.request_id = f"test-request-{next(request_sequence)}"
+            if not request_copy.epoch:
+                request_copy.epoch = judge.current_epoch
             request = request_copy
         return production_apply(request, context)
 
