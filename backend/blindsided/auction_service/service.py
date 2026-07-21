@@ -24,12 +24,18 @@ class PrimaryAssignment:
 class AuctionService(pb2_grpc.AuctionServiceServicer):
     """API layer that hides sealed bid details until an auction is revealed."""
 
-    def _get_primary_assignment(self) -> PrimaryAssignment | None:
+    def _get_primary_assignment(
+        self,
+        timeout_seconds: float = 2.0,
+    ) -> PrimaryAssignment | None:
         """Ask the controller which storage replica owns authoritative writes."""
         try:
             with grpc.insecure_channel(CONTROLLER_ADDRESS) as ch:
                 stub = pb2_grpc.ClusterControllerStub(ch)
-                resp = stub.GetPrimary(pb2.GetPrimaryRequest(), timeout=2.0)
+                resp = stub.GetPrimary(
+                    pb2.GetPrimaryRequest(),
+                    timeout=timeout_seconds,
+                )
                 if resp.success:
                     return PrimaryAssignment(
                         address=resp.primary_address,
@@ -60,19 +66,76 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
         """Bound optimistic-concurrency retries until write idempotency exists."""
         return int(os.getenv("MUTATION_RETRY_LIMIT", "5"))
 
+    def _failover_recovery_window(self) -> float:
+        return max(
+            0.0,
+            float(os.getenv("FAILOVER_RECOVERY_WINDOW_SECONDS", "10")),
+        )
+
+    def _wait_for_ready_primary(self, context) -> PrimaryAssignment | None:
+        """Poll until failover publishes a ready primary or the request expires."""
+        recovery_deadline = time.monotonic() + self._failover_recovery_window()
+        while True:
+            if hasattr(context, "is_active") and not context.is_active():
+                return None
+            client_remaining = (
+                context.time_remaining()
+                if hasattr(context, "time_remaining")
+                else None
+            )
+            if client_remaining is not None and client_remaining <= 0:
+                return None
+
+            remaining = recovery_deadline - time.monotonic()
+            if remaining <= 0:
+                return None
+            poll_timeout = min(2.0, remaining)
+            if client_remaining is not None:
+                poll_timeout = min(poll_timeout, client_remaining)
+            assignment = self._get_primary_assignment(
+                timeout_seconds=poll_timeout,
+            )
+            if assignment is not None:
+                return assignment
+
+            delay = min(random.uniform(0.25, 0.5), remaining)
+            if client_remaining is not None:
+                delay = min(delay, client_remaining)
+            if delay <= 0:
+                return None
+            time.sleep(delay)
+
     def _is_version_conflict(self, response: pb2.AuctionMutationResponse) -> bool:
         return (
             response.failure_reason
             == pb2.MUTATION_FAILURE_REASON_CONCURRENCY_CONFLICT
         )
 
+    def _is_failover_rpc_error(self, error: grpc.RpcError) -> bool:
+        return error.code() in (
+            grpc.StatusCode.UNAVAILABLE,
+            grpc.StatusCode.DEADLINE_EXCEEDED,
+        )
+
+    def _unknown_outcome_fields(self, request_id: str) -> dict:
+        return {
+            "retryable": True,
+            "outcome_unknown": True,
+            "request_id": request_id,
+            "message": (
+                "UNAVAILABLE: Mutation outcome is unknown after failover recovery expired; "
+                "retry with the same request_id."
+            ),
+        }
+
     def CreateAuction(self, request: pb2.CreateAuctionRequest, context) -> pb2.CreateAuctionResponse:
         """Persist a new auction through the current primary replica."""
-        assignment = self._get_primary_assignment()
-        if not assignment:
-            return pb2.CreateAuctionResponse(ok=False, message="The Vault is unreachable")
-
-        request_id = request.request_id or str(uuid4())
+        if not request.request_id.strip():
+            return pb2.CreateAuctionResponse(
+                ok=False,
+                message="request_id is required for idempotency.",
+            )
+        request_id = request.request_id
         auction = pb2.Auction(
             auction_id=str(uuid4()),
             seller_id=request.seller_id,
@@ -85,35 +148,64 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
         if request.HasField("ends_at"):
             auction.ends_at.CopyFrom(request.ends_at)
 
-        try:
-            stub, channel = self._create_storage_stub(assignment.address)
-            with channel:
-                response = stub.ApplyAuctionMutation(pb2.AuctionMutationRequest(
-                    mutation_type=pb2.AUCTION_MUTATION_TYPE_CREATE,
-                    auction=auction,
-                    request_id=request_id,
-                    epoch=assignment.epoch,
-                ), timeout=5.0)
+        recovered_assignment = None
+        mutation_retry_limit = self._mutation_retry_limit()
+        for attempt in range(mutation_retry_limit):
+            assignment = recovered_assignment or self._get_primary_assignment()
+            recovered_assignment = None
+            if not assignment:
+                return pb2.CreateAuctionResponse(
+                    ok=False,
+                    message="The Vault is unreachable",
+                )
+            try:
+                stub, channel = self._create_storage_stub(assignment.address)
+                with channel:
+                    response = stub.ApplyAuctionMutation(pb2.AuctionMutationRequest(
+                        mutation_type=pb2.AUCTION_MUTATION_TYPE_CREATE,
+                        auction=auction,
+                        request_id=request_id,
+                        epoch=assignment.epoch,
+                    ), timeout=5.0)
 
-                if response.success:
+                    if response.success:
+                        return pb2.CreateAuctionResponse(
+                            ok=True,
+                            auction_id=response.auction_id or auction.auction_id,
+                            message="Auction opened in the Vault.",
+                        )
+                    return pb2.CreateAuctionResponse(ok=False, message=response.message)
+            except grpc.RpcError as error:
+                if self._is_failover_rpc_error(error):
+                    if attempt < mutation_retry_limit - 1:
+                        recovered_assignment = self._wait_for_ready_primary(context)
+                        if recovered_assignment is not None:
+                            continue
                     return pb2.CreateAuctionResponse(
-                        ok=True,
-                        auction_id=response.auction_id or auction.auction_id,
-                        message="Auction opened in the Vault.",
+                        ok=False,
+                        **self._unknown_outcome_fields(request_id),
                     )
-                return pb2.CreateAuctionResponse(ok=False, message=response.message)
-
-        except grpc.RpcError as e:
-            return pb2.CreateAuctionResponse(ok=False, message=f"Judge error: {e.details()}")
+                return pb2.CreateAuctionResponse(
+                    ok=False,
+                    message=f"Judge error: {error.details()}",
+                )
+        return pb2.CreateAuctionResponse(ok=False, message="Vault write retry failed.")
 
     def PlaceBid(self, request: pb2.BidRequest, context) -> pb2.BidResponse:
         """Retry stale-version bid writes against the latest committed version."""
+        if not request.request_id.strip():
+            return pb2.BidResponse(
+                success=False,
+                message="request_id is required for idempotency.",
+            )
         mutation_retry_limit = self._mutation_retry_limit()
         current_attempt_version = request.expected_version
-        request_id = request.request_id or str(uuid4())
+        request_id = request.request_id
+        recovered_assignment = None
 
         for attempt in range(mutation_retry_limit):
-            assignment = self._get_primary_assignment()
+            assignment = recovered_assignment or self._get_primary_assignment()
+            recovered_assignment = None
             if not assignment:
                 time.sleep(min(0.01 * (attempt + 1), 0.05))
                 continue
@@ -155,6 +247,15 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                     return pb2.BidResponse(success=False, message=response.message)
 
             except grpc.RpcError as e:
+                if self._is_failover_rpc_error(e):
+                    if attempt < mutation_retry_limit - 1:
+                        recovered_assignment = self._wait_for_ready_primary(context)
+                        if recovered_assignment is not None:
+                            continue
+                    return pb2.BidResponse(
+                        success=False,
+                        **self._unknown_outcome_fields(request_id),
+                    )
                 return pb2.BidResponse(
                     success=False,
                     message=f"Judge connection failed: {e.details()}",
@@ -167,12 +268,19 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
 
     def WithdrawBid(self, request: pb2.WithdrawBidRequest, context) -> pb2.WithdrawBidResponse:
         """Withdraw the caller's active bid through the current primary replica."""
+        if not request.request_id.strip():
+            return pb2.WithdrawBidResponse(
+                success=False,
+                message="request_id is required for idempotency.",
+            )
         mutation_retry_limit = self._mutation_retry_limit()
         current_attempt_version = request.expected_version
-        request_id = request.request_id or str(uuid4())
+        request_id = request.request_id
+        recovered_assignment = None
 
         for attempt in range(mutation_retry_limit):
-            assignment = self._get_primary_assignment()
+            assignment = recovered_assignment or self._get_primary_assignment()
+            recovered_assignment = None
             if not assignment:
                 time.sleep(min(0.01 * (attempt + 1), 0.05))
                 continue
@@ -216,6 +324,15 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                     )
 
             except grpc.RpcError as e:
+                if self._is_failover_rpc_error(e):
+                    if attempt < mutation_retry_limit - 1:
+                        recovered_assignment = self._wait_for_ready_primary(context)
+                        if recovered_assignment is not None:
+                            continue
+                    return pb2.WithdrawBidResponse(
+                        success=False,
+                        **self._unknown_outcome_fields(request_id),
+                    )
                 return pb2.WithdrawBidResponse(
                     success=False,
                     message=f"Judge connection failed: {e.details()}",
@@ -227,12 +344,19 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
         )
 
     def RevealAuction(self, request: pb2.RevealAuctionRequest, context):
+        if not request.request_id.strip():
+            return pb2.RevealAuctionResponse(
+                ok=False,
+                message="request_id is required for idempotency.",
+            )
         mutation_retry_limit = self._mutation_retry_limit()
         current_attempt_version = request.expected_version
-        request_id = request.request_id or str(uuid4())
+        request_id = request.request_id
+        recovered_assignment = None
 
         for attempt in range(mutation_retry_limit):
-            assignment = self._get_primary_assignment()
+            assignment = recovered_assignment or self._get_primary_assignment()
+            recovered_assignment = None
             if not assignment:
                 time.sleep(min(0.01 * (attempt + 1), 0.05))
                 continue
@@ -275,6 +399,15 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                         message=response.message,
                     )
             except grpc.RpcError as e:
+                if self._is_failover_rpc_error(e):
+                    if attempt < mutation_retry_limit - 1:
+                        recovered_assignment = self._wait_for_ready_primary(context)
+                        if recovered_assignment is not None:
+                            continue
+                    return pb2.RevealAuctionResponse(
+                        ok=False,
+                        **self._unknown_outcome_fields(request_id),
+                    )
                 return pb2.RevealAuctionResponse(
                     ok=False,
                     message=f"Judge connection failed: {e.details()}",

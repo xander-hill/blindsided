@@ -118,6 +118,9 @@ message CreateAuctionResponse {
     bool ok = 1;
     string auction_id = 2;
     string message = 3;
+    bool retryable = 4;
+    bool outcome_unknown = 5;
+    string request_id = 6;
 }
 
 message GetAuctionRequest {
@@ -158,7 +161,14 @@ message RevealAuctionRequest {
     int32 expected_version = 3; 
     string request_id = 4;
 }
-message RevealAuctionResponse { bool ok = 1; int32 final_version = 2; string message = 3; }
+message RevealAuctionResponse {
+    bool ok = 1;
+    int32 final_version = 2;
+    string message = 3;
+    bool retryable = 4;
+    bool outcome_unknown = 5;
+    string request_id = 6;
+}
 
 message BidRequest {
     string auction_id = 1;
@@ -167,7 +177,13 @@ message BidRequest {
     int32 expected_version = 4;
     string request_id = 5;
 }
-message BidResponse { bool success = 1; string message = 2; }
+message BidResponse {
+    bool success = 1;
+    string message = 2;
+    bool retryable = 3;
+    bool outcome_unknown = 4;
+    string request_id = 5;
+}
 
 message WithdrawBidRequest {
     string auction_id = 1;
@@ -180,6 +196,9 @@ message WithdrawBidResponse {
     bool success = 1;
     int32 final_version = 2;
     string message = 3;
+    bool retryable = 4;
+    bool outcome_unknown = 5;
+    string request_id = 6;
 }
 
 message AuctionRequest { string auction_id = 1; string user_id = 2; }

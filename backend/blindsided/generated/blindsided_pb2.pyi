@@ -152,14 +152,20 @@ class CreateAuctionRequest(_message.Message):
     def __init__(self, seller_id: _Optional[str] = ..., title: _Optional[str] = ..., category: _Optional[str] = ..., description: _Optional[str] = ..., reserve_price: _Optional[float] = ..., ends_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., request_id: _Optional[str] = ...) -> None: ...
 
 class CreateAuctionResponse(_message.Message):
-    __slots__ = ("ok", "auction_id", "message")
+    __slots__ = ("ok", "auction_id", "message", "retryable", "outcome_unknown", "request_id")
     OK_FIELD_NUMBER: _ClassVar[int]
     AUCTION_ID_FIELD_NUMBER: _ClassVar[int]
     MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    RETRYABLE_FIELD_NUMBER: _ClassVar[int]
+    OUTCOME_UNKNOWN_FIELD_NUMBER: _ClassVar[int]
+    REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
     ok: bool
     auction_id: str
     message: str
-    def __init__(self, ok: bool = ..., auction_id: _Optional[str] = ..., message: _Optional[str] = ...) -> None: ...
+    retryable: bool
+    outcome_unknown: bool
+    request_id: str
+    def __init__(self, ok: bool = ..., auction_id: _Optional[str] = ..., message: _Optional[str] = ..., retryable: bool = ..., outcome_unknown: bool = ..., request_id: _Optional[str] = ...) -> None: ...
 
 class GetAuctionRequest(_message.Message):
     __slots__ = ("auction_id", "bidder_id")
@@ -236,14 +242,20 @@ class RevealAuctionRequest(_message.Message):
     def __init__(self, auction_id: _Optional[str] = ..., seller_id: _Optional[str] = ..., expected_version: _Optional[int] = ..., request_id: _Optional[str] = ...) -> None: ...
 
 class RevealAuctionResponse(_message.Message):
-    __slots__ = ("ok", "final_version", "message")
+    __slots__ = ("ok", "final_version", "message", "retryable", "outcome_unknown", "request_id")
     OK_FIELD_NUMBER: _ClassVar[int]
     FINAL_VERSION_FIELD_NUMBER: _ClassVar[int]
     MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    RETRYABLE_FIELD_NUMBER: _ClassVar[int]
+    OUTCOME_UNKNOWN_FIELD_NUMBER: _ClassVar[int]
+    REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
     ok: bool
     final_version: int
     message: str
-    def __init__(self, ok: bool = ..., final_version: _Optional[int] = ..., message: _Optional[str] = ...) -> None: ...
+    retryable: bool
+    outcome_unknown: bool
+    request_id: str
+    def __init__(self, ok: bool = ..., final_version: _Optional[int] = ..., message: _Optional[str] = ..., retryable: bool = ..., outcome_unknown: bool = ..., request_id: _Optional[str] = ...) -> None: ...
 
 class BidRequest(_message.Message):
     __slots__ = ("auction_id", "bidder_id", "amount", "expected_version", "request_id")
@@ -260,12 +272,18 @@ class BidRequest(_message.Message):
     def __init__(self, auction_id: _Optional[str] = ..., bidder_id: _Optional[str] = ..., amount: _Optional[float] = ..., expected_version: _Optional[int] = ..., request_id: _Optional[str] = ...) -> None: ...
 
 class BidResponse(_message.Message):
-    __slots__ = ("success", "message")
+    __slots__ = ("success", "message", "retryable", "outcome_unknown", "request_id")
     SUCCESS_FIELD_NUMBER: _ClassVar[int]
     MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    RETRYABLE_FIELD_NUMBER: _ClassVar[int]
+    OUTCOME_UNKNOWN_FIELD_NUMBER: _ClassVar[int]
+    REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
     success: bool
     message: str
-    def __init__(self, success: bool = ..., message: _Optional[str] = ...) -> None: ...
+    retryable: bool
+    outcome_unknown: bool
+    request_id: str
+    def __init__(self, success: bool = ..., message: _Optional[str] = ..., retryable: bool = ..., outcome_unknown: bool = ..., request_id: _Optional[str] = ...) -> None: ...
 
 class WithdrawBidRequest(_message.Message):
     __slots__ = ("auction_id", "bidder_id", "expected_version", "request_id")
@@ -280,14 +298,20 @@ class WithdrawBidRequest(_message.Message):
     def __init__(self, auction_id: _Optional[str] = ..., bidder_id: _Optional[str] = ..., expected_version: _Optional[int] = ..., request_id: _Optional[str] = ...) -> None: ...
 
 class WithdrawBidResponse(_message.Message):
-    __slots__ = ("success", "final_version", "message")
+    __slots__ = ("success", "final_version", "message", "retryable", "outcome_unknown", "request_id")
     SUCCESS_FIELD_NUMBER: _ClassVar[int]
     FINAL_VERSION_FIELD_NUMBER: _ClassVar[int]
     MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    RETRYABLE_FIELD_NUMBER: _ClassVar[int]
+    OUTCOME_UNKNOWN_FIELD_NUMBER: _ClassVar[int]
+    REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
     success: bool
     final_version: int
     message: str
-    def __init__(self, success: bool = ..., final_version: _Optional[int] = ..., message: _Optional[str] = ...) -> None: ...
+    retryable: bool
+    outcome_unknown: bool
+    request_id: str
+    def __init__(self, success: bool = ..., final_version: _Optional[int] = ..., message: _Optional[str] = ..., retryable: bool = ..., outcome_unknown: bool = ..., request_id: _Optional[str] = ...) -> None: ...
 
 class AuctionRequest(_message.Message):
     __slots__ = ("auction_id", "user_id")

@@ -1681,6 +1681,250 @@ class StorageServiceTests(BackendTestCase):
         self.assertEqual(judge.replica_role, "primary")
         self.assertFalse(judge.promotion_ready)
 
+    def test_promotion_discards_old_epoch_prepared_mutations(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = f"{temp_dir}/promotion-state.pb"
+            judge = make_judge(
+                role="backup",
+                state_file_path=state_path,
+            )
+            judge.current_epoch = 1
+            judge.prepared_mutations["interrupted-request"] = self._prepare_request(
+                request_id="interrupted-request",
+                epoch=1,
+            )
+
+            response = judge.BeginPrimaryPromotion(
+                pb2.BeginPrimaryPromotionRequest(epoch=2),
+                NoopContext(),
+            )
+            snapshot = pb2.StorageSnapshot()
+            with open(state_path, "rb") as state_file:
+                snapshot.ParseFromString(state_file.read())
+
+        self.assertTrue(response.accepted)
+        self.assertEqual(judge.prepared_mutations, {})
+        self.assertEqual(judge.aborted_mutations, {})
+        self.assertEqual(judge.idempotency_records, {})
+        self.assertEqual(list(snapshot.prepared_mutations), [])
+        self.assertEqual(list(snapshot.aborted_mutations), [])
+        self.assertEqual(list(snapshot.idempotency_records), [])
+
+    def test_failed_promotion_persistence_restores_prepared_mutations(self):
+        judge = make_judge(role="backup")
+        judge.current_epoch = 1
+        preparation = self._prepare_request(
+            request_id="interrupted-request",
+            epoch=1,
+        )
+        judge.prepared_mutations["interrupted-request"] = preparation
+
+        with mock.patch.object(
+            judge,
+            "_persist_state_to_disk",
+            side_effect=OSError("disk unavailable"),
+        ):
+            response = judge.BeginPrimaryPromotion(
+                pb2.BeginPrimaryPromotionRequest(epoch=2),
+                NoopContext(),
+            )
+
+        self.assertFalse(response.accepted)
+        self.assertEqual(judge.replica_role, "backup")
+        self.assertEqual(judge.current_epoch, 1)
+        self.assertFalse(judge.promotion_ready)
+        self.assertEqual(
+            judge.prepared_mutations["interrupted-request"],
+            preparation,
+        )
+
+    def test_retry_of_committed_request_returns_idempotent_result(self):
+        judge = make_judge(role="backup")
+        judge.current_epoch = 1
+        original = pb2.AuctionMutationRequest(
+            mutation_type=pb2.AUCTION_MUTATION_TYPE_PLACE_BID,
+            request_id="committed-bid",
+            bidder_id="buyer-a",
+            expected_version=1,
+            epoch=1,
+            auction=pb2.Auction(
+                auction_id="auction-1",
+                bids={"buyer-a": active_bid(250)},
+            ),
+        )
+        committed = pb2.Auction(
+            auction_id="auction-1",
+            version=2,
+            state=pb2.AUCTION_STATE_OPEN,
+            next_bid_sequence=2,
+            bids={"buyer-a": active_bid(250, 1)},
+        )
+        stored_response = pb2.AuctionMutationResponse(
+            success=True,
+            current_version=2,
+            auction_id="auction-1",
+            message="Vault updated.",
+        )
+        judge.auction_store["auction-1"] = committed
+        judge.idempotency_records["committed-bid"] = pb2.IdempotencyRecord(
+            request_id="committed-bid",
+            request_fingerprint=judge._request_fingerprint(
+                original,
+                pb2.AUCTION_MUTATION_TYPE_PLACE_BID,
+            ),
+            response=stored_response,
+        )
+        judge.BeginPrimaryPromotion(
+            pb2.BeginPrimaryPromotionRequest(epoch=2), NoopContext()
+        )
+        judge.promotion_ready = True
+        retry = pb2.AuctionMutationRequest()
+        retry.CopyFrom(original)
+        retry.epoch = 2
+
+        with mock.patch.object(judge, "_coordinate_synchronous_commit") as replicate:
+            response = judge.ApplyAuctionMutation(retry, NoopContext())
+
+        self.assertTrue(response.success)
+        self.assertTrue(response.replayed)
+        self.assertEqual(response.current_version, stored_response.current_version)
+        self.assertEqual(judge.auction_store["auction-1"], committed)
+        self.assertEqual(judge.auction_store["auction-1"].next_bid_sequence, 2)
+        replicate.assert_not_called()
+
+    def test_retry_of_uncommitted_request_is_applied_normally(self):
+        judge = make_judge(role="backup")
+        judge.current_epoch = 1
+        judge.auction_store["auction-1"] = pb2.Auction(
+            auction_id="auction-1",
+            version=1,
+            state=pb2.AUCTION_STATE_OPEN,
+            next_bid_sequence=1,
+        )
+        request = pb2.AuctionMutationRequest(
+            mutation_type=pb2.AUCTION_MUTATION_TYPE_PLACE_BID,
+            request_id="interrupted-bid",
+            bidder_id="buyer-a",
+            expected_version=1,
+            epoch=2,
+            auction=pb2.Auction(
+                auction_id="auction-1",
+                bids={"buyer-a": active_bid(250)},
+            ),
+        )
+        judge.prepared_mutations["interrupted-bid"] = self._prepare_request(
+            request_id="interrupted-bid",
+            version=2,
+            epoch=1,
+        )
+        judge.BeginPrimaryPromotion(
+            pb2.BeginPrimaryPromotionRequest(epoch=2), NoopContext()
+        )
+        judge.promotion_ready = True
+
+        response = judge.ApplyAuctionMutation(request, NoopContext())
+
+        self.assertTrue(response.success)
+        self.assertEqual(judge.auction_store["auction-1"].version, 2)
+        self.assertEqual(judge.auction_store["auction-1"].next_bid_sequence, 2)
+        self.assertIn("interrupted-bid", judge.idempotency_records)
+
+    def test_uncommitted_retry_revalidates_domain_rules(self):
+        judge = make_judge(role="backup")
+        judge.current_epoch = 1
+        judge.auction_store["auction-1"] = pb2.Auction(
+            auction_id="auction-1",
+            version=2,
+            state=pb2.AUCTION_STATE_REVEALED,
+        )
+        judge.prepared_mutations["interrupted-bid"] = self._prepare_request(
+            request_id="interrupted-bid",
+            version=2,
+            epoch=1,
+        )
+        judge.BeginPrimaryPromotion(
+            pb2.BeginPrimaryPromotionRequest(epoch=2), NoopContext()
+        )
+        judge.promotion_ready = True
+
+        response = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
+                mutation_type=pb2.AUCTION_MUTATION_TYPE_PLACE_BID,
+                request_id="interrupted-bid",
+                bidder_id="buyer-a",
+                expected_version=2,
+                epoch=2,
+                auction=pb2.Auction(
+                    auction_id="auction-1",
+                    bids={"buyer-a": active_bid(250)},
+                ),
+            ),
+            NoopContext(),
+        )
+
+        self.assertFalse(response.success)
+        self.assertEqual(judge.auction_store["auction-1"].version, 2)
+        self.assertNotIn("interrupted-bid", judge.idempotency_records)
+
+    def test_retried_request_id_with_different_contents_is_rejected(self):
+        judge = make_judge(role="backup")
+        judge.current_epoch = 1
+        original = pb2.AuctionMutationRequest(
+            mutation_type=pb2.AUCTION_MUTATION_TYPE_PLACE_BID,
+            request_id="committed-bid",
+            bidder_id="buyer-a",
+            expected_version=1,
+            epoch=1,
+            auction=pb2.Auction(
+                auction_id="auction-1",
+                bids={"buyer-a": active_bid(250)},
+            ),
+        )
+        judge.auction_store["auction-1"] = pb2.Auction(
+            auction_id="auction-1",
+            version=2,
+            state=pb2.AUCTION_STATE_OPEN,
+            bids={"buyer-a": active_bid(250, 1)},
+        )
+        judge.idempotency_records["committed-bid"] = pb2.IdempotencyRecord(
+            request_id="committed-bid",
+            request_fingerprint=judge._request_fingerprint(
+                original,
+                pb2.AUCTION_MUTATION_TYPE_PLACE_BID,
+            ),
+            response=pb2.AuctionMutationResponse(
+                success=True,
+                current_version=2,
+                auction_id="auction-1",
+            ),
+        )
+        judge.BeginPrimaryPromotion(
+            pb2.BeginPrimaryPromotionRequest(epoch=2), NoopContext()
+        )
+        judge.promotion_ready = True
+
+        response = judge.ApplyAuctionMutation(
+            pb2.AuctionMutationRequest(
+                mutation_type=pb2.AUCTION_MUTATION_TYPE_PLACE_BID,
+                request_id="committed-bid",
+                bidder_id="buyer-a",
+                expected_version=1,
+                epoch=2,
+                auction=pb2.Auction(
+                    auction_id="auction-1",
+                    bids={"buyer-a": active_bid(300)},
+                ),
+            ),
+            NoopContext(),
+        )
+
+        self.assertFalse(response.success)
+        self.assertEqual(
+            response.failure_reason,
+            pb2.MUTATION_FAILURE_REASON_IDEMPOTENCY_CONFLICT,
+        )
+        self.assertEqual(judge.auction_store["auction-1"].version, 2)
+
     def test_primary_promotion_candidate_remains_write_blocked(self):
         judge = make_judge(role="backup")
         begun = judge.BeginPrimaryPromotion(

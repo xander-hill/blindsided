@@ -564,14 +564,44 @@ and `backend/tests/layers/test_storage_service.py`.
 
 Required behavior:
 
-- Interrupted mutations MAY be retried only after the new primary is
+- ✅ Interrupted mutations MAY be retried only after the new primary is
   fully ready.
-- Retries of interrupted mutations MUST preserve the original request
+- ✅ Retries of interrupted mutations MUST preserve the original request
   identifier.
-- Retried mutations MUST revalidate all domain rules under the new
+- ✅ Retried mutations MUST revalidate all domain rules under the new
   primary.
-- A mutation whose result is unknown MUST be resolved through
+- ✅ A mutation whose result is unknown MUST be resolved through
   idempotency before it is retried.
+
+#### Test Coverage
+
+Auction-service coverage is parameterized across creation, bid placement,
+withdrawal, and reveal. It verifies that `UNAVAILABLE` and
+`DEADLINE_EXCEEDED` interruptions wait through the no-ready-primary promotion
+window, send no mutation during that window, and retry only after the
+controller publishes a ready primary. Retries preserve the request identifier,
+logical mutation contents, optimistic-concurrency version, and creation auction
+identifier while changing from the old assignment epoch to the new one.
+Non-transient errors are not retried. Missing request identifiers are rejected
+before controller or storage access, and unresolved interruptions return an
+explicit retryable, unknown-outcome response instructing the client to reuse
+the same request identifier.
+
+Storage coverage verifies that promotion durably discards old-epoch
+preparations without manufacturing abort tombstones or idempotency records and
+restores the prior role, epoch, readiness, and preparations if persistence
+fails. After promotion, committed requests replay their original response
+without reapplication, uncommitted requests are applied normally exactly once,
+all domain rules are revalidated against current authoritative state, and
+changed-content reuse of a committed request identifier is rejected.
+
+Distributed coverage verifies response loss after a two-replica commit replays
+the original result exactly once after failover, and primary failure after
+backup preparation permits safe reapplication only after promotion readiness
+and establishment of a new synchronous backup. These cases are exercised by
+`backend/tests/layers/test_auction_service.py`,
+`backend/tests/layers/test_storage_service.py`, and
+`backend/tests/distributed/test_failover_in_flight_requests.py`.
 
 ### Overdue Auctions
 

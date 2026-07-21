@@ -57,7 +57,7 @@ class TestableAuctionService(AuctionService):
         self.primary_epoch = primary_epoch
         self.storage_addresses: list[str] = []
 
-    def _get_primary_assignment(self):
+    def _get_primary_assignment(self, timeout_seconds=2.0):
         if not self.primary_address:
             return None
         return PrimaryAssignment(self.primary_address, self.primary_epoch)
@@ -70,9 +70,46 @@ class TestableAuctionService(AuctionService):
         return self.stub, ChannelContext()
 
 
+class FailoverRoutingAuctionService(AuctionService):
+    def __init__(self, assignments, stubs):
+        self.assignments = list(assignments)
+        self.stubs = stubs
+        self.events = []
+
+    def _get_primary_assignment(self, timeout_seconds=2.0):
+        assignment = self.assignments.pop(0)
+        self.events.append(
+            f"controller:{assignment.address}" if assignment else "controller:none"
+        )
+        return assignment
+
+    def _create_storage_stub(self, address):
+        self.events.append(f"mutation:{address}")
+        return self.stubs[address], ChannelContext()
+
+    def _failover_recovery_window(self):
+        return 5
+
+
 class FakeRpcError(grpc.RpcError):
     def details(self):
         return "temporary transport failure"
+
+    def code(self):
+        return grpc.StatusCode.UNKNOWN
+
+
+class StatusRpcError(FakeRpcError):
+    def __init__(self, status_code):
+        self.status_code = status_code
+
+    def code(self):
+        return self.status_code
+
+
+class ExpiredContext(NoopContext):
+    def time_remaining(self):
+        return 0
 
 
 class AuctionServiceTests(BackendTestCase):
@@ -88,6 +125,208 @@ class AuctionServiceTests(BackendTestCase):
         self.assertNotIn("hidden-bidder", rendered)
         self.assertNotIn("12345.5", rendered)
         self.assertNotIn("67890", rendered)
+
+    def _run_interrupted_mutation(self, operation, status_code):
+        primary_a = FakeJudgeStub()
+        primary_a.mutation_errors.append(StatusRpcError(status_code))
+        primary_b = FakeJudgeStub()
+        primary_b.mutation_responses.append(
+            pb2.AuctionMutationResponse(
+                success=True,
+                current_version=7,
+                auction_id="generated-auction-id",
+            )
+        )
+        service = FailoverRoutingAuctionService(
+            assignments=[
+                PrimaryAssignment("primary-a:50051", 4),
+                None,
+                PrimaryAssignment("primary-b:50051", 5),
+            ],
+            stubs={
+                "primary-a:50051": primary_a,
+                "primary-b:50051": primary_b,
+            },
+        )
+        requests = {
+            "create": pb2.CreateAuctionRequest(
+                seller_id="seller-a",
+                title="Interrupted creation",
+                reserve_price=100,
+                request_id="interrupted-create",
+            ),
+            "bid": pb2.BidRequest(
+                auction_id="auction-1",
+                bidder_id="buyer-a",
+                amount=250,
+                expected_version=6,
+                request_id="interrupted-bid",
+            ),
+            "withdrawal": pb2.WithdrawBidRequest(
+                auction_id="auction-1",
+                bidder_id="buyer-a",
+                expected_version=6,
+                request_id="interrupted-withdrawal",
+            ),
+            "reveal": pb2.RevealAuctionRequest(
+                auction_id="auction-1",
+                seller_id="seller-a",
+                expected_version=6,
+                request_id="interrupted-reveal",
+            ),
+        }
+        methods = {
+            "create": service.CreateAuction,
+            "bid": service.PlaceBid,
+            "withdrawal": service.WithdrawBid,
+            "reveal": service.RevealAuction,
+        }
+        with (
+            mock.patch(
+                "blindsided.auction_service.service.uuid4",
+                return_value="generated-auction-id",
+            ),
+            mock.patch(
+                "blindsided.auction_service.service.random.uniform",
+                return_value=0.25,
+            ),
+            mock.patch("blindsided.auction_service.service.time.sleep"),
+        ):
+            response = methods[operation](requests[operation], NoopContext())
+        return response, primary_a.mutations[0], primary_b.mutations[0], service.events
+
+    def test_interrupted_mutation_waits_for_ready_primary(self):
+        for operation in ("create", "bid", "withdrawal", "reveal"):
+            with self.subTest(operation=operation):
+                response, _, _, events = self._run_interrupted_mutation(
+                    operation,
+                    grpc.StatusCode.UNAVAILABLE,
+                )
+                self.assertEqual(
+                    events,
+                    [
+                        "controller:primary-a:50051",
+                        "mutation:primary-a:50051",
+                        "controller:none",
+                        "controller:primary-b:50051",
+                        "mutation:primary-b:50051",
+                    ],
+                )
+                self.assertTrue(response.ok if operation in ("create", "reveal") else response.success)
+
+    def test_interrupted_mutation_preserves_request_identity(self):
+        for operation in ("create", "bid", "withdrawal", "reveal"):
+            with self.subTest(operation=operation):
+                _, first, second, _ = self._run_interrupted_mutation(
+                    operation,
+                    grpc.StatusCode.UNAVAILABLE,
+                )
+                self.assertEqual(first.request_id, second.request_id)
+                self.assertEqual(first.epoch, 4)
+                self.assertEqual(second.epoch, 5)
+                first_logical = pb2.AuctionMutationRequest()
+                first_logical.CopyFrom(first)
+                second_logical = pb2.AuctionMutationRequest()
+                second_logical.CopyFrom(second)
+                first_logical.epoch = 0
+                second_logical.epoch = 0
+                self.assertEqual(first_logical, second_logical)
+                if operation == "create":
+                    self.assertEqual(first.auction.auction_id, "generated-auction-id")
+                    self.assertEqual(second.auction.auction_id, "generated-auction-id")
+
+    def test_deadline_exceeded_mutation_is_retried(self):
+        for operation in ("create", "bid", "withdrawal", "reveal"):
+            with self.subTest(operation=operation):
+                response, first, second, _ = self._run_interrupted_mutation(
+                    operation,
+                    grpc.StatusCode.DEADLINE_EXCEEDED,
+                )
+                self.assertEqual(first.request_id, second.request_id)
+                self.assertTrue(response.ok if operation in ("create", "reveal") else response.success)
+
+    def test_non_transient_rpc_error_is_not_retried(self):
+        for operation in ("create", "bid", "withdrawal", "reveal"):
+            with self.subTest(operation=operation):
+                stub = FakeJudgeStub()
+                stub.mutation_errors.append(
+                    StatusRpcError(grpc.StatusCode.INVALID_ARGUMENT)
+                )
+                service = TestableAuctionService(stub)
+                requests = {
+                    "create": pb2.CreateAuctionRequest(request_id="invalid-create"),
+                    "bid": pb2.BidRequest(request_id="invalid-bid"),
+                    "withdrawal": pb2.WithdrawBidRequest(request_id="invalid-withdrawal"),
+                    "reveal": pb2.RevealAuctionRequest(request_id="invalid-reveal"),
+                }
+                methods = {
+                    "create": service.CreateAuction,
+                    "bid": service.PlaceBid,
+                    "withdrawal": service.WithdrawBid,
+                    "reveal": service.RevealAuction,
+                }
+                with mock.patch.object(service, "_wait_for_ready_primary") as wait:
+                    methods[operation](requests[operation], NoopContext())
+                self.assertEqual(len(stub.mutations), 1)
+                wait.assert_not_called()
+
+    def test_unresolved_mutation_returns_unknown_outcome(self):
+        for operation in ("create", "bid", "withdrawal", "reveal"):
+            with self.subTest(operation=operation):
+                stub = FakeJudgeStub()
+                stub.mutation_errors.append(
+                    StatusRpcError(grpc.StatusCode.UNAVAILABLE)
+                )
+                service = TestableAuctionService(stub)
+                requests = {
+                    "create": pb2.CreateAuctionRequest(request_id="unknown-create"),
+                    "bid": pb2.BidRequest(request_id="unknown-bid"),
+                    "withdrawal": pb2.WithdrawBidRequest(request_id="unknown-withdrawal"),
+                    "reveal": pb2.RevealAuctionRequest(request_id="unknown-reveal"),
+                }
+                methods = {
+                    "create": service.CreateAuction,
+                    "bid": service.PlaceBid,
+                    "withdrawal": service.WithdrawBid,
+                    "reveal": service.RevealAuction,
+                }
+                with mock.patch.object(
+                    service,
+                    "_wait_for_ready_primary",
+                    return_value=None,
+                ):
+                    response = methods[operation](requests[operation], NoopContext())
+                self.assertTrue(response.retryable)
+                self.assertTrue(response.outcome_unknown)
+                self.assertEqual(response.request_id, requests[operation].request_id)
+                self.assertIn("UNAVAILABLE", response.message)
+                self.assertIn("same request_id", response.message)
+
+    def test_mutation_requires_request_id(self):
+        for operation in ("create", "bid", "withdrawal", "reveal"):
+            for request_id in ("", "   "):
+                with self.subTest(operation=operation, request_id=request_id):
+                    service = TestableAuctionService(FakeJudgeStub())
+                    requests = {
+                        "create": pb2.CreateAuctionRequest(request_id=request_id),
+                        "bid": pb2.BidRequest(request_id=request_id),
+                        "withdrawal": pb2.WithdrawBidRequest(request_id=request_id),
+                        "reveal": pb2.RevealAuctionRequest(request_id=request_id),
+                    }
+                    methods = {
+                        "create": service.CreateAuction,
+                        "bid": service.PlaceBid,
+                        "withdrawal": service.WithdrawBid,
+                        "reveal": service.RevealAuction,
+                    }
+                    with mock.patch.object(
+                        service,
+                        "_get_primary_assignment",
+                    ) as controller:
+                        response = methods[operation](requests[operation], NoopContext())
+                    controller.assert_not_called()
+                    self.assertEqual(service.storage_addresses, [])
+                    self.assertIn("request_id is required", response.message)
 
     def test_open_auction_mutations_to_primary_vault(self):
         stub = FakeJudgeStub()
@@ -105,6 +344,7 @@ class AuctionServiceTests(BackendTestCase):
                     description="A clean example",
                     reserve_price=100.0,
                     ends_at=future_timestamp(),
+                    request_id="open-auction-request",
                 ),
                 NoopContext(),
             )
@@ -137,6 +377,7 @@ class AuctionServiceTests(BackendTestCase):
                 title="First",
                 reserve_price=100.0,
                 ends_at=future_timestamp(),
+                request_id="first-create-request",
             ),
             NoopContext(),
         )
@@ -146,6 +387,7 @@ class AuctionServiceTests(BackendTestCase):
                 title="Second",
                 reserve_price=100.0,
                 ends_at=future_timestamp(),
+                request_id="second-create-request",
             ),
             NoopContext(),
         )
@@ -555,6 +797,7 @@ class AuctionServiceTests(BackendTestCase):
                 bidder_id="buyer-a",
                 amount=250.0,
                 expected_version=6,
+                request_id="bid-version-retry",
             ),
             NoopContext(),
         )
@@ -597,6 +840,7 @@ class AuctionServiceTests(BackendTestCase):
                 auction_id="auction-1",
                 bidder_id="buyer-a",
                 expected_version=7,
+                request_id="withdraw-version-retry",
             ),
             NoopContext(),
         )
@@ -625,7 +869,10 @@ class AuctionServiceTests(BackendTestCase):
         service = TestableAuctionService(stub)
 
         response = service.RevealAuction(
-            pb2.RevealAuctionRequest(auction_id="auction-1"),
+            pb2.RevealAuctionRequest(
+                auction_id="auction-1",
+                request_id="reveal-request",
+            ),
             NoopContext(),
         )
 
@@ -659,6 +906,7 @@ class AuctionServiceTests(BackendTestCase):
             pb2.RevealAuctionRequest(
                 auction_id="auction-1",
                 expected_version=2,
+                request_id="reveal-version-retry",
             ),
             NoopContext(),
         )
@@ -677,19 +925,393 @@ class AuctionServiceTests(BackendTestCase):
         stub.mutation_errors.append(FakeRpcError())
         service = TestableAuctionService(stub)
 
-        response = service.PlaceBid(
-            pb2.BidRequest(
-                auction_id="auction-1",
-                bidder_id="buyer-a",
-                amount=250.0,
-                expected_version=6,
-            ),
-            NoopContext(),
-        )
+        with mock.patch.object(service, "_wait_for_ready_primary") as recovery:
+            response = service.PlaceBid(
+                pb2.BidRequest(
+                    auction_id="auction-1",
+                    bidder_id="buyer-a",
+                    amount=250.0,
+                    expected_version=6,
+                    request_id="non-transient-bid",
+                ),
+                NoopContext(),
+            )
 
         self.assertFalse(response.success)
         self.assertIn("Judge connection failed", response.message)
         self.assertEqual(len(stub.mutations), 1)
+        recovery.assert_not_called()
+
+    def test_wait_for_ready_primary_polls_with_failover_backoff(self):
+        service = TestableAuctionService(FakeJudgeStub())
+        ready = PrimaryAssignment("new-primary:50051", 8)
+
+        with (
+            mock.patch.object(
+                service,
+                "_get_primary_assignment",
+                side_effect=[None, ready],
+            ) as get_primary,
+            mock.patch.object(service, "_failover_recovery_window", return_value=5),
+            mock.patch(
+                "blindsided.auction_service.service.random.uniform",
+                return_value=0.375,
+            ) as jitter,
+            mock.patch("blindsided.auction_service.service.time.sleep") as sleep,
+        ):
+            assignment = service._wait_for_ready_primary(NoopContext())
+
+        self.assertEqual(assignment, ready)
+        self.assertEqual(get_primary.call_count, 2)
+        jitter.assert_called_once_with(0.25, 0.5)
+        sleep.assert_called_once_with(0.375)
+
+    def test_wait_for_ready_primary_stops_for_cancelled_or_expired_client(self):
+        service = TestableAuctionService(FakeJudgeStub())
+        cancelled = mock.Mock()
+        cancelled.is_active.return_value = False
+
+        with mock.patch.object(service, "_get_primary_assignment") as get_primary:
+            self.assertIsNone(service._wait_for_ready_primary(cancelled))
+            self.assertIsNone(service._wait_for_ready_primary(ExpiredContext()))
+
+        get_primary.assert_not_called()
+
+    def test_wait_for_ready_primary_stops_at_bounded_recovery_window(self):
+        service = TestableAuctionService(FakeJudgeStub())
+
+        with (
+            mock.patch.object(service, "_get_primary_assignment", return_value=None) as get_primary,
+            mock.patch.object(service, "_failover_recovery_window", return_value=0.1),
+            mock.patch(
+                "blindsided.auction_service.service.time.monotonic",
+                side_effect=[0.0, 0.0, 0.1],
+            ),
+            mock.patch(
+                "blindsided.auction_service.service.random.uniform",
+                return_value=0.5,
+            ),
+            mock.patch("blindsided.auction_service.service.time.sleep") as sleep,
+        ):
+            assignment = service._wait_for_ready_primary(NoopContext())
+
+        self.assertIsNone(assignment)
+        get_primary.assert_called_once_with(timeout_seconds=0.1)
+        sleep.assert_called_once_with(0.1)
+
+    def test_bid_recovers_from_ambiguous_failover_rpc_statuses(self):
+        for status_code in (
+            grpc.StatusCode.UNAVAILABLE,
+            grpc.StatusCode.DEADLINE_EXCEEDED,
+        ):
+            with self.subTest(status_code=status_code):
+                stub = FakeJudgeStub()
+                stub.mutation_errors.append(StatusRpcError(status_code))
+                stub.mutation_responses.append(
+                    pb2.AuctionMutationResponse(success=True, current_version=7)
+                )
+                service = TestableAuctionService(
+                    stub,
+                    primary_address="old-primary:50051",
+                    primary_epoch=7,
+                )
+
+                with mock.patch.object(
+                    service,
+                    "_wait_for_ready_primary",
+                    return_value=PrimaryAssignment("new-primary:50051", 8),
+                ) as recovery:
+                    response = service.PlaceBid(
+                        pb2.BidRequest(
+                            auction_id="auction-1",
+                            bidder_id="buyer-a",
+                            amount=250.0,
+                            expected_version=6,
+                            request_id="stable-bid-request",
+                        ),
+                        NoopContext(),
+                    )
+
+                self.assertTrue(response.success)
+                recovery.assert_called_once()
+                self.assertEqual(
+                    service.storage_addresses,
+                    ["old-primary:50051", "new-primary:50051"],
+                )
+                self.assertEqual(len(stub.mutations), 2)
+                self.assertEqual(stub.mutations[0].request_id, "stable-bid-request")
+                self.assertEqual(stub.mutations[1].request_id, "stable-bid-request")
+                self.assertEqual(stub.mutations[0].expected_version, 6)
+                self.assertEqual(stub.mutations[1].expected_version, 6)
+                self.assertEqual(stub.mutations[0].epoch, 7)
+                self.assertEqual(stub.mutations[1].epoch, 8)
+
+    def test_place_bid_waits_through_no_ready_primary_before_failover_retry(self):
+        for status_code in (
+            grpc.StatusCode.UNAVAILABLE,
+            grpc.StatusCode.DEADLINE_EXCEEDED,
+        ):
+            with self.subTest(status_code=status_code):
+                primary_a = FakeJudgeStub()
+                primary_a.mutation_errors.append(StatusRpcError(status_code))
+                primary_b = FakeJudgeStub()
+                primary_b.mutation_responses.append(
+                    pb2.AuctionMutationResponse(success=True, current_version=12)
+                )
+                service = FailoverRoutingAuctionService(
+                    assignments=[
+                        PrimaryAssignment("primary-a:50051", 4),
+                        None,
+                        PrimaryAssignment("primary-b:50051", 5),
+                    ],
+                    stubs={
+                        "primary-a:50051": primary_a,
+                        "primary-b:50051": primary_b,
+                    },
+                )
+
+                with (
+                    mock.patch(
+                        "blindsided.auction_service.service.random.uniform",
+                        return_value=0.25,
+                    ),
+                    mock.patch("blindsided.auction_service.service.time.sleep"),
+                ):
+                    response = service.PlaceBid(
+                        pb2.BidRequest(
+                            auction_id="auction-1",
+                            bidder_id="buyer-a",
+                            amount=275.0,
+                            expected_version=11,
+                            request_id="stable-place-bid-id",
+                        ),
+                        NoopContext(),
+                    )
+
+                self.assertTrue(response.success)
+                self.assertEqual(
+                    service.events,
+                    [
+                        "controller:primary-a:50051",
+                        "mutation:primary-a:50051",
+                        "controller:none",
+                        "controller:primary-b:50051",
+                        "mutation:primary-b:50051",
+                    ],
+                )
+                self.assertEqual(len(primary_a.mutations), 1)
+                self.assertEqual(len(primary_b.mutations), 1)
+                first = primary_a.mutations[0]
+                second = primary_b.mutations[0]
+                self.assertEqual(first.request_id, "stable-place-bid-id")
+                self.assertEqual(second.request_id, first.request_id)
+                self.assertEqual(first.auction.auction_id, "auction-1")
+                self.assertEqual(second.auction.auction_id, first.auction.auction_id)
+                self.assertEqual(first.bidder_id, "buyer-a")
+                self.assertEqual(second.bidder_id, first.bidder_id)
+                self.assertEqual(first.auction.bids["buyer-a"].amount, 275.0)
+                self.assertEqual(
+                    second.auction.bids["buyer-a"].amount,
+                    first.auction.bids["buyer-a"].amount,
+                )
+                self.assertEqual(first.epoch, 4)
+                self.assertEqual(second.epoch, 5)
+                self.assertEqual(first.expected_version, 11)
+                self.assertEqual(second.expected_version, 11)
+                self.assertEqual(first.auction.version, 11)
+                self.assertEqual(second.auction.version, 11)
+
+    def test_create_recovers_from_ambiguous_rpc_failure(self):
+        stub = FakeJudgeStub()
+        stub.mutation_errors.append(StatusRpcError(grpc.StatusCode.UNAVAILABLE))
+        stub.mutation_responses.append(
+            pb2.AuctionMutationResponse(
+                success=True,
+                current_version=1,
+                auction_id="generated-auction-id",
+            )
+        )
+        service = TestableAuctionService(stub, primary_epoch=7)
+
+        with (
+            mock.patch(
+                "blindsided.auction_service.service.uuid4",
+                return_value="generated-auction-id",
+            ),
+            mock.patch.object(
+                service,
+                "_wait_for_ready_primary",
+                return_value=PrimaryAssignment("new-primary:50051", 8),
+            ),
+        ):
+            response = service.CreateAuction(
+                pb2.CreateAuctionRequest(
+                    seller_id="seller-a",
+                    title="Recovered creation",
+                    reserve_price=100,
+                    ends_at=future_timestamp(),
+                    request_id="stable-request-id",
+                ),
+                NoopContext(),
+            )
+
+        self.assertTrue(response.ok)
+        self.assertEqual(len(stub.mutations), 2)
+        self.assertEqual(stub.mutations[0].request_id, "stable-request-id")
+        self.assertEqual(stub.mutations[1].request_id, "stable-request-id")
+        self.assertEqual(stub.mutations[0].auction, stub.mutations[1].auction)
+        self.assertEqual(stub.mutations[0].auction.auction_id, "generated-auction-id")
+        self.assertEqual(stub.mutations[0].epoch, 7)
+        self.assertEqual(stub.mutations[1].epoch, 8)
+
+    def test_withdrawal_recovers_from_ambiguous_rpc_failure(self):
+        stub = FakeJudgeStub()
+        stub.mutation_errors.append(
+            StatusRpcError(grpc.StatusCode.DEADLINE_EXCEEDED)
+        )
+        stub.mutation_responses.append(
+            pb2.AuctionMutationResponse(success=True, current_version=7)
+        )
+        service = TestableAuctionService(stub, primary_epoch=7)
+
+        with mock.patch.object(
+            service,
+            "_wait_for_ready_primary",
+            return_value=PrimaryAssignment("new-primary:50051", 8),
+        ):
+            response = service.WithdrawBid(
+                pb2.WithdrawBidRequest(
+                    auction_id="auction-1",
+                    bidder_id="buyer-a",
+                    expected_version=6,
+                    request_id="stable-withdrawal-id",
+                ),
+                NoopContext(),
+            )
+
+        self.assertTrue(response.success)
+        self.assertEqual(len(stub.mutations), 2)
+        self.assertEqual(stub.mutations[0].request_id, "stable-withdrawal-id")
+        self.assertEqual(stub.mutations[1].request_id, "stable-withdrawal-id")
+        self.assertEqual(stub.mutations[0].expected_version, 6)
+        self.assertEqual(stub.mutations[1].expected_version, 6)
+        self.assertEqual(stub.mutations[0].epoch, 7)
+        self.assertEqual(stub.mutations[1].epoch, 8)
+
+    def test_reveal_recovers_from_ambiguous_rpc_failure(self):
+        stub = FakeJudgeStub()
+        stub.mutation_errors.append(StatusRpcError(grpc.StatusCode.UNAVAILABLE))
+        stub.mutation_responses.append(
+            pb2.AuctionMutationResponse(success=True, current_version=7)
+        )
+        service = TestableAuctionService(stub, primary_epoch=7)
+
+        with mock.patch.object(
+            service,
+            "_wait_for_ready_primary",
+            return_value=PrimaryAssignment("new-primary:50051", 8),
+        ):
+            response = service.RevealAuction(
+                pb2.RevealAuctionRequest(
+                    auction_id="auction-1",
+                    seller_id="seller-a",
+                    expected_version=6,
+                    request_id="stable-reveal-id",
+                ),
+                NoopContext(),
+            )
+
+        self.assertTrue(response.ok)
+        self.assertEqual(len(stub.mutations), 2)
+        self.assertEqual(stub.mutations[0].request_id, "stable-reveal-id")
+        self.assertEqual(stub.mutations[1].request_id, "stable-reveal-id")
+        self.assertEqual(stub.mutations[0].auction, stub.mutations[1].auction)
+        self.assertEqual(stub.mutations[0].expected_version, 6)
+        self.assertEqual(stub.mutations[1].expected_version, 6)
+        self.assertEqual(stub.mutations[0].epoch, 7)
+        self.assertEqual(stub.mutations[1].epoch, 8)
+
+    def test_mutations_return_retryable_unknown_outcome_when_recovery_expires(self):
+        cases = (
+            (
+                "create",
+                lambda service: service.CreateAuction(
+                    pb2.CreateAuctionRequest(
+                        seller_id="seller-a",
+                        title="Unknown creation",
+                        reserve_price=100,
+                        request_id="unknown-create",
+                    ),
+                    NoopContext(),
+                ),
+                "unknown-create",
+            ),
+            (
+                "bid",
+                lambda service: service.PlaceBid(
+                    pb2.BidRequest(
+                        auction_id="auction-1",
+                        bidder_id="buyer-a",
+                        amount=250,
+                        expected_version=4,
+                        request_id="unknown-bid",
+                    ),
+                    NoopContext(),
+                ),
+                "unknown-bid",
+            ),
+            (
+                "withdrawal",
+                lambda service: service.WithdrawBid(
+                    pb2.WithdrawBidRequest(
+                        auction_id="auction-1",
+                        bidder_id="buyer-a",
+                        expected_version=4,
+                        request_id="unknown-withdrawal",
+                    ),
+                    NoopContext(),
+                ),
+                "unknown-withdrawal",
+            ),
+            (
+                "reveal",
+                lambda service: service.RevealAuction(
+                    pb2.RevealAuctionRequest(
+                        auction_id="auction-1",
+                        seller_id="seller-a",
+                        expected_version=4,
+                        request_id="unknown-reveal",
+                    ),
+                    NoopContext(),
+                ),
+                "unknown-reveal",
+            ),
+        )
+
+        for operation, invoke, request_id in cases:
+            with self.subTest(operation=operation):
+                stub = FakeJudgeStub()
+                stub.mutation_errors.append(
+                    StatusRpcError(grpc.StatusCode.UNAVAILABLE)
+                )
+                service = TestableAuctionService(stub)
+                with mock.patch.object(
+                    service,
+                    "_wait_for_ready_primary",
+                    return_value=None,
+                ) as recovery:
+                    response = invoke(service)
+
+                recovery.assert_called_once()
+                self.assertTrue(response.retryable)
+                self.assertTrue(response.outcome_unknown)
+                self.assertEqual(response.request_id, request_id)
+                self.assertIn("same request_id", response.message)
+                self.assertEqual(len(stub.mutations), 1)
+                if operation in ("create", "reveal"):
+                    self.assertFalse(response.ok)
+                else:
+                    self.assertFalse(response.success)
 
     def test_opaque_update_uses_public_auction_update_fields(self):
         service = TestableAuctionService(FakeJudgeStub())
