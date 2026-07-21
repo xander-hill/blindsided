@@ -8,19 +8,42 @@ import grpc
 from blindsided.common.config import CONTROLLER_ADDRESS, NODE_PORT
 from blindsided.generated import blindsided_pb2 as pb2
 from blindsided.generated import blindsided_pb2_grpc as pb2_grpc
+from blindsided.storage.auction_domain import AuctionDomain
+from blindsided.storage.replication_client import SynchronousReplicationClient
+from blindsided.storage.snapshot_repository import StorageSnapshotRepository
+from blindsided.storage.synchronization_client import ReplicaSynchronizationClient
 
 
 class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
-    """Replicated storage layer that owns auction state and version checks."""
+    """Own replica state and orchestrate storage, replication, and failover RPCs."""
+
+    # These collaborators are stateless, so lightweight service instances that
+    # bypass normal startup can safely use the shared defaults.
+    auction_domain = AuctionDomain()
+    synchronization_client = ReplicaSynchronizationClient()
+    replication_client = SynchronousReplicationClient()
 
     def __init__(self) -> None:
+        # All mutable protocol state remains owned by the service and guarded by
+        # the same condition for the lifetime of the replica.
         self.state_lock = threading.Condition()
         self.auction_store: dict[str, pb2.Auction] = {}
+        self.idempotency_records: dict[str, pb2.IdempotencyRecord] = {}
+        self.prepared_mutations: dict[str, pb2.PrepareMutationRequest] = {}
+        self.aborted_mutations: dict[str, pb2.MutationDecisionRequest] = {}
+        self.pending_backup_commits: dict[str, pb2.CommitDecision] = {}
+        self.current_epoch = 0
+        self.promotion_ready = False
+
         self.state_file_path = (
             os.getenv("AUCTION_STORE_PATH")
             or os.getenv("STORAGE_STATE_PATH")
             or ""
         )
+        self.snapshot_repository = StorageSnapshotRepository(self.state_file_path)
+        self.auction_domain = AuctionDomain()
+        self.synchronization_client = ReplicaSynchronizationClient()
+        self.replication_client = SynchronousReplicationClient()
 
         self.port = os.getenv("NODE_PORT", "50051")
         self.replica_role = os.getenv("NODE_ROLE", "backup")
@@ -30,12 +53,6 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             "SYNCHRONOUS_BACKUP_ADDRESS",
             "",
         ).strip()
-        self.idempotency_records: dict[str, pb2.IdempotencyRecord] = {}
-        self.prepared_mutations: dict[str, pb2.PrepareMutationRequest] = {}
-        self.aborted_mutations: dict[str, pb2.MutationDecisionRequest] = {}
-        self.pending_backup_commits: dict[str, pb2.CommitDecision] = {}
-        self.current_epoch = 0
-        self.promotion_ready = False
 
         raw_address = os.getenv("POD_IP", "localhost")
         if "storage-" in raw_address and ".storage-service" not in raw_address:
@@ -80,6 +97,8 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 print(f"[Judge] Booting... Controller not ready: {error}")
                 time.sleep(2)
 
+    # Auction mutation and read RPCs
+
     def ApplyAuctionMutation(
         self,
         request: pb2.AuctionMutationRequest,
@@ -109,7 +128,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             if idempotency_response:
                 return idempotency_response
 
-            candidate_auction, candidate_error = self._build_candidate_auction(
+            candidate_auction, candidate_error = self.auction_domain.build_candidate(
                 request,
                 mutation_type,
                 existing_auction,
@@ -172,217 +191,6 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             )
         return None
 
-    def _build_candidate_auction(
-        self,
-        request: pb2.AuctionMutationRequest,
-        mutation_type: pb2.AuctionMutationType,
-        existing_auction: pb2.Auction | None,
-    ) -> tuple[pb2.Auction | None, pb2.AuctionMutationResponse | None]:
-        """Build the next immutable candidate without changing request or state."""
-        if existing_auction is None:
-            return self._build_create_candidate(request.auction, mutation_type)
-
-        validation_error = self._existing_auction_mutation_error(
-            request,
-            mutation_type,
-            existing_auction,
-        )
-        if validation_error is not None:
-            return None, validation_error
-
-        if mutation_type == pb2.AUCTION_MUTATION_TYPE_REVEAL:
-            return self._build_reveal_candidate(existing_auction), None
-        elif mutation_type == pb2.AUCTION_MUTATION_TYPE_PLACE_BID:
-            return self._build_bid_candidate(request, existing_auction)
-        elif mutation_type == pb2.AUCTION_MUTATION_TYPE_WITHDRAW_BID:
-            return self._build_withdraw_candidate(request, existing_auction)
-        else:
-            return None, self._mutation_error(
-                "Unsupported auction mutation type.",
-                current_version=existing_auction.version,
-            )
-
-    def _build_create_candidate(
-        self,
-        requested_auction: pb2.Auction,
-        mutation_type: pb2.AuctionMutationType,
-    ) -> tuple[pb2.Auction | None, pb2.AuctionMutationResponse | None]:
-        if mutation_type == pb2.AUCTION_MUTATION_TYPE_REVEAL:
-            return None, self._mutation_error(
-                "Cannot reveal an auction that does not exist.",
-                reason=pb2.MUTATION_FAILURE_REASON_NOT_FOUND,
-            )
-        if mutation_type != pb2.AUCTION_MUTATION_TYPE_CREATE:
-            return None, self._mutation_error(
-                "Auction does not exist.",
-                reason=pb2.MUTATION_FAILURE_REASON_NOT_FOUND,
-            )
-
-        validation_error = self._create_request_error(requested_auction)
-        if validation_error is not None:
-            return None, validation_error
-
-        candidate = pb2.Auction()
-        candidate.CopyFrom(requested_auction)
-        candidate.state = pb2.AUCTION_STATE_OPEN
-        candidate.version = 1
-        candidate.next_bid_sequence = 1
-        return candidate, None
-
-    def _create_request_error(
-        self,
-        requested_auction: pb2.Auction,
-    ) -> pb2.AuctionMutationResponse | None:
-        if not requested_auction.auction_id.strip():
-            return self._mutation_error("Auction creation requires an auction id.")
-        if not requested_auction.seller_id.strip():
-            return self._mutation_error("Auction creation requires a seller id.")
-        if not requested_auction.HasField("ends_at"):
-            return self._mutation_error(
-                "Auction creation requires an immutable closing timestamp."
-            )
-        if requested_auction.reserve_price <= 0:
-            return self._mutation_error(
-                "Auction creation requires a positive reserve price."
-            )
-        if requested_auction.bids:
-            return self._mutation_error(
-                "Auction creation must start with no active bids."
-            )
-        if requested_auction.state == pb2.AUCTION_STATE_REVEALED:
-            return self._mutation_error("Auction creation must begin open.")
-        if requested_auction.HasField("result"):
-            return self._mutation_error(
-                "An open auction cannot have a committed result."
-            )
-        return None
-
-    def _existing_auction_mutation_error(
-        self,
-        request: pb2.AuctionMutationRequest,
-        mutation_type: pb2.AuctionMutationType,
-        existing_auction: pb2.Auction,
-    ) -> pb2.AuctionMutationResponse | None:
-        current_version = existing_auction.version
-        if existing_auction.state == pb2.AUCTION_STATE_REVEALED:
-            return self._mutation_error(
-                "The Gavel has already fallen.",
-                current_version=current_version,
-            )
-        if (
-            request.auction.state == pb2.AUCTION_STATE_REVEALED
-            and mutation_type != pb2.AUCTION_MUTATION_TYPE_REVEAL
-        ):
-            return self._mutation_error(
-                "Reveal requires a reveal event.",
-                current_version=current_version,
-            )
-
-        state_error = self._acceptance_order_state_error(existing_auction)
-        if state_error:
-            return self._mutation_error(
-                state_error,
-                current_version=current_version,
-            )
-        if (
-            mutation_type != pb2.AUCTION_MUTATION_TYPE_REVEAL
-            and self._includes_creation_metadata(request.auction)
-        ):
-            return self._mutation_error(
-                "Auction creation properties are immutable.",
-                current_version=current_version,
-            )
-
-        expected_version = request.expected_version or request.auction.version
-        if expected_version != current_version:
-            return self._mutation_error(
-                "Fog conflict: Stale version.",
-                reason=pb2.MUTATION_FAILURE_REASON_CONCURRENCY_CONFLICT,
-                current_version=current_version,
-            )
-        return None
-
-    def _build_bid_candidate(
-        self,
-        request: pb2.AuctionMutationRequest,
-        existing_auction: pb2.Auction,
-    ) -> tuple[pb2.Auction | None, pb2.AuctionMutationResponse | None]:
-        current_version = existing_auction.version
-        requested_bids = request.auction.bids
-        if not requested_bids:
-            return None, self._mutation_error(
-                "Bid mutation requires at least one bid.",
-                current_version=current_version,
-            )
-        if len(requested_bids) != 1:
-            return None, self._mutation_error(
-                "Bid mutation requires exactly one bidder.",
-                current_version=current_version,
-            )
-
-        bidder_id, requested_bid = next(iter(requested_bids.items()))
-        if request.bidder_id.strip() and request.bidder_id != bidder_id:
-            return None, self._mutation_error(
-                "Bid mutation bidder id must match its single bid.",
-                current_version=current_version,
-            )
-        if self._auction_has_ended(existing_auction):
-            return None, self._mutation_error(
-                "Auction deadline has passed.",
-                current_version=current_version,
-            )
-
-        current_bid = existing_auction.bids.get(bidder_id)
-        if current_bid is not None and requested_bid.amount <= current_bid.amount:
-            return None, self._mutation_error(
-                "Bid must be higher than bidder's active bid.",
-                current_version=current_version,
-            )
-
-        candidate = pb2.Auction()
-        candidate.CopyFrom(existing_auction)
-        next_bid_sequence = self._next_bid_sequence(existing_auction)
-        candidate.bids[bidder_id].CopyFrom(
-            pb2.ActiveBid(
-                amount=requested_bid.amount,
-                acceptance_order=next_bid_sequence,
-            )
-        )
-        candidate.next_bid_sequence = next_bid_sequence + 1
-        candidate.version = current_version + 1
-        return candidate, None
-
-    def _build_withdraw_candidate(
-        self,
-        request: pb2.AuctionMutationRequest,
-        existing_auction: pb2.Auction,
-    ) -> tuple[pb2.Auction | None, pb2.AuctionMutationResponse | None]:
-        current_version = existing_auction.version
-        if self._auction_has_ended(existing_auction):
-            return None, self._mutation_error(
-                "Auction deadline has passed.",
-                current_version=current_version,
-            )
-
-        bidder_id = request.bidder_id.strip()
-        if not bidder_id:
-            return None, self._mutation_error(
-                "Withdrawal requires a bidder id.",
-                current_version=current_version,
-            )
-        if bidder_id not in existing_auction.bids:
-            return None, self._mutation_error(
-                "Bidder has no active bid to withdraw.",
-                current_version=current_version,
-            )
-
-        candidate = pb2.Auction()
-        candidate.CopyFrom(existing_auction)
-        candidate.next_bid_sequence = self._next_bid_sequence(existing_auction)
-        del candidate.bids[bidder_id]
-        candidate.version = current_version + 1
-        return candidate, None
-
     def _mutation_error(
         self,
         message: str,
@@ -397,15 +205,9 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             message=message,
         )
 
-    def _includes_creation_metadata(self, auction: pb2.Auction) -> bool:
-        return (
-            bool(auction.seller_id.strip())
-            or bool(auction.title.strip())
-            or bool(auction.category.strip())
-            or bool(auction.description.strip())
-            or auction.reserve_price > 0
-            or auction.HasField("ends_at")
-        )
+    def _build_auction_result(self, auction: pb2.Auction) -> pb2.AuctionResult:
+        """Retain the established internal result helper as a domain delegate."""
+        return self.auction_domain.build_result(auction)
 
     def _effective_mutation_type(
         self,
@@ -537,87 +339,6 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             request_fingerprint=request_fingerprint,
             response=stored_response,
         )
-
-    def _build_auction_result(self, auction: pb2.Auction) -> pb2.AuctionResult:
-        state_error = self._acceptance_order_state_error(auction)
-        if state_error:
-            raise ValueError(state_error)
-
-        if not auction.bids:
-            return pb2.AuctionResult(
-                outcome=pb2.AUCTION_OUTCOME_NO_BIDS,
-                reserve_met=False,
-                has_winner=False,
-            )
-
-        winning_bidder_id, winning_bid = min(
-            auction.bids.items(),
-            key=lambda item: (-item[1].amount, item[1].acceptance_order, item[0]),
-        )
-        winning_amount = winning_bid.amount
-        if winning_amount < auction.reserve_price:
-            return pb2.AuctionResult(
-                outcome=pb2.AUCTION_OUTCOME_RESERVE_NOT_MET,
-                reserve_met=False,
-                has_winner=False,
-            )
-
-        return pb2.AuctionResult(
-            outcome=pb2.AUCTION_OUTCOME_SUCCESSFUL_SALE,
-            reserve_met=True,
-            has_winner=True,
-            winning_bidder_id=winning_bidder_id,
-            winning_amount=winning_amount,
-        )
-
-    def _build_reveal_candidate(self, auction: pb2.Auction) -> pb2.Auction:
-        candidate = pb2.Auction()
-        candidate.CopyFrom(auction)
-        candidate.state = pb2.AUCTION_STATE_REVEALED
-        candidate.version = auction.version + 1
-        candidate.result.CopyFrom(self._build_auction_result(candidate))
-        return candidate
-
-    def _next_bid_sequence(self, auction: pb2.Auction) -> int:
-        if auction.next_bid_sequence > 0:
-            return auction.next_bid_sequence
-        if not auction.bids:
-            return 1
-        return max(bid.acceptance_order for bid in auction.bids.values()) + 1
-
-    def _acceptance_order_state_error(self, auction: pb2.Auction) -> str:
-        active_orders = [
-            bid.acceptance_order
-            for bid in auction.bids.values()
-            if bid.acceptance_order > 0
-        ]
-        if len(active_orders) != len(set(active_orders)):
-            return "Corrupted auction state: duplicate acceptance order."
-        if auction.next_bid_sequence > 0 and active_orders:
-            next_required_sequence = max(active_orders) + 1
-            if auction.next_bid_sequence < next_required_sequence:
-                return "Corrupted auction state: next bid sequence is stale."
-        return ""
-
-    def _committed_state_error(self, auction: pb2.Auction) -> str:
-        state_error = self._acceptance_order_state_error(auction)
-        if state_error:
-            return state_error
-        if auction.state != pb2.AUCTION_STATE_REVEALED:
-            if auction.HasField("result"):
-                return "An open auction cannot have a committed result."
-            return ""
-        if not auction.HasField("result"):
-            return "A revealed auction must have a committed result."
-        if auction.result != self._build_auction_result(auction):
-            return "A revealed auction result does not match its committed bids."
-        return ""
-
-    def _auction_has_ended(self, auction: pb2.Auction) -> bool:
-        if not auction.HasField("ends_at"):
-            return False
-        deadline = auction.ends_at.seconds + (auction.ends_at.nanos / 1_000_000_000)
-        return time.time() >= deadline
 
     def _find_overdue_open_auction_ids(self, now_seconds: float) -> list[str]:
         """Return a stable snapshot of open auctions whose deadline has passed."""
@@ -774,11 +495,11 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             primary_id=self.node_address,
             epoch=self.current_epoch,
         )
-        try:
-            with grpc.insecure_channel(self.synchronous_backup_address) as channel:
-                stub = pb2_grpc.StorageReplicaServiceStub(channel)
-                response = stub.PrepareAuctionMutation(request, timeout=1.0)
-        except grpc.RpcError:
+        response = self.replication_client.prepare(
+            self.synchronous_backup_address,
+            request,
+        )
+        if response is None:
             return False
 
         return (
@@ -874,14 +595,11 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 primary_id=decision.primary_id,
                 epoch=decision.epoch,
             )
-            try:
-                with grpc.insecure_channel(decision.backup_address) as channel:
-                    stub = pb2_grpc.StorageReplicaServiceStub(channel)
-                    response = stub.CommitPreparedMutation(
-                        commit_request,
-                        timeout=1.0,
-                    )
-            except grpc.RpcError:
+            response = self.replication_client.commit(
+                decision.backup_address,
+                commit_request,
+            )
+            if response is None:
                 return False
 
             if (
@@ -911,13 +629,11 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             primary_id=self.node_address,
             epoch=self.current_epoch,
         )
-        try:
-            with grpc.insecure_channel(self.synchronous_backup_address) as channel:
-                stub = pb2_grpc.StorageReplicaServiceStub(channel)
-                response = stub.AbortPreparedMutation(request, timeout=1.0)
-        except grpc.RpcError:
-            return False
-        return response.success
+        response = self.replication_client.abort(
+            self.synchronous_backup_address,
+            request,
+        )
+        return response is not None and response.success
 
     def _coordinate_synchronous_commit(
         self,
@@ -977,6 +693,8 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             )
 
         return success_response
+
+    # Synchronous replication RPCs and commit-protocol helpers
 
     def PrepareAuctionMutation(self, request, context):
         with self.state_lock:
@@ -1049,7 +767,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 )
 
             candidate = request.candidate_auction
-            state_error = self._committed_state_error(candidate)
+            state_error = self.auction_domain.committed_state_error(candidate)
             if state_error:
                 return pb2.PrepareMutationResponse(
                     success=False,
@@ -1281,35 +999,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 message="Prepared mutation aborted.",
             )
 
-    def SyncFullState(self, request, context):
-        with self.state_lock:
-            if self.replica_role != "primary":
-                return pb2.StateResponse(
-                    ok=False,
-                    message="Full state synchronization requires the primary replica.",
-                )
-            if request.epoch != self.current_epoch:
-                return pb2.StateResponse(
-                    ok=False,
-                    message=(
-                        f"Synchronization epoch {request.epoch} does not match "
-                        f"primary epoch {self.current_epoch}."
-                    ),
-                )
-            return pb2.StateResponse(
-                ok=True,
-                auctions=list(self.auction_store.values()),
-                idempotency_records=list(self.idempotency_records.values()),
-                message="Sync state provided",
-            )
-
-    def Heartbeat(self, request, context):
-        with self.state_lock:
-            return pb2.HealthCheckResponse(
-                alive=True,
-                role=self.replica_role,
-                message="Alive",
-            )
+    # Promotion and failover RPCs
 
     def BeginPrimaryPromotion(self, request, context):
         with self.state_lock:
@@ -1382,7 +1072,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                     message="Only the primary promotion candidate can confirm state.",
                 )
             for auction in self.auction_store.values():
-                state_error = self._committed_state_error(auction)
+                state_error = self.auction_domain.committed_state_error(auction)
                 if state_error:
                     return pb2.PromotionStateConfirmationResponse(
                         confirmed=False,
@@ -1467,6 +1157,30 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 message="Primary promotion complete.",
             )
 
+    # Full-state synchronization RPCs and replacement helpers
+
+    def SyncFullState(self, request, context):
+        with self.state_lock:
+            if self.replica_role != "primary":
+                return pb2.StateResponse(
+                    ok=False,
+                    message="Full state synchronization requires the primary replica.",
+                )
+            if request.epoch != self.current_epoch:
+                return pb2.StateResponse(
+                    ok=False,
+                    message=(
+                        f"Synchronization epoch {request.epoch} does not match "
+                        f"primary epoch {self.current_epoch}."
+                    ),
+                )
+            return pb2.StateResponse(
+                ok=True,
+                auctions=list(self.auction_store.values()),
+                idempotency_records=list(self.idempotency_records.values()),
+                message="Sync state provided",
+            )
+
     def SynchronizeFromPrimary(self, request, context):
         with self.state_lock:
             if self.replica_role != "backup":
@@ -1504,15 +1218,11 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
     def _synchronize_from_primary(self, primary_address: str, epoch: int) -> bool:
         """Replace local state, then report matching-epoch readiness."""
         try:
-            with grpc.insecure_channel(primary_address) as channel:
-                stub = pb2_grpc.StorageReplicaServiceStub(channel)
-                response = stub.SyncFullState(
-                    pb2.StateRequest(
-                        requester_id=self.node_address,
-                        epoch=epoch,
-                    ),
-                    timeout=10.0,
-                )
+            response = self.synchronization_client.fetch_full_state(
+                primary_address,
+                self.node_address,
+                epoch,
+            )
             if not self._replace_with_full_state(response, epoch=epoch):
                 return False
             return self._report_synchronization_complete(
@@ -1537,7 +1247,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             if (
                 not auction.auction_id.strip()
                 or auction.auction_id in replacement_auctions
-                or self._committed_state_error(auction)
+                or self.auction_domain.committed_state_error(auction)
             ):
                 return False
             copied_auction = pb2.Auction()
@@ -1591,31 +1301,36 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
         primary_address: str,
         epoch: int,
     ) -> bool:
-        try:
-            with grpc.insecure_channel(CONTROLLER_ADDRESS) as channel:
-                stub = pb2_grpc.ClusterControllerStub(channel)
-                response = stub.ReportSynchronizationComplete(
-                    pb2.SynchronizationCompleteRequest(
-                        replica_address=self.node_address,
-                        source_primary_address=primary_address,
-                        epoch=epoch,
-                    ),
-                    timeout=2.0,
-                )
-            return response.success
-        except grpc.RpcError:
-            return False
+        return self.synchronization_client.report_complete(
+            self.node_address,
+            primary_address,
+            epoch,
+            CONTROLLER_ADDRESS,
+        )
+
+    # Health and local snapshot helpers
+
+    def Heartbeat(self, request, context):
+        with self.state_lock:
+            return pb2.HealthCheckResponse(
+                alive=True,
+                role=self.replica_role,
+                message="Alive",
+            )
 
     def _load_state_from_disk(self) -> None:
-        if not self.state_file_path or not os.path.exists(self.state_file_path):
-            return
+        """Validate and apply the local snapshot before controller registration."""
         try:
-            snapshot = pb2.StorageSnapshot()
-            with open(self.state_file_path, "rb") as state_file:
-                snapshot.ParseFromString(state_file.read())
+            repository = getattr(self, "snapshot_repository", None)
+            if repository is None:
+                repository = StorageSnapshotRepository(self.state_file_path)
+                self.snapshot_repository = repository
+            snapshot = repository.load()
+            if snapshot is None:
+                return
             auction_store = {}
             for auction in snapshot.auctions:
-                state_error = self._committed_state_error(auction)
+                state_error = self.auction_domain.committed_state_error(auction)
                 if state_error:
                     raise ValueError(
                         f"invalid committed auction {auction.auction_id!r}: "
@@ -1653,6 +1368,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             ) from e
 
     def _persist_state_to_disk(self) -> None:
+        """Build a snapshot of service-owned state and delegate its storage."""
         if not self.state_file_path:
             return
         snapshot = pb2.StorageSnapshot(
@@ -1667,10 +1383,8 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             synchronous_backup_address=self.synchronous_backup_address,
             message="Local storage snapshot",
         )
-        state_dir = os.path.dirname(self.state_file_path)
-        if state_dir:
-            os.makedirs(state_dir, exist_ok=True)
-        temp_path = f"{self.state_file_path}.tmp"
-        with open(temp_path, "wb") as state_file:
-            state_file.write(snapshot.SerializeToString())
-        os.replace(temp_path, self.state_file_path)
+        repository = getattr(self, "snapshot_repository", None)
+        if repository is None:
+            repository = StorageSnapshotRepository(self.state_file_path)
+            self.snapshot_repository = repository
+        repository.save(snapshot)
