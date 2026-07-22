@@ -177,20 +177,28 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
                 self._finish_failover_locked("failed")
             if reported_epoch > self.last_primary_epoch:
                 self.last_primary_epoch = reported_epoch
-            if (
-                self.primary_assignment is None
-                and request.role == "primary"
+            reported_backup_address = request.synchronous_backup_address.strip()
+            reported_backup = self.nodes.get(reported_backup_address)
+            recovered_primary_is_ready = bool(
+                request.role == "primary"
                 and reported_epoch > 0
                 and reported_epoch == self.last_primary_epoch
                 and request.promotion_ready
+                and reported_backup_address
+                and reported_backup_address != address
+                and reported_backup is not None
+                and reported_backup.sync_status == ReplicaSyncStatus.SYNCHRONIZED
+                and reported_backup.synchronized_epoch == reported_epoch
+            )
+            if (
+                self.primary_assignment is None
+                and recovered_primary_is_ready
             ):
                 self.primary_assignment = PrimaryAssignment(
                     node_id=address,
                     epoch=reported_epoch,
                     status=PrimaryStatus.READY,
-                    sync_backup_address=(
-                        request.synchronous_backup_address.strip() or None
-                    ),
+                    sync_backup_address=reported_backup_address,
                 )
                 LOGGER.info("Recovered primary assignment from %s", address)
             elif self.primary_assignment is None and self.last_primary_epoch == 0:

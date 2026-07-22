@@ -804,6 +804,50 @@ class StorageServiceTests(BackendTestCase):
         self.assertIn("prepare-1", recovered.idempotency_records)
         self.assertIn("prepare-1", recovered.pending_backup_commits)
 
+    def test_ready_primary_role_is_restored_from_persisted_assignment_state(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = f"{temp_dir}/ready-primary.pb"
+            primary = make_judge(
+                role="primary",
+                synchronous_backup_address="backup.storage:50051",
+                state_file_path=state_path,
+            )
+            primary.promotion_ready = True
+            primary.current_epoch = 7
+            primary._persist_state_to_disk()
+
+            recovered = make_judge(
+                role="backup",
+                synchronous_backup_address="",
+                state_file_path=state_path,
+            )
+            recovered._load_state_from_disk()
+
+        registration = recovered._registration_request()
+        self.assertEqual(recovered.replica_role, "primary")
+        self.assertEqual(registration.role, "primary")
+        self.assertEqual(registration.epoch, 7)
+        self.assertTrue(registration.promotion_ready)
+        self.assertEqual(
+            registration.synchronous_backup_address,
+            "backup.storage:50051",
+        )
+
+    def test_non_ready_snapshot_does_not_restore_primary_role(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = f"{temp_dir}/non-ready-primary.pb"
+            storage = make_judge(role="backup", state_file_path=state_path)
+            storage.current_epoch = 7
+            storage.promotion_ready = False
+            storage.synchronous_backup_address = "backup.storage:50051"
+            storage._persist_state_to_disk()
+
+            recovered = make_judge(role="backup", state_file_path=state_path)
+            recovered._load_state_from_disk()
+
+        self.assertEqual(recovered.replica_role, "backup")
+        self.assertFalse(recovered._registration_request().promotion_ready)
+
     def test_primary_commit_decision_persist_failure_restores_all_collections(self):
         judge = make_judge(
             role="primary",

@@ -134,7 +134,10 @@ def running_backend_stack():
             os.environ,
             {
                 "NODE_PORT": str(storage_port),
-                "POD_IP": "127.0.0.1",
+                # Storage advertises this address to the controller and the
+                # auction service; include the ephemeral port it actually
+                # binds below so in-process gRPC calls can reach it.
+                "POD_IP": f"127.0.0.1:{storage_port}",
                 "NODE_ROLE": "backup",
                 "PEER_ADDRESSES": "",
             },

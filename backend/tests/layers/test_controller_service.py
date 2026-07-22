@@ -22,6 +22,12 @@ class ControllerServiceTests(BackendTestCase):
             role="primary",
             epoch=5,
             promotion_ready=True,
+            synchronous_backup_address="old-backup:50051",
+        ), NoopContext())
+        restarted.RegisterNode(pb2.RegisterRequest(
+            address="backup:50051",
+            role="backup",
+            epoch=6,
         ), NoopContext())
         current = restarted.RegisterNode(pb2.RegisterRequest(
             address="current-primary:50051",
@@ -31,7 +37,7 @@ class ControllerServiceTests(BackendTestCase):
             synchronous_backup_address="backup:50051",
         ), NoopContext())
 
-        self.assertTrue(stale.is_primary)
+        self.assertFalse(stale.is_primary)
         self.assertTrue(current.is_primary)
         self.assertEqual(restarted.last_primary_epoch, 6)
         self.assertEqual(
@@ -41,27 +47,30 @@ class ControllerServiceTests(BackendTestCase):
         self.assertEqual(restarted.primary_assignment.epoch, 6)
 
     def test_controller_restart_recovery_is_independent_of_registration_order(self):
-        registrations = (
-            pb2.RegisterRequest(
-                address="former-primary:50051",
-                role="primary",
-                epoch=5,
-                promotion_ready=True,
-            ),
-            pb2.RegisterRequest(
-                address="current-primary:50051",
-                role="primary",
-                epoch=6,
-                promotion_ready=True,
-                synchronous_backup_address="backup:50051",
-            ),
+        primary_registration = pb2.RegisterRequest(
+            address="current-primary:50051",
+            role="primary",
+            epoch=6,
+            promotion_ready=True,
+            synchronous_backup_address="backup:50051",
+        )
+        backup = pb2.RegisterRequest(
+            address="backup:50051",
+            role="backup",
+            epoch=6,
         )
 
-        for order in (registrations, tuple(reversed(registrations))):
+        for order in (
+            (backup, primary_registration),
+            (primary_registration, backup),
+        ):
             with self.subTest(order=[request.address for request in order]):
                 restarted = ControllerService()
                 for request in order:
                     restarted.RegisterNode(request, NoopContext())
+                # Storage periodically re-registers, allowing reconstruction
+                # once both sides of the persisted relationship are known.
+                restarted.RegisterNode(primary_registration, NoopContext())
 
                 primary = restarted.GetPrimary(
                     pb2.GetPrimaryRequest(), NoopContext()
@@ -95,6 +104,46 @@ class ControllerServiceTests(BackendTestCase):
             restarted.primary_assignment.sync_backup_address,
             "backup:50051",
         )
+
+    def test_recovery_requires_ready_primary_with_matching_synchronized_backup(self):
+        cases = (
+            (
+                pb2.RegisterRequest(
+                    address="primary:50051", role="backup", epoch=7,
+                    promotion_ready=True,
+                    synchronous_backup_address="backup:50051",
+                ),
+                "backup role",
+            ),
+            (
+                pb2.RegisterRequest(
+                    address="primary:50051", role="primary", epoch=7,
+                    promotion_ready=False,
+                    synchronous_backup_address="backup:50051",
+                ),
+                "non-ready primary",
+            ),
+            (
+                pb2.RegisterRequest(
+                    address="primary:50051", role="primary", epoch=6,
+                    promotion_ready=True,
+                    synchronous_backup_address="backup:50051",
+                ),
+                "mismatched epoch",
+            ),
+        )
+
+        for registration, label in cases:
+            with self.subTest(case=label):
+                restarted = ControllerService()
+                restarted.RegisterNode(pb2.RegisterRequest(
+                    address="backup:50051", role="backup", epoch=7,
+                ), NoopContext())
+                response = restarted.RegisterNode(registration, NoopContext())
+
+                self.assertFalse(response.is_primary)
+                self.assertIsNone(restarted.primary_assignment)
+                self.assertEqual(restarted.last_primary_epoch, 7)
 
     def test_rejects_blank_registration_address(self):
         service = ControllerService()

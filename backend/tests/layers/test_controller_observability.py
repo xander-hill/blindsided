@@ -118,6 +118,61 @@ class ControllerObservabilityTests(TestCase):
             "blindsided_failovers_total", {"outcome": "completed"}
         ))
 
+    def test_recovery_registration_sets_ready_only_for_valid_assignment(self):
+        service = ControllerService()
+        backup = self.register(
+            service,
+            "backup:1",
+            role="backup",
+            epoch=7,
+        )
+        self.assertFalse(backup.is_primary)
+        self.assertEqual(self.value("blindsided_cluster_ready"), 0)
+
+        primary = self.register(
+            service,
+            "primary:1",
+            role="primary",
+            epoch=7,
+            promotion_ready=True,
+            synchronous_backup_address="backup:1",
+        )
+
+        self.assertTrue(primary.is_primary)
+        self.assertEqual(service.primary_assignment.status, PrimaryStatus.READY)
+        self.assertEqual(self.value("blindsided_cluster_ready"), 1)
+
+    def test_stale_recovery_callback_cannot_ready_newer_assignment(self):
+        service = ControllerService()
+        service.last_primary_epoch = 8
+        service.primary_assignment = PrimaryAssignment(
+            "new-primary:1", 8, PrimaryStatus.PROMOTING, "new-backup:1"
+        )
+        service.nodes = {
+            "old-backup:1": ReplicaRecord(
+                "old-backup:1", 1, ReplicaSyncStatus.SYNCHRONIZED, 7
+            ),
+            "new-primary:1": ReplicaRecord(
+                "new-primary:1", 1, ReplicaSyncStatus.SYNCHRONIZED, 8
+            ),
+        }
+        with service.lock:
+            service._refresh_gauges_locked()
+
+        response = service.ReportSynchronizationComplete(
+            pb2.SynchronizationCompleteRequest(
+                replica_address="old-backup:1",
+                source_primary_address="old-primary:1",
+                epoch=7,
+            ),
+            NoopContext(),
+        )
+
+        self.assertFalse(response.success)
+        self.assertEqual(service.primary_assignment.epoch, 8)
+        self.assertEqual(service.primary_assignment.status, PrimaryStatus.PROMOTING)
+        self.assertEqual(self.value("blindsided_cluster_ready"), 0)
+
     def test_health_transitions_emit_only_on_state_changes(self):
         service = ControllerService()
         self.register(service, "storage:1")

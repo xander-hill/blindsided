@@ -1509,6 +1509,8 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             self.current_epoch = snapshot.current_epoch
             self.promotion_ready = snapshot.promotion_ready
             self.synchronous_backup_address = snapshot.synchronous_backup_address
+            if self.promotion_ready and self.synchronous_backup_address:
+                self.replica_role = "primary"
         except Exception as e:
             raise RuntimeError(
                 f"Could not load local state snapshot {self.state_file_path!r}: {e}"
