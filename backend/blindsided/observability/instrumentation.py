@@ -1,11 +1,18 @@
 from collections.abc import Callable
+from contextvars import ContextVar
 from functools import wraps
 import logging
 import time
 
 import grpc
 
-from blindsided.observability.metrics import RPC_DURATION_SECONDS, RPC_REQUESTS
+from blindsided.observability.metrics import (
+    CONCURRENCY_RETRIES,
+    IDEMPOTENCY_REQUESTS,
+    MUTATIONS,
+    RPC_DURATION_SECONDS,
+    RPC_REQUESTS,
+)
 
 
 LOGGER = logging.getLogger(__name__)
@@ -20,6 +27,10 @@ BOUNDED_RESULTS = frozenset({
     "stale_epoch",
 })
 ResultClassifier = Callable[[object], str]
+_mutation_outcome: ContextVar[str | None] = ContextVar(
+    "blindsided_mutation_outcome",
+    default=None,
+)
 
 
 def _exception_result(error: BaseException) -> str:
@@ -92,3 +103,54 @@ def observe_rpc(
         return wrapped
 
     return decorator
+
+
+def _safe_increment(metric, **labels: str) -> None:
+    try:
+        metric.labels(**labels).inc()
+    except Exception:
+        LOGGER.exception("Failed to record metric")
+
+
+def set_mutation_outcome(outcome: str) -> None:
+    """Set an exact outcome determined inside the current mutation handler."""
+    _mutation_outcome.set(outcome)
+
+
+def observe_mutation(operation: str, result_classifier: ResultClassifier):
+    """Record exactly one final outcome for an external logical mutation."""
+    def decorator(handler):
+        @wraps(handler)
+        def wrapped(*args, **kwargs):
+            token = _mutation_outcome.set(None)
+            outcome = "failure"
+            try:
+                response = handler(*args, **kwargs)
+                try:
+                    outcome = _mutation_outcome.get() or result_classifier(response)
+                except Exception:
+                    LOGGER.exception("Failed to classify mutation response")
+                return response
+            finally:
+                _safe_increment(MUTATIONS, operation=operation, outcome=outcome)
+                _mutation_outcome.reset(token)
+
+        return wrapped
+
+    return decorator
+
+
+def record_concurrency_retry(operation: str, outcome: str) -> None:
+    _safe_increment(
+        CONCURRENCY_RETRIES,
+        operation=operation,
+        outcome=outcome,
+    )
+
+
+def record_idempotency_decision(operation: str, outcome: str) -> None:
+    _safe_increment(
+        IDEMPOTENCY_REQUESTS,
+        operation=operation,
+        outcome=outcome,
+    )

@@ -11,7 +11,13 @@ import grpc
 from blindsided.common.config import CONTROLLER_PORT
 from blindsided.generated import blindsided_pb2 as pb2
 from blindsided.generated import blindsided_pb2_grpc as pb2_grpc
-from blindsided.observability.instrumentation import observe_rpc
+from blindsided.observability.instrumentation import (
+    observe_mutation,
+    observe_rpc,
+    record_concurrency_retry,
+    record_idempotency_decision,
+    set_mutation_outcome,
+)
 
 
 controller_host = os.getenv("CONTROLLER_HOST", "localhost")
@@ -26,6 +32,39 @@ def _classify_ok(response) -> str:
 
 def _classify_success(response) -> str:
     return "success" if response.success else "failure"
+
+
+def _classify_ok_mutation(response) -> str:
+    if response.outcome_unknown:
+        return "unknown"
+    if response.ok:
+        return "committed"
+    if response.retryable:
+        return "unavailable"
+    return "rejected"
+
+
+def _classify_success_mutation(response) -> str:
+    if response.outcome_unknown:
+        return "unknown"
+    if response.success:
+        return "committed"
+    if response.retryable:
+        return "unavailable"
+    return "rejected"
+
+
+def _record_idempotency_result(operation: str, response) -> None:
+    if (
+        response.failure_reason
+        == pb2.MUTATION_FAILURE_REASON_IDEMPOTENCY_CONFLICT
+    ):
+        outcome = "mismatch"
+    elif response.replayed:
+        outcome = "replayed"
+    else:
+        outcome = "new"
+    record_idempotency_decision(operation, outcome)
 
 
 def _auction_id_for_request(request_id: str) -> str:
@@ -255,6 +294,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
     # Mutation RPC handlers. Domain validation and idempotency remain in storage.
 
     @observe_rpc("auction_service", "CreateAuction", _classify_ok)
+    @observe_mutation("CreateAuction", _classify_ok_mutation)
     def CreateAuction(
         self,
         request: pb2.CreateAuctionRequest,
@@ -311,6 +351,8 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                         epoch=assignment.epoch,
                     ), timeout=rpc_timeout)
 
+                    _record_idempotency_result("CreateAuction", response)
+
                     if response.success:
                         return pb2.CreateAuctionResponse(
                             ok=True,
@@ -336,10 +378,12 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                     request_id,
                     error.code(),
                 )
+                set_mutation_outcome("failure")
                 return pb2.CreateAuctionResponse(ok=False, message="Storage mutation failed.")
         return pb2.CreateAuctionResponse(ok=False, message="Vault write retry failed.")
 
     @observe_rpc("auction_service", "PlaceBid", _classify_success)
+    @observe_mutation("PlaceBid", _classify_success_mutation)
     def PlaceBid(self, request: pb2.BidRequest, context) -> pb2.BidResponse:
         """Retry stale-version bid writes against the latest committed version."""
         if not request.request_id.strip():
@@ -351,6 +395,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
         current_attempt_version = request.expected_version
         request_id = request.request_id
         recovered_assignment = None
+        concurrency_retry_count = 0
 
         for attempt in range(mutation_retry_limit):
             assignment = recovered_assignment or self._resolve_ready_primary(
@@ -392,10 +437,16 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                     ), timeout=rpc_timeout)
 
                     if response.success:
+                        _record_idempotency_result("PlaceBid", response)
+                        if concurrency_retry_count:
+                            record_concurrency_retry(
+                                "PlaceBid", "succeeded_after_retry"
+                            )
                         return pb2.BidResponse(success=True, message="Vault Updated.")
 
                     pending = self._acknowledgement_pending_fields(response, request_id)
                     if pending is not None:
+                        _record_idempotency_result("PlaceBid", response)
                         return pb2.BidResponse(success=False, **pending)
 
                     if (
@@ -403,6 +454,8 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                         and response.current_version
                         and attempt < mutation_retry_limit - 1
                     ):
+                        concurrency_retry_count += 1
+                        record_concurrency_retry("PlaceBid", "retried")
                         current_attempt_version = response.current_version
                         logger.info(
                             "Retrying version conflict: operation=place_bid "
@@ -413,6 +466,13 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                         )
                         time.sleep(min(0.01 * (attempt + 1), 0.05))
                         continue
+
+                    _record_idempotency_result("PlaceBid", response)
+
+                    if self._is_version_conflict(response):
+                        set_mutation_outcome("conflict")
+                        if attempt == mutation_retry_limit - 1:
+                            record_concurrency_retry("PlaceBid", "exhausted")
 
                     return pb2.BidResponse(success=False, message=response.message)
 
@@ -433,6 +493,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                     request_id,
                     e.code(),
                 )
+                set_mutation_outcome("failure")
                 return pb2.BidResponse(success=False, message="Storage mutation failed.")
 
         return pb2.BidResponse(
@@ -441,6 +502,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
         )
 
     @observe_rpc("auction_service", "WithdrawBid", _classify_success)
+    @observe_mutation("WithdrawBid", _classify_success_mutation)
     def WithdrawBid(self, request: pb2.WithdrawBidRequest, context) -> pb2.WithdrawBidResponse:
         """Withdraw the caller's active bid through the current primary replica."""
         if not request.request_id.strip():
@@ -452,6 +514,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
         current_attempt_version = request.expected_version
         request_id = request.request_id
         recovered_assignment = None
+        concurrency_retry_count = 0
 
         for attempt in range(mutation_retry_limit):
             assignment = recovered_assignment or self._resolve_ready_primary(
@@ -487,6 +550,11 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                     ), timeout=rpc_timeout)
 
                     if response.success:
+                        _record_idempotency_result("WithdrawBid", response)
+                        if concurrency_retry_count:
+                            record_concurrency_retry(
+                                "WithdrawBid", "succeeded_after_retry"
+                            )
                         return pb2.WithdrawBidResponse(
                             success=True,
                             final_version=response.current_version,
@@ -495,6 +563,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
 
                     pending = self._acknowledgement_pending_fields(response, request_id)
                     if pending is not None:
+                        _record_idempotency_result("WithdrawBid", response)
                         return pb2.WithdrawBidResponse(
                             success=False,
                             final_version=response.current_version,
@@ -506,6 +575,8 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                         and response.current_version
                         and attempt < mutation_retry_limit - 1
                     ):
+                        concurrency_retry_count += 1
+                        record_concurrency_retry("WithdrawBid", "retried")
                         current_attempt_version = response.current_version
                         logger.info(
                             "Retrying version conflict: operation=withdraw_bid "
@@ -516,6 +587,13 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                         )
                         time.sleep(min(0.01 * (attempt + 1), 0.05))
                         continue
+
+                    _record_idempotency_result("WithdrawBid", response)
+
+                    if self._is_version_conflict(response):
+                        set_mutation_outcome("conflict")
+                        if attempt == mutation_retry_limit - 1:
+                            record_concurrency_retry("WithdrawBid", "exhausted")
 
                     return pb2.WithdrawBidResponse(
                         success=False,
@@ -540,6 +618,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                     request_id,
                     e.code(),
                 )
+                set_mutation_outcome("failure")
                 return pb2.WithdrawBidResponse(success=False, message="Storage mutation failed.")
 
         return pb2.WithdrawBidResponse(
@@ -548,6 +627,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
         )
 
     @observe_rpc("auction_service", "RevealAuction", _classify_ok)
+    @observe_mutation("RevealAuction", _classify_ok_mutation)
     def RevealAuction(self, request: pb2.RevealAuctionRequest, context):
         if not request.request_id.strip():
             return pb2.RevealAuctionResponse(
@@ -558,6 +638,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
         current_attempt_version = request.expected_version
         request_id = request.request_id
         recovered_assignment = None
+        concurrency_retry_count = 0
 
         for attempt in range(mutation_retry_limit):
             assignment = recovered_assignment or self._resolve_ready_primary(
@@ -604,6 +685,8 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                         and response.current_version
                         and attempt < mutation_retry_limit - 1
                     ):
+                        concurrency_retry_count += 1
+                        record_concurrency_retry("RevealAuction", "retried")
                         current_attempt_version = response.current_version
                         logger.info(
                             "Retrying version conflict: operation=reveal "
@@ -614,6 +697,17 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                         )
                         time.sleep(min(0.01 * (attempt + 1), 0.05))
                         continue
+
+                    _record_idempotency_result("RevealAuction", response)
+
+                    if response.success and concurrency_retry_count:
+                        record_concurrency_retry(
+                            "RevealAuction", "succeeded_after_retry"
+                        )
+                    elif self._is_version_conflict(response):
+                        set_mutation_outcome("conflict")
+                        if attempt == mutation_retry_limit - 1:
+                            record_concurrency_retry("RevealAuction", "exhausted")
 
                     pending = self._acknowledgement_pending_fields(response, request_id)
                     if pending is not None:
@@ -645,6 +739,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                     request_id,
                     e.code(),
                 )
+                set_mutation_outcome("failure")
                 return pb2.RevealAuctionResponse(ok=False, message="Storage mutation failed.")
 
         return pb2.RevealAuctionResponse(

@@ -12,3 +12,21 @@ RPC_DURATION_SECONDS = Histogram(
     "Time spent handling Blindsided gRPC requests",
     ["service", "method", "result"],
 )
+
+MUTATIONS = Counter(
+    "blindsided_mutations_total",
+    "Final outcomes of logical external auction mutations",
+    ["operation", "outcome"],
+)
+
+CONCURRENCY_RETRIES = Counter(
+    "blindsided_concurrency_retries_total",
+    "Optimistic-concurrency retry outcomes",
+    ["operation", "outcome"],
+)
+
+IDEMPOTENCY_REQUESTS = Counter(
+    "blindsided_idempotency_requests_total",
+    "Authoritative idempotency decisions for mutation requests",
+    ["operation", "outcome"],
+)
