@@ -8,10 +8,14 @@ import grpc
 
 from blindsided.generated import blindsided_pb2 as pb2
 from blindsided.generated import blindsided_pb2_grpc as pb2_grpc
-from blindsided.observability.metrics import CONTROLLER_FAILOVERS
+from blindsided.observability.instrumentation import observe_rpc
 
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _classify_success(response) -> str:
+    return "success" if response.success else "failure"
 
 HEARTBEAT_RPC_TIMEOUT_SECONDS = 2.0
 PROMOTION_RPC_TIMEOUT_SECONDS = 5.0
@@ -77,6 +81,7 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
 
     # Public controller RPCs
 
+    @observe_rpc("controller", "RegisterNode", _classify_success)
     def RegisterNode(self, request, context):
         address = request.address.strip()
         if not address:
@@ -150,6 +155,7 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
                 epoch=assignment.epoch if assignment else self.last_primary_epoch,
             )
 
+    @observe_rpc("controller", "GetPrimary", _classify_success)
     def GetPrimary(self, request, context):
         with self.lock:
             assignment = self.primary_assignment
@@ -168,6 +174,7 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
                 message="Primary retrieved",
             )
 
+    @observe_rpc("controller", "GetClusterInfo", _classify_success)
     def GetClusterInfo(self, request, context):
         with self.lock:
             addresses = sorted(self.nodes)
@@ -177,6 +184,7 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
                 message=f"Found {len(addresses)} active replicas",
             )
 
+    @observe_rpc("controller", "ReportSynchronizationComplete", _classify_success)
     def ReportSynchronizationComplete(self, request, context):
         replica_address = request.replica_address.strip()
         source_primary_address = request.source_primary_address.strip()
@@ -271,9 +279,6 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
                     success=False, message="Primary assignment changed during completion."
                 )
             self.primary_assignment.status = PrimaryStatus.READY
-        CONTROLLER_FAILOVERS.labels(
-            service="ControllerService", outcome="success"
-        ).inc()
         return pb2.SynchronizationCompleteResponse(
             success=True,
             message="Replica synchronized and primary promotion completed.",
@@ -368,9 +373,6 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
             for replica in self.nodes.values():
                 replica.sync_status = ReplicaSyncStatus.UNSYNCHRONIZED
                 replica.synchronized_epoch = 0
-        CONTROLLER_FAILOVERS.labels(
-            service="ControllerService", outcome="attempt"
-        ).inc()
         LOGGER.info(
             "Elected primary candidate %s for epoch %s",
             candidate_address,
@@ -538,9 +540,6 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
             epoch,
             reason,
         )
-        CONTROLLER_FAILOVERS.labels(
-            service="ControllerService", outcome="failure"
-        ).inc()
         self._elect_new_primary(retry_addresses)
 
     def _handle_promotion_backup_failure(
@@ -588,9 +587,6 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
             epoch,
             reason,
         )
-        CONTROLLER_FAILOVERS.labels(
-            service="ControllerService", outcome="failure"
-        ).inc()
 
     # Heartbeat monitoring and replica eviction
 

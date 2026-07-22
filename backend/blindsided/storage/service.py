@@ -8,11 +8,31 @@ import grpc
 from blindsided.common.config import CONTROLLER_ADDRESS, NODE_PORT
 from blindsided.generated import blindsided_pb2 as pb2
 from blindsided.generated import blindsided_pb2_grpc as pb2_grpc
-from blindsided.observability.metrics import REPLICATION_OPERATIONS
+from blindsided.observability.instrumentation import observe_rpc
 from blindsided.storage.auction_domain import AuctionDomain
 from blindsided.storage.replication_client import SynchronousReplicationClient
 from blindsided.storage.snapshot_repository import StorageSnapshotRepository
 from blindsided.storage.synchronization_client import ReplicaSynchronizationClient
+
+
+def _classify_success(response) -> str:
+    return "success" if response.success else "failure"
+
+
+def _classify_ok(response) -> str:
+    return "success" if response.ok else "failure"
+
+
+def _classify_alive(response) -> str:
+    return "success" if response.alive else "unavailable"
+
+
+def _classify_accepted(response) -> str:
+    return "success" if response.accepted else "rejected"
+
+
+def _classify_confirmed(response) -> str:
+    return "success" if response.confirmed else "rejected"
 
 
 class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
@@ -118,6 +138,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
 
     # Auction mutation and read RPCs
 
+    @observe_rpc("storage", "ApplyAuctionMutation", _classify_success)
     def ApplyAuctionMutation(
         self,
         request: pb2.AuctionMutationRequest,
@@ -452,6 +473,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 results.append(response)
         return results
 
+    @observe_rpc("storage", "GetAuction", _classify_ok)
     def GetAuction(
         self,
         request: pb2.StorageGetAuctionRequest,
@@ -485,6 +507,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 failure_reason=pb2.READ_FAILURE_REASON_NOT_FOUND,
             )
 
+    @observe_rpc("storage", "SearchAuctions", _classify_ok)
     def SearchAuctions(
         self,
         request: pb2.SearchAuctionsRequest,
@@ -688,9 +711,6 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             candidate_auction,
             idempotency_record,
         ):
-            REPLICATION_OPERATIONS.labels(
-                service="StorageReplicaService", phase="prepare", outcome="failure"
-            ).inc()
             self._abort_on_synchronous_backup(
                 request_id,
                 candidate_auction.auction_id,
@@ -702,18 +722,12 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 auction_id=candidate_auction.auction_id,
                 message="Synchronous backup preparation failed.",
             )
-        REPLICATION_OPERATIONS.labels(
-            service="StorageReplicaService", phase="prepare", outcome="success"
-        ).inc()
 
         if not self._record_commit_decision(
             request_id,
             candidate_auction,
             idempotency_record,
         ):
-            REPLICATION_OPERATIONS.labels(
-                service="StorageReplicaService", phase="commit_decision", outcome="failure"
-            ).inc()
             self._abort_on_synchronous_backup(
                 request_id,
                 candidate_auction.auction_id,
@@ -725,14 +739,8 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 auction_id=candidate_auction.auction_id,
                 message="Primary commit decision could not be persisted.",
             )
-        REPLICATION_OPERATIONS.labels(
-            service="StorageReplicaService", phase="commit_decision", outcome="success"
-        ).inc()
 
         if not self._complete_pending_backup_commit(request_id):
-            REPLICATION_OPERATIONS.labels(
-                service="StorageReplicaService", phase="acknowledgement", outcome="pending"
-            ).inc()
             return pb2.AuctionMutationResponse(
                 success=False,
                 current_version=candidate_auction.version,
@@ -741,14 +749,12 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 message="Commit is durable but backup acknowledgement is pending.",
             )
 
-        REPLICATION_OPERATIONS.labels(
-            service="StorageReplicaService", phase="acknowledgement", outcome="success"
-        ).inc()
 
         return success_response
 
     # Synchronous replication RPCs and commit-protocol helpers
 
+    @observe_rpc("storage", "PrepareAuctionMutation", _classify_success)
     def PrepareAuctionMutation(self, request, context):
         with self.state_lock:
             if self.replica_role != "backup":
@@ -856,6 +862,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 message="Mutation prepared.",
             )
 
+    @observe_rpc("storage", "CommitPreparedMutation", _classify_success)
     def CommitPreparedMutation(self, request, context):
         with self.state_lock:
             if self.replica_role != "backup":
@@ -962,6 +969,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 message="Prepared mutation committed.",
             )
 
+    @observe_rpc("storage", "AbortPreparedMutation", _classify_success)
     def AbortPreparedMutation(self, request, context):
         with self.state_lock:
             if self.replica_role != "backup":
@@ -1054,6 +1062,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
 
     # Promotion and failover RPCs
 
+    @observe_rpc("storage", "BeginPrimaryPromotion", _classify_accepted)
     def BeginPrimaryPromotion(self, request, context):
         with self.state_lock:
             if request.epoch <= 0:
@@ -1110,6 +1119,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 message="Primary promotion begun.",
             )
 
+    @observe_rpc("storage", "ConfirmPromotionState", _classify_confirmed)
     def ConfirmPromotionState(self, request, context):
         with self.state_lock:
             if request.epoch <= 0 or request.epoch != self.current_epoch:
@@ -1150,6 +1160,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 message="Committed state confirmed for promotion.",
             )
 
+    @observe_rpc("storage", "CompletePrimaryPromotion", _classify_success)
     def CompletePrimaryPromotion(self, request, context):
         with self.state_lock:
             backup_address = request.backup_address.strip()
@@ -1213,6 +1224,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
 
     # Full-state synchronization RPCs and replacement helpers
 
+    @observe_rpc("storage", "SyncFullState", _classify_ok)
     def SyncFullState(self, request, context):
         with self.state_lock:
             if self.replica_role != "primary":
@@ -1235,6 +1247,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 message="Sync state provided",
             )
 
+    @observe_rpc("storage", "SynchronizeFromPrimary", _classify_success)
     def SynchronizeFromPrimary(self, request, context):
         with self.state_lock:
             if self.replica_role != "backup":
@@ -1383,6 +1396,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
 
     # Health and local snapshot helpers
 
+    @observe_rpc("storage", "Heartbeat", _classify_alive)
     def Heartbeat(self, request, context):
         with self.state_lock:
             return pb2.HealthCheckResponse(

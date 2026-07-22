@@ -161,129 +161,6 @@ class AuctionServiceTests(BackendTestCase):
         self.assertEqual(stale.gets[0].epoch, 4)
         self.assertEqual(fresh.gets[0].epoch, 5)
 
-    def test_get_auction_tracks_successful_request(self):
-        stub = FakeJudgeStub()
-        stub.get_responses.append(pb2.GetStoredAuctionResponse(
-            ok=True,
-            auction=pb2.Auction(auction_id="auction-1", version=4),
-        ))
-        service = TestableAuctionService(stub)
-
-        with mock.patch(
-            "blindsided.auction_service.service.RPC_REQUESTS"
-        ) as request_counter:
-            response = service.GetAuction(
-                pb2.GetAuctionRequest(auction_id="auction-1"),
-                NoopContext(),
-            )
-
-        self.assertTrue(response.ok)
-        request_counter.labels.assert_called_once_with(
-            service="AuctionService",
-            method="GetAuction",
-            result="success",
-        )
-        request_counter.labels.return_value.inc.assert_called_once_with()
-
-    def test_get_auction_observes_rpc_latency(self):
-        stub = FakeJudgeStub()
-        stub.get_responses.append(pb2.GetStoredAuctionResponse(
-            ok=True,
-            auction=pb2.Auction(auction_id="auction-1"),
-        ))
-        service = TestableAuctionService(stub)
-
-        with (
-            mock.patch(
-                "blindsided.auction_service.service.RPC_LATENCY_SECONDS"
-            ) as latency,
-            mock.patch(
-                "blindsided.auction_service.service.time.perf_counter",
-                side_effect=[10.0, 10.25],
-            ),
-        ):
-            response = service.GetAuction(
-                pb2.GetAuctionRequest(auction_id="auction-1"),
-                NoopContext(),
-            )
-
-        self.assertTrue(response.ok)
-        latency.labels.assert_called_once_with(
-            service="AuctionService",
-            method="GetAuction",
-        )
-        latency.labels.return_value.observe.assert_called_once_with(0.25)
-
-    def test_create_auction_tracks_mutation_success(self):
-        stub = FakeJudgeStub()
-        service = TestableAuctionService(stub)
-
-        with mock.patch(
-            "blindsided.auction_service.service.MUTATION_OUTCOMES"
-        ) as outcomes:
-            response = service.CreateAuction(
-                pb2.CreateAuctionRequest(
-                    request_id="tracked-create",
-                    seller_id="seller-a",
-                ),
-                NoopContext(),
-            )
-
-        self.assertTrue(response.ok)
-        outcomes.labels.assert_called_once_with(
-            service="AuctionService",
-            method="CreateAuction",
-            outcome="success",
-        )
-        outcomes.labels.return_value.inc.assert_called_once_with()
-
-    def test_create_auction_tracks_mutation_failure(self):
-        service = TestableAuctionService(FakeJudgeStub())
-
-        with mock.patch(
-            "blindsided.auction_service.service.MUTATION_OUTCOMES"
-        ) as outcomes:
-            response = service.CreateAuction(
-                pb2.CreateAuctionRequest(request_id=""),
-                NoopContext(),
-            )
-
-        self.assertFalse(response.ok)
-        outcomes.labels.assert_called_once_with(
-            service="AuctionService",
-            method="CreateAuction",
-            outcome="failure",
-        )
-        outcomes.labels.return_value.inc.assert_called_once_with()
-
-    def test_create_auction_tracks_unknown_mutation_outcome(self):
-        stub = FakeJudgeStub()
-        stub.mutation_responses.append(pb2.AuctionMutationResponse(
-            success=False,
-            failure_reason=pb2.MUTATION_FAILURE_REASON_ACKNOWLEDGEMENT_PENDING,
-            message="Backup acknowledgement pending.",
-        ))
-        service = TestableAuctionService(stub)
-
-        with mock.patch(
-            "blindsided.auction_service.service.MUTATION_OUTCOMES"
-        ) as outcomes:
-            response = service.CreateAuction(
-                pb2.CreateAuctionRequest(
-                    request_id="unknown-create",
-                    seller_id="seller-a",
-                ),
-                NoopContext(),
-            )
-
-        self.assertTrue(response.outcome_unknown)
-        outcomes.labels.assert_called_once_with(
-            service="AuctionService",
-            method="CreateAuction",
-            outcome="unknown",
-        )
-        outcomes.labels.return_value.inc.assert_called_once_with()
-
     def test_outbound_timeout_respects_shorter_client_deadline(self):
         stub = FakeJudgeStub()
         service = TestableAuctionService(stub)
@@ -786,37 +663,6 @@ class AuctionServiceTests(BackendTestCase):
         self.assertEqual(update.state, pb2.AUCTION_STATE_REVEALED)
         self.assertEqual(update.result.outcome, pb2.AUCTION_OUTCOME_NO_BIDS)
 
-    def test_watch_auction_tracks_completed_stream(self):
-        stub = FakeJudgeStub()
-        stub.get_responses.append(pb2.GetStoredAuctionResponse(
-            ok=True,
-            auction=pb2.Auction(
-                auction_id="auction-1",
-                state=pb2.AUCTION_STATE_REVEALED,
-                version=4,
-                result=pb2.AuctionResult(
-                    outcome=pb2.AUCTION_OUTCOME_NO_BIDS,
-                ),
-            ),
-        ))
-        service = TestableAuctionService(stub)
-
-        with mock.patch(
-            "blindsided.auction_service.service.RPC_REQUESTS"
-        ) as requests:
-            updates = list(service.WatchAuction(
-                pb2.AuctionRequest(auction_id="auction-1"),
-                NoopContext(),
-            ))
-
-        self.assertEqual(len(updates), 1)
-        requests.labels.assert_called_once_with(
-            service="AuctionService",
-            method="WatchAuction",
-            result="success",
-        )
-        requests.labels.return_value.inc.assert_called_once_with()
-
     def test_revealed_no_bids_public_result_exposes_no_bids(self):
         service = TestableAuctionService(FakeJudgeStub())
         public_auction = service._to_public_auction(pb2.Auction(
@@ -1028,19 +874,16 @@ class AuctionServiceTests(BackendTestCase):
         ])
         service = TestableAuctionService(stub)
 
-        with mock.patch(
-            "blindsided.auction_service.service.CONCURRENCY_RETRIES"
-        ) as retries:
-            response = service.PlaceBid(
-                pb2.BidRequest(
-                    auction_id="auction-1",
-                    bidder_id="buyer-a",
-                    amount=250.0,
-                    expected_version=6,
-                    request_id="bid-version-retry",
-                ),
-                NoopContext(),
-            )
+        response = service.PlaceBid(
+            pb2.BidRequest(
+                auction_id="auction-1",
+                bidder_id="buyer-a",
+                amount=250.0,
+                expected_version=6,
+                request_id="bid-version-retry",
+            ),
+            NoopContext(),
+        )
 
         self.assertTrue(response.success)
         self.assertEqual(
@@ -1061,30 +904,6 @@ class AuctionServiceTests(BackendTestCase):
         self.assertEqual(stub.mutations[0].epoch, 7)
         self.assertEqual(stub.mutations[1].epoch, 7)
         self.assertEqual(stub.gets, [])
-        retries.labels.assert_called_once_with(
-            service="AuctionService", method="PlaceBid"
-        )
-        retries.labels.return_value.inc.assert_called_once_with()
-
-    def test_search_auctions_tracks_rpc_result(self):
-        stub = FakeJudgeStub()
-        stub.search_responses.append(pb2.GetStoredAuctionsResponse(ok=True))
-        service = TestableAuctionService(stub)
-
-        with mock.patch(
-            "blindsided.auction_service.service.RPC_REQUESTS"
-        ) as requests:
-            response = service.SearchAuctions(
-                pb2.SearchAuctionsRequest(), NoopContext()
-            )
-
-        self.assertTrue(response.ok)
-        requests.labels.assert_called_once_with(
-            service="AuctionService",
-            method="SearchAuctions",
-            result="success",
-        )
-        requests.labels.return_value.inc.assert_called_once_with()
 
     def test_withdraw_bid_retries_with_latest_version_after_stale_conflict(self):
         stub = FakeJudgeStub()

@@ -625,9 +625,6 @@ class ControllerServiceTests(BackendTestCase):
                 "blindsided.controller.service.pb2_grpc.StorageReplicaServiceStub",
                 return_value=storage_stub,
             ),
-            mock.patch(
-                "blindsided.controller.service.CONTROLLER_FAILOVERS"
-            ) as failovers,
         ):
             response = service.ReportSynchronizationComplete(
                 pb2.SynchronizationCompleteRequest(
@@ -647,10 +644,6 @@ class ControllerServiceTests(BackendTestCase):
         self.assertEqual(completion_request.epoch, 7)
         self.assertEqual(completion_request.backup_address, "backup:50051")
         self.assertEqual(service.primary_assignment.status, PrimaryStatus.READY)
-        failovers.labels.assert_called_once_with(
-            service="ControllerService", outcome="success"
-        )
-        failovers.labels.return_value.inc.assert_called_once_with()
 
     def test_controller_remains_promoting_when_storage_activation_fails(self):
         service = ControllerService()
