@@ -1,0 +1,20 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: "controller"
+    static_configs:
+      - targets:
+          - "controller:8000"
+
+  - job_name: "auction-service"
+    static_configs:
+      - targets:
+          - "service-node:8000"
+
+  - job_name: "storage"
+    static_configs:
+      - targets:
+          - "storage-primary:8000"
+          - "storage-backup:8000"

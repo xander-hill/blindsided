@@ -7,10 +7,12 @@ import grpc
 from blindsided.common.config import NODE_PORT
 from blindsided.generated import blindsided_pb2_grpc as pb2_grpc
 from blindsided.storage.service import StorageReplicaService
+from blindsided.observability.server import start_metrics_server
 
 
 def serve() -> None:
     storage_service = StorageReplicaService()
+    start_metrics_server(8000)
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     pb2_grpc.add_StorageReplicaServiceServicer_to_server(storage_service, server)
     server.add_insecure_port(f"[::]:{NODE_PORT}")

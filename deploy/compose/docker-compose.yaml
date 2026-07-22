@@ -8,6 +8,8 @@ services:
       - "50050:50050"
     environment:
       - CONTROLLER_PORT=50050
+      - METRICS_ENABLED=true
+      - METRICS_PORT=8000
 
   storage-primary:
     build:
@@ -19,6 +21,8 @@ services:
       - NODE_PORT=50051
       - POD_IP=storage-primary:50051
       - AUCTION_STORE_PATH=/var/lib/blindsided/auction-state.pb
+      - METRICS_ENABLED=true
+      - METRICS_PORT=8000
     volumes:
       - storage-primary-state:/var/lib/blindsided
     depends_on:
@@ -34,6 +38,8 @@ services:
       - NODE_PORT=50051
       - POD_IP=storage-backup:50051
       - AUCTION_STORE_PATH=/var/lib/blindsided/auction-state.pb
+      - METRICS_ENABLED=true
+      - METRICS_PORT=8000
     volumes:
       - storage-backup-state:/var/lib/blindsided
     depends_on:
@@ -49,6 +55,8 @@ services:
     environment:
       - CONTROLLER_HOST=controller
       - NODE_PORT=50052
+      - METRICS_ENABLED=true
+      - METRICS_PORT=8000
     depends_on:
       - controller
 
@@ -61,6 +69,23 @@ services:
     depends_on:
       - service-node
 
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ../prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    depends_on:
+      - controller
+      - storage-primary
+      - storage-backup
+      - service-node
+
 volumes:
   storage-primary-state:
   storage-backup-state:
+  prometheus-data:

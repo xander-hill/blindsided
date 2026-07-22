@@ -6,10 +6,12 @@ import grpc
 from blindsided.common.config import CONTROLLER_PORT
 from blindsided.controller.service import ControllerService
 from blindsided.generated import blindsided_pb2_grpc as pb2_grpc
+from blindsided.observability.server import start_metrics_server
 
 
 def serve():
     controller_service = ControllerService()
+    start_metrics_server(8000)
 
     monitor_thread = threading.Thread(
         target=controller_service._monitor_heartbeats,

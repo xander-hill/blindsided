@@ -7,5 +7,5 @@ logger = logging.getLogger(__name__)
 
 
 def start_metrics_server(port: int) -> None:
-    start_http_server(port)
+    start_http_server(port, addr="0.0.0.0")
     logger.info("Prometheus metrics server started on port %s", port)

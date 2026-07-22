@@ -79,13 +79,10 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             "",
         ).strip()
 
-        raw_address = os.getenv("POD_IP", "localhost")
-        if "storage-" in raw_address and ".storage-service" not in raw_address:
-            self.node_address = f"{raw_address}.storage-service:{NODE_PORT}"
-        else:
-            self.node_address = (
-                raw_address if ":" in raw_address else f"{raw_address}:{NODE_PORT}"
-            )
+        self.node_address = os.getenv(
+            "POD_IP",
+            f"localhost:{NODE_PORT}",
+        )
 
         refresh_storage_state_metrics(role="unassigned", ready=False, epoch=0)
         self._load_state_from_disk()
