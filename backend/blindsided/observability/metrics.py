@@ -111,3 +111,35 @@ SYNCHRONIZATION_DURATION_SECONDS = Histogram(
     "Replacement-backup synchronization attempt duration",
     ["outcome"],
 )
+
+STORAGE_ROLE = Gauge(
+    "blindsided_storage_role",
+    "Current process-local storage role as a one-hot value",
+    ["role"],
+)
+
+STORAGE_READY = Gauge(
+    "blindsided_storage_ready",
+    "Whether this storage process is ready for its assigned role",
+)
+
+STORAGE_EPOCH = Gauge(
+    "blindsided_storage_epoch",
+    "Current epoch assigned to this storage process",
+)
+
+ACTIVE_WATCH_STREAMS = Gauge(
+    "blindsided_active_watch_streams",
+    "Current auction watch streams handled by this process",
+)
+
+WATCH_STREAMS = Counter(
+    "blindsided_watch_streams_total",
+    "Terminal auction watch stream outcomes",
+    ["outcome"],
+)
+
+WATCH_UPDATES = Counter(
+    "blindsided_watch_updates_total",
+    "Auction watch updates emitted by this process",
+)

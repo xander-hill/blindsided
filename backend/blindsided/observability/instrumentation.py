@@ -27,6 +27,12 @@ from blindsided.observability.metrics import (
     SYNCHRONIZATION_DURATION_SECONDS,
     RPC_DURATION_SECONDS,
     RPC_REQUESTS,
+    ACTIVE_WATCH_STREAMS,
+    STORAGE_EPOCH,
+    STORAGE_READY,
+    STORAGE_ROLE,
+    WATCH_STREAMS,
+    WATCH_UPDATES,
 )
 
 
@@ -253,3 +259,37 @@ def record_synchronization(outcome: str, duration: float) -> None:
         outcome,
         duration,
     )
+
+
+def refresh_storage_state_metrics(*, role: str, ready: bool, epoch: int) -> None:
+    """Publish one authoritative storage-state snapshot without affecting it."""
+    metric_role = role if role in {"primary", "backup"} else "unassigned"
+    try:
+        for candidate in ("primary", "backup", "unassigned"):
+            STORAGE_ROLE.labels(role=candidate).set(candidate == metric_role)
+        STORAGE_READY.set(1 if ready else 0)
+        STORAGE_EPOCH.set(epoch)
+    except Exception:
+        LOGGER.exception("Failed to refresh storage state metrics")
+
+
+def record_watch_stream_started() -> None:
+    try:
+        ACTIVE_WATCH_STREAMS.inc()
+    except Exception:
+        LOGGER.exception("Failed to record active watch stream")
+
+
+def record_watch_stream_finished(outcome: str) -> None:
+    _safe_increment(WATCH_STREAMS, outcome=outcome)
+    try:
+        ACTIVE_WATCH_STREAMS.dec()
+    except Exception:
+        LOGGER.exception("Failed to decrement active watch streams")
+
+
+def record_watch_update() -> None:
+    try:
+        WATCH_UPDATES.inc()
+    except Exception:
+        LOGGER.exception("Failed to record watch update")

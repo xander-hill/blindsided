@@ -16,6 +16,9 @@ from blindsided.observability.instrumentation import (
     observe_rpc,
     record_concurrency_retry,
     record_idempotency_decision,
+    record_watch_stream_finished,
+    record_watch_stream_started,
+    record_watch_update,
     set_mutation_outcome,
 )
 
@@ -886,44 +889,69 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
         last_version = -1
 
         logger.info("Watcher joined: auction_id=%s", auction_id)
+        outcome = "failure"
+        record_watch_stream_started()
 
-        while context.is_active():
-            assignment = self._resolve_ready_primary(context, allow_recovery=True)
-            if not assignment:
-                time.sleep(1)
-                continue
+        try:
+            while context.is_active():
+                assignment = self._resolve_ready_primary(context, allow_recovery=True)
+                if not assignment:
+                    time.sleep(1)
+                    continue
 
-            try:
-                stub, channel = self._create_storage_stub(assignment.address)
-                with channel:
-                    timeout = self._rpc_timeout(self.read_timeout, context)
-                    if timeout is None:
-                        return
-                    response = stub.GetAuction(
-                        pb2.StorageGetAuctionRequest(
-                            auction_id=auction_id,
-                            epoch=assignment.epoch,
-                        ),
-                        timeout=timeout,
-                    )
+                try:
+                    stub, channel = self._create_storage_stub(assignment.address)
+                    with channel:
+                        timeout = self._rpc_timeout(self.read_timeout, context)
+                        if timeout is None:
+                            outcome = (
+                                "cancelled"
+                                if not context.is_active()
+                                else "completed"
+                            )
+                            return
+                        response = stub.GetAuction(
+                            pb2.StorageGetAuctionRequest(
+                                auction_id=auction_id,
+                                epoch=assignment.epoch,
+                            ),
+                            timeout=timeout,
+                        )
 
-                    if not response.ok and self._is_read_authority_failure(response):
-                        time.sleep(0.05)
-                        continue
+                        if not response.ok and self._is_read_authority_failure(
+                            response
+                        ):
+                            time.sleep(0.05)
+                            continue
 
-                    if response.ok:
-                        auction = response.auction
+                        if response.ok:
+                            auction = response.auction
 
-                        if auction.version > last_version:
-                            last_version = auction.version
+                            if auction.version > last_version:
+                                last_version = auction.version
 
-                            yield self._to_public_auction_update(auction)
-                            if auction.state == pb2.AUCTION_STATE_REVEALED:
-                                return
+                                update = self._to_public_auction_update(auction)
+                                record_watch_update()
+                                yield update
+                                if auction.state == pb2.AUCTION_STATE_REVEALED:
+                                    outcome = "completed"
+                                    return
 
-                time.sleep(1)
+                    time.sleep(1)
 
-            except grpc.RpcError as error:
-                if not self._is_failover_rpc_error(error):
-                    logger.warning("Storage WatchAuction read failed: status=%s", error.code())
-                time.sleep(2)
+                except grpc.RpcError as error:
+                    if not self._is_failover_rpc_error(error):
+                        logger.warning(
+                            "Storage WatchAuction read failed: status=%s",
+                            error.code(),
+                        )
+                    time.sleep(2)
+            outcome = "cancelled"
+        except GeneratorExit:
+            outcome = "cancelled"
+            raise
+        except BaseException:
+            outcome = "cancelled" if not context.is_active() else "failure"
+            raise
+        finally:
+            record_watch_stream_finished(outcome)

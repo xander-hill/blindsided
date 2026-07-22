@@ -208,3 +208,69 @@ sum by (outcome) (increase(blindsided_synchronization_attempts_total[1h]))
 
 Controller recovery events are intentionally low-frequency; `increase()` over
 demo-sized windows may be more useful than short `rate()` windows.
+
+## Storage process state
+
+`blindsided_storage_role{role}` is a process-local one-hot gauge. Its bounded
+roles are `primary`, `backup`, and `unassigned`; exactly one series is `1` and
+the others are `0`. It is refreshed from authoritative storage state at startup
+registration, promotion begin or rollback, and retained synchronization state.
+No node address, assignment, auction, or epoch is an application label.
+
+`blindsided_storage_ready` is an unlabeled process-local gauge. It follows the
+existing barriers: a newly promoted primary is not ready until promotion
+completion persists its synchronous backup, and a backup is not ready while
+full-state synchronization is in progress. A backup becomes ready only after
+state replacement, controller completion reporting, and primary configuration
+all succeed.
+
+`blindsided_storage_epoch` is the current assigned epoch, initially `0` before
+registration. Role, readiness, and epoch are published together under the
+storage state lock. Older promotion requests and synchronization callbacks
+whose role or epoch identity no longer matches return without overwriting a
+newer metric snapshot.
+
+```promql
+blindsided_storage_role
+```
+
+```promql
+sum(blindsided_storage_ready)
+```
+
+```promql
+blindsided_storage_epoch
+```
+
+Prometheus target labels such as `instance` and `job` distinguish storage
+processes; no high-cardinality process identity label is added by the service.
+
+## Auction watch streams
+
+`blindsided_active_watch_streams` is an unlabeled gauge of currently active
+`WatchAuction` generators in each auction-service process. It increments when
+iteration accepts a stream and decrements from a `finally` block on every exit.
+
+`blindsided_watch_streams_total{outcome}` records exactly one terminal outcome:
+`completed` when the revealed update closes the stream or its active deadline
+ends normally, `cancelled` when `context.is_active()` becomes false or the
+generator is closed, and `failure` when an unexpected active-handler exception
+propagates. Cancellation classification uses structured context state and
+`GeneratorExit`; exception messages are not inspected.
+
+`blindsided_watch_updates_total` is an unlabeled counter incremented once just
+before each public update is yielded. The current protocol has no structured
+bounded update type, so `update_type` is deliberately omitted. Auction and
+client identifiers are never labels.
+
+```promql
+sum(blindsided_active_watch_streams)
+```
+
+```promql
+sum by (outcome) (rate(blindsided_watch_streams_total[5m]))
+```
+
+```promql
+sum(rate(blindsided_watch_updates_total[5m]))
+```
