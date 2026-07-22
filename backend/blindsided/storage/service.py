@@ -8,6 +8,7 @@ import grpc
 from blindsided.common.config import CONTROLLER_ADDRESS, NODE_PORT
 from blindsided.generated import blindsided_pb2 as pb2
 from blindsided.generated import blindsided_pb2_grpc as pb2_grpc
+from blindsided.observability.metrics import REPLICATION_OPERATIONS
 from blindsided.storage.auction_domain import AuctionDomain
 from blindsided.storage.replication_client import SynchronousReplicationClient
 from blindsided.storage.snapshot_repository import StorageSnapshotRepository
@@ -687,6 +688,9 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             candidate_auction,
             idempotency_record,
         ):
+            REPLICATION_OPERATIONS.labels(
+                service="StorageReplicaService", phase="prepare", outcome="failure"
+            ).inc()
             self._abort_on_synchronous_backup(
                 request_id,
                 candidate_auction.auction_id,
@@ -698,12 +702,18 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 auction_id=candidate_auction.auction_id,
                 message="Synchronous backup preparation failed.",
             )
+        REPLICATION_OPERATIONS.labels(
+            service="StorageReplicaService", phase="prepare", outcome="success"
+        ).inc()
 
         if not self._record_commit_decision(
             request_id,
             candidate_auction,
             idempotency_record,
         ):
+            REPLICATION_OPERATIONS.labels(
+                service="StorageReplicaService", phase="commit_decision", outcome="failure"
+            ).inc()
             self._abort_on_synchronous_backup(
                 request_id,
                 candidate_auction.auction_id,
@@ -715,8 +725,14 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 auction_id=candidate_auction.auction_id,
                 message="Primary commit decision could not be persisted.",
             )
+        REPLICATION_OPERATIONS.labels(
+            service="StorageReplicaService", phase="commit_decision", outcome="success"
+        ).inc()
 
         if not self._complete_pending_backup_commit(request_id):
+            REPLICATION_OPERATIONS.labels(
+                service="StorageReplicaService", phase="acknowledgement", outcome="pending"
+            ).inc()
             return pb2.AuctionMutationResponse(
                 success=False,
                 current_version=candidate_auction.version,
@@ -724,6 +740,10 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 auction_id=candidate_auction.auction_id,
                 message="Commit is durable but backup acknowledgement is pending.",
             )
+
+        REPLICATION_OPERATIONS.labels(
+            service="StorageReplicaService", phase="acknowledgement", outcome="success"
+        ).inc()
 
         return success_response
 

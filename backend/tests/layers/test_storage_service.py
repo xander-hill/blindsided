@@ -645,6 +645,9 @@ class StorageServiceTests(BackendTestCase):
                 side_effect=lambda *args: calls.append("complete") or True,
             ),
             mock.patch.object(judge, "_abort_on_synchronous_backup") as abort,
+            mock.patch(
+                "blindsided.storage.service.REPLICATION_OPERATIONS"
+            ) as replication,
         ):
             response = judge._coordinate_synchronous_commit(
                 "prepare-1",
@@ -657,6 +660,27 @@ class StorageServiceTests(BackendTestCase):
         self.assertEqual(calls, ["prepare", "record", "complete"])
         abort.assert_not_called()
         self.assertIs(response, original_success)
+        self.assertEqual(
+            [call.kwargs for call in replication.labels.call_args_list],
+            [
+                {
+                    "service": "StorageReplicaService",
+                    "phase": "prepare",
+                    "outcome": "success",
+                },
+                {
+                    "service": "StorageReplicaService",
+                    "phase": "commit_decision",
+                    "outcome": "success",
+                },
+                {
+                    "service": "StorageReplicaService",
+                    "phase": "acknowledgement",
+                    "outcome": "success",
+                },
+            ],
+        )
+        self.assertEqual(replication.labels.return_value.inc.call_count, 3)
 
     def test_primary_prepare_returns_false_without_synchronous_backup(self):
         judge = make_judge(role="primary")

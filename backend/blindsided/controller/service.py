@@ -8,6 +8,7 @@ import grpc
 
 from blindsided.generated import blindsided_pb2 as pb2
 from blindsided.generated import blindsided_pb2_grpc as pb2_grpc
+from blindsided.observability.metrics import CONTROLLER_FAILOVERS
 
 
 LOGGER = logging.getLogger(__name__)
@@ -270,6 +271,9 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
                     success=False, message="Primary assignment changed during completion."
                 )
             self.primary_assignment.status = PrimaryStatus.READY
+        CONTROLLER_FAILOVERS.labels(
+            service="ControllerService", outcome="success"
+        ).inc()
         return pb2.SynchronizationCompleteResponse(
             success=True,
             message="Replica synchronized and primary promotion completed.",
@@ -364,6 +368,9 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
             for replica in self.nodes.values():
                 replica.sync_status = ReplicaSyncStatus.UNSYNCHRONIZED
                 replica.synchronized_epoch = 0
+        CONTROLLER_FAILOVERS.labels(
+            service="ControllerService", outcome="attempt"
+        ).inc()
         LOGGER.info(
             "Elected primary candidate %s for epoch %s",
             candidate_address,
@@ -531,6 +538,9 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
             epoch,
             reason,
         )
+        CONTROLLER_FAILOVERS.labels(
+            service="ControllerService", outcome="failure"
+        ).inc()
         self._elect_new_primary(retry_addresses)
 
     def _handle_promotion_backup_failure(
@@ -578,6 +588,9 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
             epoch,
             reason,
         )
+        CONTROLLER_FAILOVERS.labels(
+            service="ControllerService", outcome="failure"
+        ).inc()
 
     # Heartbeat monitoring and replica eviction
 

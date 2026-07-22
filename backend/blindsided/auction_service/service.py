@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from functools import wraps
 import logging
 import os
 import random
@@ -11,12 +12,102 @@ import grpc
 from blindsided.common.config import CONTROLLER_PORT
 from blindsided.generated import blindsided_pb2 as pb2
 from blindsided.generated import blindsided_pb2_grpc as pb2_grpc
+from blindsided.observability.metrics import (
+    CONCURRENCY_RETRIES,
+    MUTATION_OUTCOMES,
+    RPC_LATENCY_SECONDS,
+    RPC_REQUESTS,
+)
 
 
 controller_host = os.getenv("CONTROLLER_HOST", "localhost")
 CONTROLLER_ADDRESS = f"{controller_host}:{CONTROLLER_PORT}"
 CREATE_AUCTION_NAMESPACE = UUID("9c056d8e-23e6-5b5f-9f53-ff0c44f30ae1")
 logger = logging.getLogger(__name__)
+
+
+def _observe_rpc(method: str, *, mutation_success_field: str | None = None):
+    """Track unary RPC duration and, for mutations, the final client outcome."""
+    def decorator(handler):
+        @wraps(handler)
+        def wrapped(self, request, context):
+            started_at = time.perf_counter()
+            try:
+                response = handler(self, request, context)
+                if mutation_success_field is not None:
+                    if getattr(response, "outcome_unknown", False):
+                        outcome = "unknown"
+                    elif getattr(response, mutation_success_field):
+                        outcome = "success"
+                    else:
+                        outcome = "failure"
+                    MUTATION_OUTCOMES.labels(
+                        service="AuctionService",
+                        method=method,
+                        outcome=outcome,
+                    ).inc()
+                elif hasattr(response, "ok"):
+                    outcome = "success" if response.ok else "failure"
+                elif hasattr(response, "success"):
+                    outcome = "success" if response.success else "failure"
+                else:
+                    outcome = "success"
+                RPC_REQUESTS.labels(
+                    service="AuctionService",
+                    method=method,
+                    result=outcome,
+                ).inc()
+                return response
+            except Exception:
+                if mutation_success_field is not None:
+                    MUTATION_OUTCOMES.labels(
+                        service="AuctionService",
+                        method=method,
+                        outcome="failure",
+                    ).inc()
+                RPC_REQUESTS.labels(
+                    service="AuctionService",
+                    method=method,
+                    result="failure",
+                ).inc()
+                raise
+            finally:
+                RPC_LATENCY_SECONDS.labels(
+                    service="AuctionService",
+                    method=method,
+                ).observe(time.perf_counter() - started_at)
+
+        return wrapped
+
+    return decorator
+
+
+def _observe_stream_rpc(method: str):
+    """Track a streaming RPC when its generator completes or is closed."""
+    def decorator(handler):
+        @wraps(handler)
+        def wrapped(self, request, context):
+            started_at = time.perf_counter()
+            outcome = "success"
+            try:
+                yield from handler(self, request, context)
+            except Exception:
+                outcome = "failure"
+                raise
+            finally:
+                RPC_REQUESTS.labels(
+                    service="AuctionService",
+                    method=method,
+                    result=outcome,
+                ).inc()
+                RPC_LATENCY_SECONDS.labels(
+                    service="AuctionService",
+                    method=method,
+                ).observe(time.perf_counter() - started_at)
+
+        return wrapped
+
+    return decorator
 
 
 def _auction_id_for_request(request_id: str) -> str:
@@ -245,6 +336,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
 
     # Mutation RPC handlers. Domain validation and idempotency remain in storage.
 
+    @_observe_rpc("CreateAuction", mutation_success_field="ok")
     def CreateAuction(
         self,
         request: pb2.CreateAuctionRequest,
@@ -329,6 +421,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                 return pb2.CreateAuctionResponse(ok=False, message="Storage mutation failed.")
         return pb2.CreateAuctionResponse(ok=False, message="Vault write retry failed.")
 
+    @_observe_rpc("PlaceBid", mutation_success_field="success")
     def PlaceBid(self, request: pb2.BidRequest, context) -> pb2.BidResponse:
         """Retry stale-version bid writes against the latest committed version."""
         if not request.request_id.strip():
@@ -392,6 +485,10 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                         and response.current_version
                         and attempt < mutation_retry_limit - 1
                     ):
+                        CONCURRENCY_RETRIES.labels(
+                            service="AuctionService",
+                            method="PlaceBid",
+                        ).inc()
                         current_attempt_version = response.current_version
                         logger.info(
                             "Retrying version conflict: operation=place_bid "
@@ -429,6 +526,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
             message="Vault write contention too high.",
         )
 
+    @_observe_rpc("WithdrawBid", mutation_success_field="success")
     def WithdrawBid(self, request: pb2.WithdrawBidRequest, context) -> pb2.WithdrawBidResponse:
         """Withdraw the caller's active bid through the current primary replica."""
         if not request.request_id.strip():
@@ -494,6 +592,10 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                         and response.current_version
                         and attempt < mutation_retry_limit - 1
                     ):
+                        CONCURRENCY_RETRIES.labels(
+                            service="AuctionService",
+                            method="WithdrawBid",
+                        ).inc()
                         current_attempt_version = response.current_version
                         logger.info(
                             "Retrying version conflict: operation=withdraw_bid "
@@ -535,6 +637,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
             message="Vault write contention too high.",
         )
 
+    @_observe_rpc("RevealAuction", mutation_success_field="ok")
     def RevealAuction(self, request: pb2.RevealAuctionRequest, context):
         if not request.request_id.strip():
             return pb2.RevealAuctionResponse(
@@ -591,6 +694,10 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                         and response.current_version
                         and attempt < mutation_retry_limit - 1
                     ):
+                        CONCURRENCY_RETRIES.labels(
+                            service="AuctionService",
+                            method="RevealAuction",
+                        ).inc()
                         current_attempt_version = response.current_version
                         logger.info(
                             "Retrying version conflict: operation=reveal "
@@ -673,6 +780,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
         return update
 
     # Stale-tolerant discovery read; any healthy replica may answer.
+    @_observe_rpc("SearchAuctions")
     def SearchAuctions(
         self,
         request: pb2.SearchAuctionsRequest,
@@ -721,6 +829,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
     # Authoritative read RPC handlers. Unlike search, these always use the
     # controller's current primary assignment and epoch.
 
+    @_observe_rpc("GetAuction")
     def GetAuction(self, request: pb2.GetAuctionRequest, context) -> pb2.GetAuctionResponse:
         """Fetch one auction from the primary and hide sealed bids while open."""
         recovery_deadline = time.monotonic() + self.failover_recovery_window
@@ -770,6 +879,7 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
                     )
                 time.sleep(min(0.05, max(0.0, recovery_deadline - time.monotonic())))
 
+    @_observe_stream_rpc("WatchAuction")
     def WatchAuction(self, request: pb2.AuctionRequest, context):
         """Stream public auction updates, revealing winner and amount only at close."""
         auction_id = request.auction_id
