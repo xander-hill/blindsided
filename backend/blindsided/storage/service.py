@@ -8,7 +8,11 @@ import grpc
 from blindsided.common.config import CONTROLLER_ADDRESS, NODE_PORT
 from blindsided.generated import blindsided_pb2 as pb2
 from blindsided.generated import blindsided_pb2_grpc as pb2_grpc
-from blindsided.observability.instrumentation import observe_rpc
+from blindsided.observability.instrumentation import (
+    observe_rpc,
+    record_commit_outcome,
+    replication_operation,
+)
 from blindsided.storage.auction_domain import AuctionDomain
 from blindsided.storage.replication_client import SynchronousReplicationClient
 from blindsided.storage.snapshot_repository import StorageSnapshotRepository
@@ -151,7 +155,8 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
         logical operation. Candidate construction is side-effect free; only the
         commit coordinator may publish the candidate to replica state.
         """
-        with self.state_lock:
+        operation = self._mutation_operation(request)
+        with replication_operation(operation), self.state_lock:
             request_error = self._mutation_request_error(request)
             if request_error is not None:
                 return request_error
@@ -202,6 +207,20 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 response,
                 previous_version,
             )
+
+    @staticmethod
+    def _mutation_operation(request: pb2.AuctionMutationRequest) -> str:
+        operations = {
+            pb2.AUCTION_MUTATION_TYPE_CREATE: "CreateAuction",
+            pb2.AUCTION_MUTATION_TYPE_PLACE_BID: "PlaceBid",
+            pb2.AUCTION_MUTATION_TYPE_WITHDRAW_BID: "WithdrawBid",
+            pb2.AUCTION_MUTATION_TYPE_REVEAL: "RevealAuction",
+        }
+        if request.mutation_type in operations:
+            return operations[request.mutation_type]
+        if request.bidder_id or request.auction.bids:
+            return "PlaceBid"
+        return "CreateAuction"
 
     def _mutation_request_error(
         self,
@@ -711,6 +730,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             candidate_auction,
             idempotency_record,
         ):
+            record_commit_outcome("aborted")
             self._abort_on_synchronous_backup(
                 request_id,
                 candidate_auction.auction_id,
@@ -728,6 +748,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             candidate_auction,
             idempotency_record,
         ):
+            record_commit_outcome("aborted")
             self._abort_on_synchronous_backup(
                 request_id,
                 candidate_auction.auction_id,
@@ -741,6 +762,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             )
 
         if not self._complete_pending_backup_commit(request_id):
+            record_commit_outcome("unknown")
             return pb2.AuctionMutationResponse(
                 success=False,
                 current_version=candidate_auction.version,
@@ -748,8 +770,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 auction_id=candidate_auction.auction_id,
                 message="Commit is durable but backup acknowledgement is pending.",
             )
-
-
+        record_commit_outcome("committed")
         return success_response
 
     # Synchronous replication RPCs and commit-protocol helpers

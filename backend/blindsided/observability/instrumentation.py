@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from contextvars import ContextVar
+from contextlib import contextmanager
 from functools import wraps
 import logging
 import time
@@ -10,6 +11,9 @@ from blindsided.observability.metrics import (
     CONCURRENCY_RETRIES,
     IDEMPOTENCY_REQUESTS,
     MUTATIONS,
+    COMMITS,
+    REPLICATION_ATTEMPTS,
+    REPLICATION_DURATION_SECONDS,
     RPC_DURATION_SECONDS,
     RPC_REQUESTS,
 )
@@ -29,6 +33,10 @@ BOUNDED_RESULTS = frozenset({
 ResultClassifier = Callable[[object], str]
 _mutation_outcome: ContextVar[str | None] = ContextVar(
     "blindsided_mutation_outcome",
+    default=None,
+)
+_replication_operation: ContextVar[str | None] = ContextVar(
+    "blindsided_replication_operation",
     default=None,
 )
 
@@ -154,3 +162,40 @@ def record_idempotency_decision(operation: str, outcome: str) -> None:
         operation=operation,
         outcome=outcome,
     )
+
+
+@contextmanager
+def replication_operation(operation: str):
+    token = _replication_operation.set(operation)
+    try:
+        yield
+    finally:
+        _replication_operation.reset(token)
+
+
+def current_replication_operation() -> str | None:
+    return _replication_operation.get()
+
+
+def record_replication_attempt(
+    operation: str,
+    outcome: str,
+    duration: float,
+) -> None:
+    try:
+        REPLICATION_ATTEMPTS.labels(
+            operation=operation,
+            outcome=outcome,
+        ).inc()
+        REPLICATION_DURATION_SECONDS.labels(
+            operation=operation,
+            outcome=outcome,
+        ).observe(duration)
+    except Exception:
+        LOGGER.exception("Failed to record replication metric")
+
+
+def record_commit_outcome(outcome: str) -> None:
+    operation = current_replication_operation()
+    if operation is not None:
+        _safe_increment(COMMITS, operation=operation, outcome=outcome)

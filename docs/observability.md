@@ -54,3 +54,60 @@ storage have no idempotency decision and are not counted.
 ```promql
 sum by (operation, outcome) (rate(blindsided_idempotency_requests_total[5m]))
 ```
+
+## Synchronous replication attempts
+
+`blindsided_replication_attempts_total` is a counter labeled by `operation` and
+`outcome`. The primary storage process emits one sample for every actual
+candidate-bearing `PrepareAuctionMutation` RPC to its designated synchronous
+backup. Operations use the four external mutation RPC names. Allowed outcomes
+are `success`, `timeout`, `rejected`, `unreachable`, and `failure`.
+
+This metric excludes local candidate construction, backup commit/abort control
+messages, controller health traffic, and failover synchronization. The current
+`PrepareMutationResponse` has no structured stale-epoch reason, so stale-epoch
+rejections are included in `rejected`; messages are deliberately not parsed.
+The current replication client does not retry prepare internally, so there is
+one attempt per coordinator invocation.
+
+```promql
+sum by (operation, outcome) (rate(blindsided_replication_attempts_total[5m]))
+```
+
+```promql
+sum by (outcome) (rate(blindsided_replication_attempts_total{outcome!="success"}[5m]))
+```
+
+## Synchronous replication duration
+
+`blindsided_replication_duration_seconds` is a histogram labeled by `operation`
+and `outcome`. It measures the complete outbound candidate-prepare call, from
+immediately before channel creation until response or exception classification.
+The counter and histogram use the same outcome and emit once per actual attempt.
+Buckets are tuned for local synchronous calls from 5 ms through 5 seconds.
+
+```promql
+histogram_quantile(0.95, sum by (le, operation, outcome) (rate(blindsided_replication_duration_seconds_bucket[5m])))
+```
+
+## Primary commit outcomes
+
+`blindsided_commits_total` is a primary-only counter labeled by `operation` and
+`outcome`. `committed` means candidate preparation, durable primary decision,
+and designated-backup acknowledgement all succeeded. `aborted` means the
+coordinator stopped before a durable commit. `unknown` means the primary made a
+durable decision but backup acknowledgement remains pending—the protocol's
+explicit uncertain client outcome.
+
+The primary coordinator emits exactly one outcome for each mutation reaching
+commit coordination. Backup application, candidate-validation failures,
+idempotent replay, and external auction-service mutation outcomes are separate
+concerns and do not increment this counter.
+
+```promql
+sum by (operation, outcome) (rate(blindsided_commits_total[5m]))
+```
+
+```promql
+sum(rate(blindsided_commits_total{outcome="committed"}[5m])) / sum(rate(blindsided_commits_total[5m]))
+```

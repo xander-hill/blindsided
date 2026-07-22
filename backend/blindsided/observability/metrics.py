@@ -30,3 +30,22 @@ IDEMPOTENCY_REQUESTS = Counter(
     "Authoritative idempotency decisions for mutation requests",
     ["operation", "outcome"],
 )
+
+REPLICATION_ATTEMPTS = Counter(
+    "blindsided_replication_attempts_total",
+    "Primary-to-designated-backup replication attempts",
+    ["operation", "outcome"],
+)
+
+REPLICATION_DURATION_SECONDS = Histogram(
+    "blindsided_replication_duration_seconds",
+    "Duration of primary-to-designated-backup replication attempts",
+    ["operation", "outcome"],
+    buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0),
+)
+
+COMMITS = Counter(
+    "blindsided_commits_total",
+    "Final primary commit coordination outcomes",
+    ["operation", "outcome"],
+)
