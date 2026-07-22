@@ -8,7 +8,14 @@ import grpc
 
 from blindsided.generated import blindsided_pb2 as pb2
 from blindsided.generated import blindsided_pb2_grpc as pb2_grpc
-from blindsided.observability.instrumentation import observe_rpc
+from blindsided.observability.instrumentation import (
+    observe_rpc,
+    record_failover,
+    record_health_transition,
+    record_promotion,
+    record_synchronization,
+    set_controller_gauges,
+)
 
 
 LOGGER = logging.getLogger(__name__)
@@ -16,6 +23,13 @@ LOGGER = logging.getLogger(__name__)
 
 def _classify_success(response) -> str:
     return "success" if response.success else "failure"
+
+
+def _rpc_status(error: grpc.RpcError):
+    try:
+        return error.code()
+    except Exception:
+        return None
 
 HEARTBEAT_RPC_TIMEOUT_SECONDS = 2.0
 PROMOTION_RPC_TIMEOUT_SECONDS = 5.0
@@ -78,6 +92,37 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
         self._promotion_timeout = promotion_timeout
         self._synchronization_timeout = synchronization_timeout
         self._election_in_progress = False
+        self._failover_started_at: float | None = None
+        self._promotion_started_at: dict[tuple[str, int], float] = {}
+
+        set_controller_gauges(registered=0, healthy=0, ready=False, epoch=0)
+
+    def _refresh_gauges_locked(self) -> None:
+        assignment = self.primary_assignment
+        set_controller_gauges(
+            registered=len(self.nodes),
+            healthy=sum(
+                node.consecutive_heartbeat_failures == 0
+                for node in self.nodes.values()
+            ),
+            ready=bool(assignment and assignment.status == PrimaryStatus.READY),
+            epoch=self.last_primary_epoch,
+        )
+
+    def _finish_failover_locked(self, outcome: str) -> None:
+        started_at = self._failover_started_at
+        if started_at is not None:
+            self._failover_started_at = None
+            record_failover(outcome, time.perf_counter() - started_at)
+
+    def _finish_promotion_locked(
+        self, candidate_address: str, epoch: int, outcome: str
+    ) -> None:
+        started_at = self._promotion_started_at.pop(
+            (candidate_address, epoch), None
+        )
+        if started_at is not None:
+            record_promotion(outcome, time.perf_counter() - started_at)
 
     # Public controller RPCs
 
@@ -90,6 +135,7 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
                 message="Replica address is required.",
             )
         with self.lock:
+            existing = self.nodes.get(address)
             reported_epoch = max(0, request.epoch)
             reported_synchronized = (
                 request.role == "backup" and reported_epoch > 0
@@ -104,10 +150,15 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
                 ),
                 synchronized_epoch=reported_epoch if reported_synchronized else 0,
             )
+            if existing is None:
+                record_health_transition("registered")
+            elif existing.consecutive_heartbeat_failures > 0:
+                record_health_transition("unhealthy_to_healthy")
             if (
                 self.primary_assignment is not None
                 and reported_epoch > self.primary_assignment.epoch
             ):
+                invalidated = self.primary_assignment
                 LOGGER.warning(
                     "Invalidating recovered primary %s at epoch %s after %s "
                     "reported higher epoch %s",
@@ -116,8 +167,14 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
                     address,
                     reported_epoch,
                 )
+                self._finish_promotion_locked(
+                    invalidated.primary_address,
+                    invalidated.epoch,
+                    "failed",
+                )
                 self.primary_assignment = None
                 self._election_in_progress = False
+                self._finish_failover_locked("failed")
             if reported_epoch > self.last_primary_epoch:
                 self.last_primary_epoch = reported_epoch
             if (
@@ -145,6 +202,7 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
                 )
                 LOGGER.info("Initial replica assigned as primary: %s", address)
             assignment = self.primary_assignment
+            self._refresh_gauges_locked()
             LOGGER.info("Registered replica: %s", address)
             return pb2.RegisterResponse(
                 success=True,
@@ -225,6 +283,7 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
             replica.synchronized_epoch = assignment.epoch
             if assignment.status == PrimaryStatus.READY:
                 assignment.sync_backup_address = replica_address
+                self._refresh_gauges_locked()
                 return pb2.SynchronizationCompleteResponse(
                     success=True,
                     message="Replica synchronized and designated as synchronous backup.",
@@ -253,7 +312,10 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
                 error,
             )
             self._abandon_promotion_attempt(
-                candidate_address, epoch, "completion result is ambiguous"
+                candidate_address,
+                epoch,
+                "completion result is ambiguous",
+                outcome="abandoned",
             )
             return pb2.SynchronizationCompleteResponse(
                 success=False, message="Primary promotion completion RPC failed."
@@ -266,7 +328,10 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
 
         if not completion.success or completion.epoch != epoch:
             self._handle_candidate_promotion_failure(
-                candidate_address, epoch, "completion rejected"
+                candidate_address,
+                epoch,
+                "completion rejected",
+                promotion_outcome="rejected",
             )
             return pb2.SynchronizationCompleteResponse(
                 success=False, message="Primary promotion completion was rejected."
@@ -279,6 +344,9 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
                     success=False, message="Primary assignment changed during completion."
                 )
             self.primary_assignment.status = PrimaryStatus.READY
+            self._finish_promotion_locked(candidate_address, epoch, "completed")
+            self._finish_failover_locked("completed")
+            self._refresh_gauges_locked()
         return pb2.SynchronizationCompleteResponse(
             success=True,
             message="Replica synchronized and primary promotion completed.",
@@ -350,9 +418,13 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
         with self.lock:
             if self.primary_assignment is not None or self._election_in_progress:
                 return
+            if self._failover_started_at is None and self.last_primary_epoch > 0:
+                self._failover_started_at = time.perf_counter()
             candidate_address = self._select_primary_candidate_locked(eligible_addresses)
             if candidate_address is None:
                 LOGGER.critical("No synchronized replica can be promoted")
+                self._finish_failover_locked("failed")
+                self._refresh_gauges_locked()
                 return
             prior_eligible = tuple(
                 address
@@ -370,9 +442,13 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
             )
             self.primary_assignment = assignment
             self._election_in_progress = True
+            self._promotion_started_at[(candidate_address, assignment.epoch)] = (
+                time.perf_counter()
+            )
             for replica in self.nodes.values():
                 replica.sync_status = ReplicaSyncStatus.UNSYNCHRONIZED
                 replica.synchronized_epoch = 0
+            self._refresh_gauges_locked()
         LOGGER.info(
             "Elected primary candidate %s for epoch %s",
             candidate_address,
@@ -413,7 +489,10 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
                 )
                 if not begun.accepted or begun.epoch != epoch:
                     self._handle_candidate_promotion_failure(
-                        candidate_address, epoch, "begin rejected"
+                        candidate_address,
+                        epoch,
+                        "begin rejected",
+                        promotion_outcome="rejected",
                     )
                     return
                 if not self._validate_promotion_context(candidate_address, epoch):
@@ -424,7 +503,10 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
                 )
             if not confirmed.confirmed or confirmed.epoch != epoch:
                 self._handle_candidate_promotion_failure(
-                    candidate_address, epoch, "state confirmation rejected"
+                    candidate_address,
+                    epoch,
+                    "state confirmation rejected",
+                    promotion_outcome="rejected",
                 )
                 return
             self._try_next_promotion_backup(candidate_address, epoch)
@@ -436,7 +518,14 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
                 error,
             )
             self._handle_candidate_promotion_failure(
-                candidate_address, epoch, "candidate promotion RPC failed"
+                candidate_address,
+                epoch,
+                "candidate promotion RPC failed",
+                promotion_outcome=(
+                    "timeout"
+                    if _rpc_status(error) == grpc.StatusCode.DEADLINE_EXCEEDED
+                    else "failed"
+                ),
             )
         except Exception:
             LOGGER.exception(
@@ -445,7 +534,10 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
                 epoch,
             )
             self._handle_candidate_promotion_failure(
-                candidate_address, epoch, "unexpected candidate promotion error"
+                candidate_address,
+                epoch,
+                "unexpected candidate promotion error",
+                promotion_outcome="failed",
             )
 
     def _try_next_promotion_backup(self, candidate_address: str, epoch: int):
@@ -472,6 +564,7 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
                 candidate_address, epoch, "no eligible promotion backup"
             )
             return
+        synchronization_started_at = time.perf_counter()
         try:
             with grpc.insecure_channel(backup_address) as channel:
                 synchronization = pb2_grpc.StorageReplicaServiceStub(
@@ -483,6 +576,12 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
                     timeout=self._synchronization_timeout,
                 )
         except grpc.RpcError as error:
+            record_synchronization(
+                "timeout"
+                if _rpc_status(error) == grpc.StatusCode.DEADLINE_EXCEEDED
+                else "failed",
+                time.perf_counter() - synchronization_started_at,
+            )
             LOGGER.warning(
                 "Synchronization RPC to backup %s failed: %s",
                 backup_address,
@@ -493,6 +592,9 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
             )
             return
         except Exception:
+            record_synchronization(
+                "failed", time.perf_counter() - synchronization_started_at
+            )
             LOGGER.exception(
                 "Unexpected synchronization error for backup %s", backup_address
             )
@@ -501,10 +603,16 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
             )
             return
         if not synchronization.success or synchronization.epoch != epoch:
+            record_synchronization(
+                "rejected", time.perf_counter() - synchronization_started_at
+            )
             self._handle_promotion_backup_failure(
                 candidate_address, epoch, backup_address, "synchronization rejected"
             )
             return
+        record_synchronization(
+            "completed", time.perf_counter() - synchronization_started_at
+        )
         LOGGER.info(
                 "Backup %s synchronized from %s for epoch %s",
             backup_address,
@@ -515,7 +623,12 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
     # Promotion recovery
 
     def _handle_candidate_promotion_failure(
-        self, candidate_address: str, epoch: int, reason: str
+        self,
+        candidate_address: str,
+        epoch: int,
+        reason: str,
+        *,
+        promotion_outcome: str = "failed",
     ):
         with self.lock:
             if not self._assignment_matches_locked(
@@ -528,12 +641,18 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
                 for address in assignment.eligible_backup_addresses
                 if address != candidate_address and address in self.nodes
             )
-            self.nodes.pop(candidate_address, None)
+            removed = self.nodes.pop(candidate_address, None)
+            if removed is not None:
+                record_health_transition("removed")
+            self._finish_promotion_locked(
+                candidate_address, epoch, promotion_outcome
+            )
             for replica in self.nodes.values():
                 replica.sync_status = ReplicaSyncStatus.UNSYNCHRONIZED
                 replica.synchronized_epoch = 0
             self.primary_assignment = None
             self._election_in_progress = False
+            self._refresh_gauges_locked()
         LOGGER.warning(
             "Promotion of %s at epoch %s failed (%s)",
             candidate_address,
@@ -557,8 +676,11 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
                 backup_address,
             ):
                 return
-            self.nodes.pop(backup_address, None)
+            removed = self.nodes.pop(backup_address, None)
+            if removed is not None:
+                record_health_transition("removed")
             self.primary_assignment.sync_backup_address = None
+            self._refresh_gauges_locked()
         LOGGER.warning(
             "Promotion backup %s failed for candidate %s at epoch %s (%s)",
             backup_address,
@@ -569,7 +691,12 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
         self._try_next_promotion_backup(candidate_address, epoch)
 
     def _abandon_promotion_attempt(
-        self, candidate_address: str, epoch: int, reason: str
+        self,
+        candidate_address: str,
+        epoch: int,
+        reason: str,
+        *,
+        outcome: str = "failed",
     ):
         with self.lock:
             if not self._assignment_matches_locked(
@@ -581,6 +708,9 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
                 replica.synchronized_epoch = 0
             self.primary_assignment = None
             self._election_in_progress = False
+            self._finish_promotion_locked(candidate_address, epoch, outcome)
+            self._finish_failover_locked(outcome)
+            self._refresh_gauges_locked()
         LOGGER.warning(
             "Abandoned promotion of %s at epoch %s (%s)",
             candidate_address,
@@ -621,8 +751,12 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
                     # The replica may have been evicted while its heartbeat ran.
                     replica = self.nodes.get(address)
                     if replica is not None:
+                        was_unhealthy = replica.consecutive_heartbeat_failures > 0
                         replica.last_seen = time.time()
                         replica.consecutive_heartbeat_failures = 0
+                        if was_unhealthy:
+                            record_health_transition("unhealthy_to_healthy")
+                        self._refresh_gauges_locked()
 
     def _record_heartbeat_failure(self, address: str) -> None:
         """Evict only after a short run of failed health checks."""
@@ -630,7 +764,11 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
             replica = self.nodes.get(address)
             if replica is None:
                 return
+            was_healthy = replica.consecutive_heartbeat_failures == 0
             replica.consecutive_heartbeat_failures += 1
+            if was_healthy:
+                record_health_transition("healthy_to_unhealthy")
+                self._refresh_gauges_locked()
             should_evict = replica.consecutive_heartbeat_failures >= 3
         if should_evict:
             self._handle_replica_failure(address)
@@ -642,6 +780,7 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
         with self.lock:
             if self.nodes.pop(address, None) is None:
                 return
+            record_health_transition("removed")
             assignment = self.primary_assignment
             if assignment is None:
                 should_elect = not self._election_in_progress
@@ -653,6 +792,7 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
                 if assignment.status == PrimaryStatus.PROMOTING:
                     candidate_address = assignment.primary_address
                     epoch = assignment.epoch
+            self._refresh_gauges_locked()
         LOGGER.warning("Evicted failed replica %s", address)
         if should_elect:
             self._elect_new_primary()

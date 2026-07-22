@@ -14,6 +14,17 @@ from blindsided.observability.metrics import (
     COMMITS,
     REPLICATION_ATTEMPTS,
     REPLICATION_DURATION_SECONDS,
+    CLUSTER_READY,
+    FAILOVER_DURATION_SECONDS,
+    FAILOVERS,
+    HEALTHY_REPLICAS,
+    PRIMARY_EPOCH,
+    PROMOTION_ATTEMPTS,
+    PROMOTION_DURATION_SECONDS,
+    REGISTERED_REPLICAS,
+    REPLICA_HEALTH_TRANSITIONS,
+    SYNCHRONIZATION_ATTEMPTS,
+    SYNCHRONIZATION_DURATION_SECONDS,
     RPC_DURATION_SECONDS,
     RPC_REQUESTS,
 )
@@ -199,3 +210,46 @@ def record_commit_outcome(outcome: str) -> None:
     operation = current_replication_operation()
     if operation is not None:
         _safe_increment(COMMITS, operation=operation, outcome=outcome)
+
+
+def set_controller_gauges(
+    *, registered: int, healthy: int, ready: bool, epoch: int
+) -> None:
+    try:
+        REGISTERED_REPLICAS.set(registered)
+        HEALTHY_REPLICAS.set(healthy)
+        CLUSTER_READY.set(1 if ready else 0)
+        PRIMARY_EPOCH.set(epoch)
+    except Exception:
+        LOGGER.exception("Failed to refresh controller gauges")
+
+
+def record_health_transition(transition: str) -> None:
+    _safe_increment(REPLICA_HEALTH_TRANSITIONS, transition=transition)
+
+
+def record_timed_outcome(counter, histogram, outcome: str, duration: float) -> None:
+    try:
+        counter.labels(outcome=outcome).inc()
+        histogram.labels(outcome=outcome).observe(duration)
+    except Exception:
+        LOGGER.exception("Failed to record timed controller outcome")
+
+
+def record_failover(outcome: str, duration: float) -> None:
+    record_timed_outcome(FAILOVERS, FAILOVER_DURATION_SECONDS, outcome, duration)
+
+
+def record_promotion(outcome: str, duration: float) -> None:
+    record_timed_outcome(
+        PROMOTION_ATTEMPTS, PROMOTION_DURATION_SECONDS, outcome, duration
+    )
+
+
+def record_synchronization(outcome: str, duration: float) -> None:
+    record_timed_outcome(
+        SYNCHRONIZATION_ATTEMPTS,
+        SYNCHRONIZATION_DURATION_SECONDS,
+        outcome,
+        duration,
+    )

@@ -1,4 +1,4 @@
-from prometheus_client import Counter, Histogram
+from prometheus_client import Counter, Gauge, Histogram
 
 
 RPC_REQUESTS = Counter(
@@ -48,4 +48,66 @@ COMMITS = Counter(
     "blindsided_commits_total",
     "Final primary commit coordination outcomes",
     ["operation", "outcome"],
+)
+
+REGISTERED_REPLICAS = Gauge(
+    "blindsided_registered_replicas",
+    "Replicas in authoritative controller membership",
+)
+
+HEALTHY_REPLICAS = Gauge(
+    "blindsided_healthy_replicas",
+    "Registered replicas currently considered healthy by the controller",
+)
+
+CLUSTER_READY = Gauge(
+    "blindsided_cluster_ready",
+    "Whether the authoritative primary assignment is ready",
+)
+
+PRIMARY_EPOCH = Gauge(
+    "blindsided_primary_epoch",
+    "Current authoritative controller epoch",
+)
+
+REPLICA_HEALTH_TRANSITIONS = Counter(
+    "blindsided_replica_health_transitions_total",
+    "Authoritative replica membership and health transitions",
+    ["transition"],
+)
+
+FAILOVERS = Counter(
+    "blindsided_failovers_total",
+    "Logical controller failover outcomes",
+    ["outcome"],
+)
+
+FAILOVER_DURATION_SECONDS = Histogram(
+    "blindsided_failover_duration_seconds",
+    "Logical controller failover duration",
+    ["outcome"],
+)
+
+PROMOTION_ATTEMPTS = Counter(
+    "blindsided_promotion_attempts_total",
+    "Candidate promotion attempt outcomes",
+    ["outcome"],
+)
+
+PROMOTION_DURATION_SECONDS = Histogram(
+    "blindsided_promotion_duration_seconds",
+    "Candidate promotion attempt duration",
+    ["outcome"],
+)
+
+SYNCHRONIZATION_ATTEMPTS = Counter(
+    "blindsided_synchronization_attempts_total",
+    "Replacement-backup synchronization attempt outcomes",
+    ["outcome"],
+)
+
+SYNCHRONIZATION_DURATION_SECONDS = Histogram(
+    "blindsided_synchronization_duration_seconds",
+    "Replacement-backup synchronization attempt duration",
+    ["outcome"],
 )

@@ -111,3 +111,100 @@ sum by (operation, outcome) (rate(blindsided_commits_total[5m]))
 ```promql
 sum(rate(blindsided_commits_total{outcome="committed"}[5m])) / sum(rate(blindsided_commits_total[5m]))
 ```
+
+## Controller cluster state
+
+The controller is the authoritative emitter for four unlabeled gauges:
+
+- `blindsided_registered_replicas` is the size of controller membership.
+- `blindsided_healthy_replicas` counts members with no outstanding heartbeat
+  failures.
+- `blindsided_cluster_ready` is `1` only for an assignment in the existing
+  `READY` state and `0` while absent or promoting.
+- `blindsided_primary_epoch` is the controller's authoritative last primary
+  epoch, initially `0`.
+
+They are derived under the controller state lock after existing transitions;
+there is no metrics refresh thread. First-ever primary assignment updates the
+gauges but is not counted as failover.
+
+```promql
+blindsided_cluster_ready
+```
+
+```promql
+blindsided_registered_replicas
+```
+
+```promql
+blindsided_healthy_replicas
+```
+
+```promql
+blindsided_primary_epoch
+```
+
+## Replica health transitions
+
+`blindsided_replica_health_transitions_total{transition}` records authoritative
+state changes only. Allowed transitions are `registered`,
+`healthy_to_unhealthy`, `unhealthy_to_healthy`, and `removed`. The first failed
+probe marks a member unhealthy; repeated failures do not repeat that transition.
+Re-registration or a successful heartbeat restores health. Eviction records a
+separate removal transition.
+
+```promql
+sum by (transition) (increase(blindsided_replica_health_transitions_total[1h]))
+```
+
+## Failover attempts
+
+`blindsided_failovers_total{outcome}` and
+`blindsided_failover_duration_seconds{outcome}` emit once per logical recovery
+cycle. Timing begins when `_elect_new_primary` enters recovery after an existing
+epoch and ends with `completed`, `failed`, or `abandoned`. Candidate retries stay
+within the same logical failover. Completion means the assignment crossed the
+existing promotion and replacement-backup barrier; exhaustion is `failed`; an
+ambiguous completion RPC is conservatively `abandoned`.
+
+Attempt timing is retained across candidate retries, while promotion timing is
+keyed by candidate address and epoch. Existing assignment guards reject stale
+callbacks before metric completion, and terminal records are removed after one
+emission.
+
+```promql
+sum by (outcome) (increase(blindsided_failovers_total[1h]))
+```
+
+```promql
+histogram_quantile(0.95, sum by (le, outcome) (rate(blindsided_failover_duration_seconds_bucket[1h])))
+```
+
+## Promotion attempts
+
+`blindsided_promotion_attempts_total{outcome}` and
+`blindsided_promotion_duration_seconds{outcome}` record one terminal result per
+candidate/epoch attempt. Allowed outcomes are `completed`, `rejected`,
+`timeout`, `failed`, and `abandoned`. Explicit begin, confirmation, or completion
+rejections collapse to `rejected`; non-deadline RPC and unexpected failures
+collapse to `failed`; ambiguous completion is `abandoned`.
+
+```promql
+sum by (outcome) (increase(blindsided_promotion_attempts_total[1h]))
+```
+
+## Replacement-backup synchronization
+
+`blindsided_synchronization_attempts_total{outcome}` and
+`blindsided_synchronization_duration_seconds{outcome}` measure each actual
+`SynchronizeFromPrimary` attempt during the promotion barrier. Allowed outcomes
+are `completed`, `rejected`, `timeout`, and `failed`. Each deterministic backup
+retry emits separately. Non-deadline transport errors and unexpected failures
+collapse to `failed`. Ordinary synchronous mutation replication is excluded.
+
+```promql
+sum by (outcome) (increase(blindsided_synchronization_attempts_total[1h]))
+```
+
+Controller recovery events are intentionally low-frequency; `increase()` over
+demo-sized windows may be more useful than short `rate()` windows.
