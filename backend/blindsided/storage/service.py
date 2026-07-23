@@ -168,7 +168,13 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             address=self.node_address,
             role=self.replica_role,
             epoch=self.current_epoch,
-            promotion_ready=self.promotion_ready,
+            # For a primary this is promotion readiness.  For a backup it is
+            # the local proof that synchronization completed for current_epoch.
+            # A restarted backup deliberately starts with this false even when
+            # its persisted epoch is current.
+            promotion_ready=getattr(
+                self, "_storage_metrics_ready", self.promotion_ready
+            ),
             synchronous_backup_address=self.synchronous_backup_address,
         )
 
@@ -1652,7 +1658,11 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 role=self.replica_role,
                 message="Alive",
                 epoch=self.current_epoch,
-                promotion_ready=self.promotion_ready,
+                # Backup readiness is reported on the existing readiness bit so
+                # the controller can revoke READY when local protection is lost.
+                promotion_ready=getattr(
+                    self, "_storage_metrics_ready", self.promotion_ready
+                ),
                 synchronous_backup_address=self.synchronous_backup_address,
             )
 
@@ -1702,6 +1712,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             self.synchronous_backup_address = snapshot.synchronous_backup_address
             if self.promotion_ready and self.synchronous_backup_address:
                 self.replica_role = "primary"
+                self._storage_metrics_ready = True
         except Exception as e:
             raise RuntimeError(
                 f"Could not load local state snapshot {self.state_file_path!r}: {e}"
