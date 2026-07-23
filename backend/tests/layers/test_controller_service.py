@@ -14,6 +14,273 @@ from backend.tests.helpers import BackendTestCase, ChannelContext, NoopContext
 
 
 class ControllerServiceTests(BackendTestCase):
+    def test_ready_assignment_does_not_make_restored_standby_promotion_eligible(self):
+        service = ControllerService()
+        service.primary_assignment = PrimaryAssignment(
+            node_id="primary:1",
+            epoch=4,
+            status=PrimaryStatus.READY,
+            sync_backup_address="active-backup:1",
+        )
+        service.last_primary_epoch = 4
+        service.nodes = {
+            "primary:1": ReplicaRecord(
+                "primary:1", 1.0, ReplicaSyncStatus.UNSYNCHRONIZED
+            ),
+            "active-backup:1": ReplicaRecord(
+                "active-backup:1",
+                1.0,
+                ReplicaSyncStatus.SYNCHRONIZED,
+                4,
+            ),
+        }
+
+        service.RegisterNode(
+            pb2.RegisterRequest(
+                address="restored-standby:1",
+                role="backup",
+                epoch=4,
+            ),
+            NoopContext(),
+        )
+
+        self.assertFalse(
+            service.nodes["restored-standby:1"].promotion_eligible
+        )
+        self.assertTrue(
+            service.nodes["active-backup:1"].promotion_eligible
+        )
+
+    def test_active_backup_eviction_logs_classification_and_reprotection(self):
+        service = ControllerService()
+        service.primary_assignment = PrimaryAssignment(
+            node_id="primary:1",
+            epoch=4,
+            status=PrimaryStatus.READY,
+            sync_backup_address="backup:1",
+            recovery_generation=2,
+        )
+        service.nodes = {
+            address: ReplicaRecord(
+                address, 1.0, ReplicaSyncStatus.SYNCHRONIZED, 4
+            )
+            for address in ("primary:1", "backup:1", "standby:1")
+        }
+
+        with (
+            mock.patch("blindsided.controller.service.threading.Thread"),
+            self.assertLogs(
+                "blindsided.controller.service", level="INFO"
+            ) as captured,
+        ):
+            service._handle_replica_failure("backup:1")
+
+        output = "\n".join(captured.output)
+        self.assertIn("event=replica_failure_classified", output)
+        self.assertIn("classification=active_backup", output)
+        self.assertIn("event=reprotection_entered", output)
+        self.assertIn("cluster_ready=false", output)
+        self.assertIn("event=replica_failure_handled", output)
+        self.assertIn("replacement_worker_started=true", output)
+
+    def test_replacement_dispatch_started_is_logged_before_rpc_outcome(self):
+        service = ControllerService()
+        service.primary_assignment = PrimaryAssignment(
+            node_id="primary:1",
+            epoch=4,
+            status=PrimaryStatus.REPROTECTING,
+        )
+        service.nodes = {
+            address: ReplicaRecord(
+                address, 1.0, ReplicaSyncStatus.UNSYNCHRONIZED
+            )
+            for address in ("primary:1", "standby:1")
+        }
+        stub = mock.Mock()
+        stub.SynchronizeFromPrimary.return_value = (
+            pb2.SynchronizeFromPrimaryResponse(
+                success=False, epoch=4, message="not installed"
+            )
+        )
+
+        with (
+            mock.patch(
+                "blindsided.controller.service.grpc.insecure_channel",
+                return_value=ChannelContext(),
+            ),
+            mock.patch(
+                "blindsided.controller.service.pb2_grpc.StorageReplicaServiceStub",
+                return_value=stub,
+            ),
+            self.assertLogs(
+                "blindsided.controller.service", level="INFO"
+            ) as captured,
+        ):
+            service._try_next_replacement_backup("primary:1", 4)
+
+        output = "\n".join(captured.output)
+        self.assertLess(
+            output.index("event=synchronization_dispatch_started"),
+            output.index("event=synchronization_dispatch_rejected"),
+        )
+        self.assertIn("target_candidate=standby:1", output)
+        self.assertIn("event=reprotection_candidate_failed", output)
+        self.assertIn("stage=dispatch", output)
+        self.assertNotIn("event=reprotection_retry_started", output)
+
+    def test_reprotection_retry_is_logged_only_after_candidate_failure(self):
+        service = ControllerService()
+        service.primary_assignment = PrimaryAssignment(
+            node_id="primary:1",
+            epoch=4,
+            status=PrimaryStatus.REPROTECTING,
+            recovery_generation=7,
+        )
+        service.nodes = {
+            address: ReplicaRecord(
+                address, 1.0, ReplicaSyncStatus.UNSYNCHRONIZED
+            )
+            for address in ("primary:1", "a-standby:1", "b-standby:1")
+        }
+        stub = mock.Mock()
+        stub.SynchronizeFromPrimary.return_value = (
+            pb2.SynchronizeFromPrimaryResponse(
+                success=False, epoch=4, message="not installed"
+            )
+        )
+
+        with (
+            mock.patch(
+                "blindsided.controller.service.grpc.insecure_channel",
+                return_value=ChannelContext(),
+            ),
+            mock.patch(
+                "blindsided.controller.service.pb2_grpc.StorageReplicaServiceStub",
+                return_value=stub,
+            ),
+            self.assertLogs(
+                "blindsided.controller.service", level="INFO"
+            ) as captured,
+        ):
+            service._try_next_replacement_backup("primary:1", 4)
+
+        output = "\n".join(captured.output)
+        self.assertEqual(output.count("event=reprotection_retry_started"), 1)
+        self.assertIn("primary=primary:1", output)
+        self.assertIn("previous_candidate=a-standby:1", output)
+        self.assertIn("next_candidate=b-standby:1", output)
+        self.assertIn("old_generation=8", output)
+        self.assertIn("new_generation=9", output)
+
+    def test_completion_mismatch_logs_exact_rejection_reason(self):
+        service = ControllerService()
+        service.primary_assignment = PrimaryAssignment(
+            node_id="primary:1",
+            epoch=4,
+            status=PrimaryStatus.REPROTECTING,
+            replacement_candidate_address="standby:1",
+            recovery_generation=3,
+        )
+        service.nodes = {
+            address: ReplicaRecord(
+                address, 1.0, ReplicaSyncStatus.UNSYNCHRONIZED
+            )
+            for address in ("primary:1", "standby:1")
+        }
+
+        with self.assertLogs(
+            "blindsided.controller.service", level="INFO"
+        ) as captured:
+            response = service.ReportSynchronizationComplete(
+                pb2.SynchronizationCompleteRequest(
+                    replica_address="standby:1",
+                    source_primary_address="old-primary:1",
+                    epoch=4,
+                ),
+                NoopContext(),
+            )
+
+        self.assertFalse(response.success)
+        output = "\n".join(captured.output)
+        self.assertIn("event=synchronization_completion_received", output)
+        self.assertIn("event=synchronization_completion_rejected", output)
+        self.assertIn("reason=wrong_source_primary", output)
+
+    def test_activation_outcome_controls_reprotection_completion_log(self):
+        def make_service():
+            service = ControllerService()
+            service.primary_assignment = PrimaryAssignment(
+                node_id="primary:1",
+                epoch=4,
+                status=PrimaryStatus.REPROTECTING,
+                replacement_candidate_address="standby:1",
+                recovery_generation=3,
+                attempted_backup_addresses={"standby:1"},
+            )
+            service.nodes = {
+                address: ReplicaRecord(
+                    address, 1.0, ReplicaSyncStatus.UNSYNCHRONIZED
+                )
+                for address in ("primary:1", "standby:1")
+            }
+            return service
+
+        for activation_succeeds in (False, True):
+            with self.subTest(activation_succeeds=activation_succeeds):
+                service = make_service()
+                stub = mock.Mock()
+                stub.CompletePrimaryPromotion.return_value = (
+                    pb2.CompletePrimaryPromotionResponse(
+                        success=activation_succeeds,
+                        epoch=4,
+                        message=(
+                            "configured"
+                            if activation_succeeds
+                            else "configuration rejected"
+                        ),
+                    )
+                )
+                with (
+                    mock.patch(
+                        "blindsided.controller.service.grpc.insecure_channel",
+                        return_value=ChannelContext(),
+                    ),
+                    mock.patch(
+                        "blindsided.controller.service.pb2_grpc.StorageReplicaServiceStub",
+                        return_value=stub,
+                    ),
+                    self.assertLogs(
+                        "blindsided.controller.service", level="INFO"
+                    ) as captured,
+                ):
+                    response = service.ReportSynchronizationComplete(
+                        pb2.SynchronizationCompleteRequest(
+                            replica_address="standby:1",
+                            source_primary_address="primary:1",
+                            epoch=4,
+                        ),
+                        NoopContext(),
+                    )
+
+                output = "\n".join(captured.output)
+                self.assertIn("event=backup_activation_started", output)
+                if activation_succeeds:
+                    self.assertTrue(response.success)
+                    self.assertLess(
+                        output.index("event=backup_activation_succeeded"),
+                        output.index("event=reprotection_completed"),
+                    )
+                    self.assertIn("cluster_ready=true", output)
+                else:
+                    self.assertFalse(response.success)
+                    self.assertIn("event=backup_activation_rejected", output)
+                    self.assertIn("stage=backup_activation", output)
+                    self.assertNotIn("event=reprotection_completed", output)
+                    self.assertEqual(
+                        service.primary_assignment.status,
+                        PrimaryStatus.REPROTECTING,
+                    )
+
     def test_controller_restart_rejects_lower_epoch_primary_when_higher_epoch_primary_reregisters(self):
         restarted = ControllerService()
 
@@ -22,6 +289,12 @@ class ControllerServiceTests(BackendTestCase):
             role="primary",
             epoch=5,
             promotion_ready=True,
+            synchronous_backup_address="old-backup:50051",
+        ), NoopContext())
+        restarted.RegisterNode(pb2.RegisterRequest(
+            address="backup:50051",
+            role="backup",
+            epoch=6,
         ), NoopContext())
         current = restarted.RegisterNode(pb2.RegisterRequest(
             address="current-primary:50051",
@@ -31,7 +304,7 @@ class ControllerServiceTests(BackendTestCase):
             synchronous_backup_address="backup:50051",
         ), NoopContext())
 
-        self.assertTrue(stale.is_primary)
+        self.assertFalse(stale.is_primary)
         self.assertTrue(current.is_primary)
         self.assertEqual(restarted.last_primary_epoch, 6)
         self.assertEqual(
@@ -41,27 +314,30 @@ class ControllerServiceTests(BackendTestCase):
         self.assertEqual(restarted.primary_assignment.epoch, 6)
 
     def test_controller_restart_recovery_is_independent_of_registration_order(self):
-        registrations = (
-            pb2.RegisterRequest(
-                address="former-primary:50051",
-                role="primary",
-                epoch=5,
-                promotion_ready=True,
-            ),
-            pb2.RegisterRequest(
-                address="current-primary:50051",
-                role="primary",
-                epoch=6,
-                promotion_ready=True,
-                synchronous_backup_address="backup:50051",
-            ),
+        primary_registration = pb2.RegisterRequest(
+            address="current-primary:50051",
+            role="primary",
+            epoch=6,
+            promotion_ready=True,
+            synchronous_backup_address="backup:50051",
+        )
+        backup = pb2.RegisterRequest(
+            address="backup:50051",
+            role="backup",
+            epoch=6,
         )
 
-        for order in (registrations, tuple(reversed(registrations))):
+        for order in (
+            (backup, primary_registration),
+            (primary_registration, backup),
+        ):
             with self.subTest(order=[request.address for request in order]):
                 restarted = ControllerService()
                 for request in order:
                     restarted.RegisterNode(request, NoopContext())
+                # Storage periodically re-registers, allowing reconstruction
+                # once both sides of the persisted relationship are known.
+                restarted.RegisterNode(primary_registration, NoopContext())
 
                 primary = restarted.GetPrimary(
                     pb2.GetPrimaryRequest(), NoopContext()
@@ -96,6 +372,46 @@ class ControllerServiceTests(BackendTestCase):
             "backup:50051",
         )
 
+    def test_recovery_requires_ready_primary_with_matching_synchronized_backup(self):
+        cases = (
+            (
+                pb2.RegisterRequest(
+                    address="primary:50051", role="backup", epoch=7,
+                    promotion_ready=True,
+                    synchronous_backup_address="backup:50051",
+                ),
+                "backup role",
+            ),
+            (
+                pb2.RegisterRequest(
+                    address="primary:50051", role="primary", epoch=7,
+                    promotion_ready=False,
+                    synchronous_backup_address="backup:50051",
+                ),
+                "non-ready primary",
+            ),
+            (
+                pb2.RegisterRequest(
+                    address="primary:50051", role="primary", epoch=6,
+                    promotion_ready=True,
+                    synchronous_backup_address="backup:50051",
+                ),
+                "mismatched epoch",
+            ),
+        )
+
+        for registration, label in cases:
+            with self.subTest(case=label):
+                restarted = ControllerService()
+                restarted.RegisterNode(pb2.RegisterRequest(
+                    address="backup:50051", role="backup", epoch=7,
+                ), NoopContext())
+                response = restarted.RegisterNode(registration, NoopContext())
+
+                self.assertFalse(response.is_primary)
+                self.assertIsNone(restarted.primary_assignment)
+                self.assertEqual(restarted.last_primary_epoch, 7)
+
     def test_rejects_blank_registration_address(self):
         service = ControllerService()
 
@@ -110,14 +426,17 @@ class ControllerServiceTests(BackendTestCase):
     def test_registers_first_node_as_primary_and_reports_cluster(self):
         service = ControllerService()
 
-        first = service.RegisterNode(
-            pb2.RegisterRequest(address="storage-0:50051"),
-            NoopContext(),
-        )
-        second = service.RegisterNode(
-            pb2.RegisterRequest(address="storage-1:50051"),
-            NoopContext(),
-        )
+        with mock.patch(
+            "blindsided.controller.service.threading.Thread"
+        ) as thread:
+            first = service.RegisterNode(
+                pb2.RegisterRequest(address="storage-0:50051"),
+                NoopContext(),
+            )
+            second = service.RegisterNode(
+                pb2.RegisterRequest(address="storage-1:50051"),
+                NoopContext(),
+            )
         primary_address = service.GetPrimary(pb2.GetPrimaryRequest(), NoopContext())
         cluster = service.GetClusterInfo(pb2.ClusterInfoRequest(), NoopContext())
 
@@ -127,10 +446,17 @@ class ControllerServiceTests(BackendTestCase):
         self.assertTrue(second.success)
         self.assertFalse(second.is_primary)
         self.assertEqual(second.epoch, 1)
-        self.assertEqual(primary_address.primary_address, "storage-0:50051")
+        self.assertFalse(primary_address.success)
         self.assertEqual(primary_address.epoch, 1)
+        self.assertEqual(
+            service.primary_assignment.status, PrimaryStatus.REPROTECTING
+        )
+        thread.assert_called_once_with(
+            target=service._try_next_replacement_backup,
+            args=("storage-0:50051", 1),
+            daemon=True,
+        )
         self.assertEqual(service.primary_assignment.epoch, 1)
-        self.assertEqual(service.primary_assignment.status, PrimaryStatus.READY)
         self.assertEqual(service.nodes["storage-0:50051"].address, "storage-0:50051")
         self.assertGreater(service.nodes["storage-0:50051"].last_seen, 0)
         self.assertEqual(
@@ -152,40 +478,47 @@ class ControllerServiceTests(BackendTestCase):
         self.assertEqual(primary_address.epoch, 0)
         self.assertEqual(primary_address.message, "No Primary Judge available")
 
-    def test_reports_registered_backup_synchronized_with_current_primary(self):
+    def test_unsolicited_completion_during_ready_does_not_replace_backup(self):
         service = ControllerService()
-        service.RegisterNode(pb2.RegisterRequest(address="storage-0:50051"), NoopContext())
-        service.RegisterNode(pb2.RegisterRequest(address="storage-1:50051"), NoopContext())
+        service.primary_assignment = PrimaryAssignment(
+            node_id="storage-0:50051",
+            epoch=1,
+            status=PrimaryStatus.READY,
+            sync_backup_address="storage-1:50051",
+        )
+        service.nodes = {
+            address: ReplicaRecord(
+                address, 1.0, ReplicaSyncStatus.UNSYNCHRONIZED
+            )
+            for address in (
+                "storage-0:50051",
+                "storage-1:50051",
+                "storage-2:50051",
+            )
+        }
 
         response = service.ReportSynchronizationComplete(
             pb2.SynchronizationCompleteRequest(
-                replica_address="storage-1:50051",
+                replica_address="storage-2:50051",
                 source_primary_address="storage-0:50051",
                 epoch=1,
             ),
             NoopContext(),
         )
 
-        self.assertTrue(response.success)
+        self.assertFalse(response.success)
+        self.assertEqual(service.primary_assignment.status, PrimaryStatus.READY)
         self.assertEqual(
-            service.nodes["storage-1:50051"].sync_status,
-            ReplicaSyncStatus.SYNCHRONIZED,
+            service.primary_assignment.sync_backup_address, "storage-1:50051"
         )
-        self.assertTrue(service.nodes["storage-1:50051"].promotion_eligible)
+        self.assertFalse(service.nodes["storage-2:50051"].promotion_eligible)
 
     def test_reregistered_replica_loses_promotion_eligibility(self):
         service = ControllerService()
         service.RegisterNode(pb2.RegisterRequest(address="storage-0:50051"), NoopContext())
         service.RegisterNode(pb2.RegisterRequest(address="storage-1:50051"), NoopContext())
-        synchronized = service.ReportSynchronizationComplete(
-            pb2.SynchronizationCompleteRequest(
-                replica_address="storage-1:50051",
-                source_primary_address="storage-0:50051",
-                epoch=1,
-            ),
-            NoopContext(),
-        )
-        self.assertTrue(synchronized.success)
+        service.nodes["storage-1:50051"].sync_status = ReplicaSyncStatus.SYNCHRONIZED
+        service.nodes["storage-1:50051"].synchronized_epoch = 1
         self.assertTrue(service.nodes["storage-1:50051"].promotion_eligible)
 
         reregistered = service.RegisterNode(
@@ -217,10 +550,13 @@ class ControllerServiceTests(BackendTestCase):
         )
         service.last_primary_epoch = 2
 
-        reregistered = service.RegisterNode(
-            pb2.RegisterRequest(address="former-primary:50051"),
-            NoopContext(),
-        )
+        with mock.patch(
+            "blindsided.controller.service.threading.Thread"
+        ):
+            reregistered = service.RegisterNode(
+                pb2.RegisterRequest(address="former-primary:50051"),
+                NoopContext(),
+            )
 
         self.assertTrue(initial.is_primary)
         self.assertFalse(reregistered.is_primary)
@@ -242,12 +578,12 @@ class ControllerServiceTests(BackendTestCase):
             NoopContext(),
         )
 
-        self.assertTrue(synchronized.success)
+        self.assertFalse(synchronized.success)
         self.assertEqual(
             service.nodes["former-primary:50051"].sync_status,
-            ReplicaSyncStatus.SYNCHRONIZED,
+            ReplicaSyncStatus.UNSYNCHRONIZED,
         )
-        self.assertTrue(
+        self.assertFalse(
             service.nodes["former-primary:50051"].promotion_eligible
         )
 
@@ -339,6 +675,44 @@ class ControllerServiceTests(BackendTestCase):
         self.assertEqual(service.primary_assignment.status, PrimaryStatus.PROMOTING)
         notify.assert_called_once_with("storage-1:50051", 1)
 
+    def test_primary_failure_promotes_active_backup_and_can_sync_standby(self):
+        service = ControllerService()
+        service.last_primary_epoch = 4
+        service.primary_assignment = PrimaryAssignment(
+            node_id="primary:1",
+            epoch=4,
+            status=PrimaryStatus.READY,
+            sync_backup_address="active-backup:1",
+        )
+        service.nodes = {
+            "primary:1": ReplicaRecord(
+                "primary:1", 1.0, ReplicaSyncStatus.UNSYNCHRONIZED
+            ),
+            "active-backup:1": ReplicaRecord(
+                "active-backup:1",
+                1.0,
+                ReplicaSyncStatus.SYNCHRONIZED,
+                4,
+            ),
+            "standby:1": ReplicaRecord(
+                "standby:1", 1.0, ReplicaSyncStatus.UNSYNCHRONIZED
+            ),
+        }
+
+        with mock.patch(
+            "blindsided.controller.service.threading.Thread"
+        ):
+            service._handle_replica_failure("primary:1")
+
+        self.assertEqual(
+            service.primary_assignment.primary_address,
+            "active-backup:1",
+        )
+        self.assertEqual(
+            set(service.primary_assignment.eligible_backup_addresses),
+            {"active-backup:1", "standby:1"},
+        )
+
     def test_controller_flow_skips_first_unsynchronized_backup_during_election(self):
         service = ControllerService()
         service.RegisterNode(pb2.RegisterRequest(address="primary:50051"), NoopContext())
@@ -350,21 +724,16 @@ class ControllerServiceTests(BackendTestCase):
             pb2.RegisterRequest(address="backup-synchronized:50051"),
             NoopContext(),
         )
-        synchronization = service.ReportSynchronizationComplete(
-            pb2.SynchronizationCompleteRequest(
-                replica_address="backup-synchronized:50051",
-                source_primary_address="primary:50051",
-                epoch=1,
-            ),
-            NoopContext(),
-        )
+        service.nodes[
+            "backup-synchronized:50051"
+        ].sync_status = ReplicaSyncStatus.SYNCHRONIZED
+        service.nodes["backup-synchronized:50051"].synchronized_epoch = 1
         del service.nodes["primary:50051"]
         service.primary_assignment = None
 
         with mock.patch.object(service, "_notify_promotion") as notify:
             service._elect_new_primary()
 
-        self.assertTrue(synchronization.success)
         self.assertFalse(
             service.nodes["backup-unsynchronized:50051"].promotion_eligible
         )
@@ -1008,6 +1377,303 @@ class ControllerServiceTests(BackendTestCase):
         self.assertNotIn("backup:1", service.nodes)
         self.assertIn("candidate:1", service.nodes)
         self.assertIsNone(service.primary_assignment)
+
+    def test_ready_primary_reprotects_with_available_standby_after_backup_eviction(self):
+        service = ControllerService()
+        service.primary_assignment = PrimaryAssignment(
+            node_id="primary:1",
+            epoch=4,
+            status=PrimaryStatus.READY,
+            sync_backup_address="backup:1",
+        )
+        service.nodes = {
+            "primary:1": ReplicaRecord(
+                "primary:1", 1.0, ReplicaSyncStatus.UNSYNCHRONIZED
+            ),
+            "backup:1": ReplicaRecord(
+                "backup:1", 1.0, ReplicaSyncStatus.SYNCHRONIZED, 4
+            ),
+            "standby:1": ReplicaRecord(
+                "standby:1", 1.0, ReplicaSyncStatus.UNSYNCHRONIZED
+            ),
+        }
+
+        with mock.patch(
+            "blindsided.controller.service.threading.Thread"
+        ) as thread:
+            service._handle_replica_failure("backup:1")
+
+        self.assertNotIn("backup:1", service.nodes)
+        self.assertEqual(
+            service.primary_assignment.status, PrimaryStatus.REPROTECTING
+        )
+        self.assertIsNone(service.primary_assignment.sync_backup_address)
+        self.assertFalse(
+            service.GetPrimary(pb2.GetPrimaryRequest(), NoopContext()).success
+        )
+        thread.assert_called_once_with(
+            target=service._try_next_replacement_backup,
+            args=("primary:1", 4),
+            daemon=True,
+        )
+        thread.return_value.start.assert_called_once()
+
+        synchronization_stub = mock.Mock()
+        synchronization_stub.SynchronizeFromPrimary.return_value = (
+            pb2.SynchronizeFromPrimaryResponse(success=False, epoch=4)
+        )
+        with (
+            mock.patch(
+                "blindsided.controller.service.grpc.insecure_channel",
+                return_value=ChannelContext(),
+            ),
+            mock.patch(
+                "blindsided.controller.service.pb2_grpc.StorageReplicaServiceStub",
+                return_value=synchronization_stub,
+            ),
+            mock.patch(
+                "blindsided.controller.service.record_synchronization"
+            ) as record,
+        ):
+            thread.call_args.kwargs["target"](*thread.call_args.kwargs["args"])
+
+        synchronization_stub.SynchronizeFromPrimary.assert_called_once()
+        record.assert_called_once()
+
+    def test_replacement_synchronization_makes_backup_ready_and_reprotects_cluster(self):
+        service = ControllerService()
+        service.primary_assignment = PrimaryAssignment(
+            node_id="primary:1",
+            epoch=4,
+            status=PrimaryStatus.REPROTECTING,
+        )
+        service.nodes = {
+            "primary:1": ReplicaRecord(
+                "primary:1", 1.0, ReplicaSyncStatus.UNSYNCHRONIZED
+            ),
+            "standby:1": ReplicaRecord(
+                "standby:1", 1.0, ReplicaSyncStatus.UNSYNCHRONIZED
+            ),
+        }
+        backup_stub = mock.Mock()
+        backup_stub.CompletePrimaryPromotion.return_value = (
+            pb2.CompletePrimaryPromotionResponse(success=True, epoch=4)
+        )
+
+        def synchronize(request, **_kwargs):
+            completion = service.ReportSynchronizationComplete(
+                pb2.SynchronizationCompleteRequest(
+                    replica_address="standby:1",
+                    source_primary_address=request.primary_address,
+                    epoch=request.epoch,
+                ),
+                NoopContext(),
+            )
+            self.assertTrue(completion.success)
+            return pb2.SynchronizeFromPrimaryResponse(success=True, epoch=4)
+
+        backup_stub.SynchronizeFromPrimary.side_effect = synchronize
+        with (
+            mock.patch(
+                "blindsided.controller.service.grpc.insecure_channel",
+                return_value=ChannelContext(),
+            ),
+            mock.patch(
+                "blindsided.controller.service.pb2_grpc.StorageReplicaServiceStub",
+                return_value=backup_stub,
+            ),
+        ):
+            service._try_next_replacement_backup("primary:1", 4)
+
+        request = backup_stub.SynchronizeFromPrimary.call_args.args[0]
+        self.assertEqual(request.primary_address, "primary:1")
+        self.assertEqual(request.epoch, 4)
+        self.assertEqual(
+            service.nodes["standby:1"].sync_status,
+            ReplicaSyncStatus.SYNCHRONIZED,
+        )
+        self.assertEqual(service.nodes["standby:1"].synchronized_epoch, 4)
+        self.assertEqual(
+            service.primary_assignment.sync_backup_address, "standby:1"
+        )
+        self.assertEqual(service.primary_assignment.status, PrimaryStatus.READY)
+        self.assertTrue(
+            service.GetPrimary(pb2.GetPrimaryRequest(), NoopContext()).success
+        )
+
+    def test_replacement_selection_skips_unhealthy_standby(self):
+        service = ControllerService()
+        assignment = PrimaryAssignment(
+            node_id="primary:1",
+            epoch=4,
+            status=PrimaryStatus.REPROTECTING,
+        )
+        service.primary_assignment = assignment
+        service.nodes = {
+            "primary:1": ReplicaRecord(
+                "primary:1", 1.0, ReplicaSyncStatus.UNSYNCHRONIZED
+            ),
+            "a-unhealthy:1": ReplicaRecord(
+                "a-unhealthy:1",
+                1.0,
+                ReplicaSyncStatus.UNSYNCHRONIZED,
+                consecutive_heartbeat_failures=1,
+            ),
+            "z-healthy:1": ReplicaRecord(
+                "z-healthy:1", 1.0, ReplicaSyncStatus.UNSYNCHRONIZED
+            ),
+        }
+
+        selected = service._select_replacement_backup_locked(assignment)
+
+        self.assertEqual(selected, "z-healthy:1")
+
+    def test_reprotecting_rejects_completion_from_wrong_replica(self):
+        service = ControllerService()
+        service.primary_assignment = PrimaryAssignment(
+            node_id="primary:1",
+            epoch=4,
+            status=PrimaryStatus.REPROTECTING,
+            replacement_candidate_address="standby:1",
+            recovery_generation=3,
+        )
+        service.nodes = {
+            address: ReplicaRecord(
+                address, 1.0, ReplicaSyncStatus.UNSYNCHRONIZED
+            )
+            for address in ("primary:1", "standby:1", "other:1")
+        }
+
+        response = service.ReportSynchronizationComplete(
+            pb2.SynchronizationCompleteRequest(
+                replica_address="other:1",
+                source_primary_address="primary:1",
+                epoch=4,
+            ),
+            NoopContext(),
+        )
+
+        self.assertFalse(response.success)
+        self.assertEqual(
+            service.primary_assignment.status, PrimaryStatus.REPROTECTING
+        )
+        self.assertEqual(
+            service.primary_assignment.replacement_candidate_address,
+            "standby:1",
+        )
+        self.assertIn("other:1", service.nodes)
+        self.assertFalse(service.nodes["other:1"].promotion_eligible)
+
+    def test_reprotecting_rejects_stale_epoch_and_source(self):
+        for source, epoch in (("old-primary:1", 4), ("primary:1", 3)):
+            with self.subTest(source=source, epoch=epoch):
+                service = ControllerService()
+                service.primary_assignment = PrimaryAssignment(
+                    node_id="primary:1",
+                    epoch=4,
+                    status=PrimaryStatus.REPROTECTING,
+                    replacement_candidate_address="standby:1",
+                    recovery_generation=2,
+                )
+                service.nodes = {
+                    address: ReplicaRecord(
+                        address, 1.0, ReplicaSyncStatus.UNSYNCHRONIZED
+                    )
+                    for address in ("primary:1", "standby:1")
+                }
+
+                response = service.ReportSynchronizationComplete(
+                    pb2.SynchronizationCompleteRequest(
+                        replica_address="standby:1",
+                        source_primary_address=source,
+                        epoch=epoch,
+                    ),
+                    NoopContext(),
+                )
+
+                self.assertFalse(response.success)
+                self.assertEqual(
+                    service.primary_assignment.status,
+                    PrimaryStatus.REPROTECTING,
+                )
+                self.assertEqual(
+                    service.primary_assignment.replacement_candidate_address,
+                    "standby:1",
+                )
+
+    def test_replacement_configuration_failure_keeps_unready_and_tries_other_standby(self):
+        service = ControllerService()
+        service.primary_assignment = PrimaryAssignment(
+            node_id="primary:1",
+            epoch=4,
+            status=PrimaryStatus.REPROTECTING,
+            replacement_candidate_address="a-standby:1",
+            recovery_generation=1,
+            attempted_backup_addresses={"a-standby:1"},
+        )
+        service.nodes = {
+            address: ReplicaRecord(
+                address, 1.0, ReplicaSyncStatus.UNSYNCHRONIZED
+            )
+            for address in ("primary:1", "a-standby:1", "b-standby:1")
+        }
+        primary_stub = mock.Mock()
+        primary_stub.CompletePrimaryPromotion.return_value = (
+            pb2.CompletePrimaryPromotionResponse(success=False, epoch=4)
+        )
+        with (
+            mock.patch(
+                "blindsided.controller.service.grpc.insecure_channel",
+                return_value=ChannelContext(),
+            ),
+            mock.patch(
+                "blindsided.controller.service.pb2_grpc.StorageReplicaServiceStub",
+                return_value=primary_stub,
+            ),
+        ):
+            response = service.ReportSynchronizationComplete(
+                pb2.SynchronizationCompleteRequest(
+                    replica_address="a-standby:1",
+                    source_primary_address="primary:1",
+                    epoch=4,
+                ),
+                NoopContext(),
+            )
+
+        self.assertFalse(response.success)
+        self.assertEqual(
+            service.primary_assignment.status, PrimaryStatus.REPROTECTING
+        )
+        self.assertIsNone(service.primary_assignment.sync_backup_address)
+        self.assertIsNone(
+            service.primary_assignment.replacement_candidate_address
+        )
+        self.assertFalse(service.nodes["a-standby:1"].promotion_eligible)
+
+        replacement_stub = mock.Mock()
+        replacement_stub.SynchronizeFromPrimary.return_value = (
+            pb2.SynchronizeFromPrimaryResponse(success=False, epoch=4)
+        )
+        with (
+            mock.patch(
+                "blindsided.controller.service.grpc.insecure_channel",
+                return_value=ChannelContext(),
+            ),
+            mock.patch(
+                "blindsided.controller.service.pb2_grpc.StorageReplicaServiceStub",
+                return_value=replacement_stub,
+            ),
+        ):
+            service._try_next_replacement_backup("primary:1", 4)
+
+        replacement_stub.SynchronizeFromPrimary.assert_called_once()
+        self.assertEqual(
+            service.primary_assignment.attempted_backup_addresses,
+            {"a-standby:1", "b-standby:1"},
+        )
+        self.assertEqual(
+            service.primary_assignment.status, PrimaryStatus.REPROTECTING
+        )
 
     def test_new_assignment_invalidates_old_epoch_synchronization(self):
         service = ControllerService()

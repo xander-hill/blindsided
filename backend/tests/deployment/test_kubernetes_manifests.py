@@ -61,7 +61,7 @@ class KubernetesScalingAndReplicationManifestTests(BackendTestCase):
         )
 
         replicas = int_field(statefulset, "replicas")
-        self.assertGreaterEqual(replicas, 2)
+        self.assertEqual(replicas, 3)
         self.assertRegex(service, r"clusterIP:\s*None")
         self.assertRegex(statefulset, r'serviceName:\s*"storage-service"')
         self.assertIn('command: ["python", "-m", "blindsided.storage.server"]', statefulset)

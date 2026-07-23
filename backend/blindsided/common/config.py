@@ -12,11 +12,7 @@ NODE_PORT = os.getenv("NODE_PORT", "50051")
 
 # The IP or Hostname of THIS pod (K8s will provide this via POD_IP env)
 # If local, we just use localhost.
-MY_POD_NAME = os.getenv("POD_IP", "localhost")
-if "storage-" in MY_POD_NAME:
-    MY_ADDRESS = f"{MY_POD_NAME}.storage-service"
-else:
-    MY_ADDRESS = MY_POD_NAME
+MY_ADDRESS = os.getenv("POD_IP", "localhost")
 
 # --- Service Layer Config ---
 # The port the Marketplace (ServiceNode) listens on

@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import threading
 import time
@@ -8,10 +9,53 @@ import grpc
 from blindsided.common.config import CONTROLLER_ADDRESS, NODE_PORT
 from blindsided.generated import blindsided_pb2 as pb2
 from blindsided.generated import blindsided_pb2_grpc as pb2_grpc
+from blindsided.observability.instrumentation import (
+    observe_rpc,
+    record_commit_outcome,
+    refresh_storage_state_metrics,
+    replication_operation,
+)
 from blindsided.storage.auction_domain import AuctionDomain
 from blindsided.storage.replication_client import SynchronousReplicationClient
 from blindsided.storage.snapshot_repository import StorageSnapshotRepository
 from blindsided.storage.synchronization_client import ReplicaSynchronizationClient
+
+
+LOGGER = logging.getLogger(__name__)
+
+
+def _log_event(level: int, event: str, **fields) -> None:
+    def render(value):
+        if isinstance(value, bool):
+            return str(value).lower()
+        return "none" if value is None else str(value)
+
+    LOGGER.log(
+        level,
+        "event=%s %s",
+        event,
+        " ".join(f"{key}={render(value)}" for key, value in fields.items()),
+    )
+
+
+def _classify_success(response) -> str:
+    return "success" if response.success else "failure"
+
+
+def _classify_ok(response) -> str:
+    return "success" if response.ok else "failure"
+
+
+def _classify_alive(response) -> str:
+    return "success" if response.alive else "unavailable"
+
+
+def _classify_accepted(response) -> str:
+    return "success" if response.accepted else "rejected"
+
+
+def _classify_confirmed(response) -> str:
+    return "success" if response.confirmed else "rejected"
 
 
 class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
@@ -23,7 +67,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
     synchronization_client = ReplicaSynchronizationClient()
     replication_client = SynchronousReplicationClient()
 
-    def __init__(self) -> None:
+    def __init__(self, *, initialize_connection: bool = True) -> None:
         # All mutable protocol state remains owned by the service and guarded by
         # the same condition for the lifetime of the replica.
         self.state_lock = threading.Condition()
@@ -34,6 +78,9 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
         self.pending_backup_commits: dict[str, pb2.CommitDecision] = {}
         self.current_epoch = 0
         self.promotion_ready = False
+        self._storage_metrics_ready = False
+        self._last_synchronization_failure_retryable = True
+        self._last_synchronization_failure_reason = ""
 
         self.state_file_path = (
             os.getenv("AUCTION_STORE_PATH")
@@ -52,16 +99,22 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             "",
         ).strip()
 
-        raw_address = os.getenv("POD_IP", "localhost")
-        if "storage-" in raw_address and ".storage-service" not in raw_address:
-            self.node_address = f"{raw_address}.storage-service:{NODE_PORT}"
-        else:
-            self.node_address = (
-                raw_address if ":" in raw_address else f"{raw_address}:{NODE_PORT}"
-            )
+        self.node_address = os.getenv(
+            "POD_IP",
+            f"localhost:{NODE_PORT}",
+        )
 
+        refresh_storage_state_metrics(role="unassigned", ready=False, epoch=0)
         self._load_state_from_disk()
-        self._initialize_connection()
+        if initialize_connection:
+            self._initialize_connection()
+
+    def _refresh_storage_state_metrics_locked(self) -> None:
+        refresh_storage_state_metrics(
+            role=self.replica_role,
+            ready=self._storage_metrics_ready,
+            epoch=self.current_epoch,
+        )
 
     def _initialize_connection(self) -> None:
         """Register with the controller and synchronize before serving as backup."""
@@ -74,11 +127,14 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                         self._registration_request(),
                         timeout=2.0,
                     )
-                    self.replica_role = (
-                        "primary" if registration.is_primary else "backup"
-                    )
-                    self.current_epoch = registration.epoch
-                    self.promotion_ready = self.replica_role == "primary"
+                    with self.state_lock:
+                        self.replica_role = (
+                            "primary" if registration.is_primary else "backup"
+                        )
+                        self.current_epoch = registration.epoch
+                        self.promotion_ready = self.replica_role == "primary"
+                        self._storage_metrics_ready = self.promotion_ready
+                        self._refresh_storage_state_metrics_locked()
 
                     if self.replica_role == "backup":
                         primary = stub.GetPrimary(pb2.GetPrimaryRequest())
@@ -87,6 +143,18 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                                 primary.primary_address,
                                 epoch=primary.epoch,
                             ):
+                                if not self._last_synchronization_failure_retryable:
+                                    _log_event(
+                                        logging.INFO,
+                                        "storage_standby_settled",
+                                        target_replica=self.node_address,
+                                        primary=primary.primary_address,
+                                        epoch=primary.epoch,
+                                        reason=self._last_synchronization_failure_reason,
+                                        local_ready=False,
+                                    )
+                                    connected = True
+                                    continue
                                 raise RuntimeError(
                                     "Full synchronization did not complete successfully."
                                 )
@@ -117,6 +185,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
 
     # Auction mutation and read RPCs
 
+    @observe_rpc("storage", "ApplyAuctionMutation", _classify_success)
     def ApplyAuctionMutation(
         self,
         request: pb2.AuctionMutationRequest,
@@ -129,7 +198,8 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
         logical operation. Candidate construction is side-effect free; only the
         commit coordinator may publish the candidate to replica state.
         """
-        with self.state_lock:
+        operation = self._mutation_operation(request)
+        with replication_operation(operation), self.state_lock:
             request_error = self._mutation_request_error(request)
             if request_error is not None:
                 return request_error
@@ -180,6 +250,20 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 response,
                 previous_version,
             )
+
+    @staticmethod
+    def _mutation_operation(request: pb2.AuctionMutationRequest) -> str:
+        operations = {
+            pb2.AUCTION_MUTATION_TYPE_CREATE: "CreateAuction",
+            pb2.AUCTION_MUTATION_TYPE_PLACE_BID: "PlaceBid",
+            pb2.AUCTION_MUTATION_TYPE_WITHDRAW_BID: "WithdrawBid",
+            pb2.AUCTION_MUTATION_TYPE_REVEAL: "RevealAuction",
+        }
+        if request.mutation_type in operations:
+            return operations[request.mutation_type]
+        if request.bidder_id or request.auction.bids:
+            return "PlaceBid"
+        return "CreateAuction"
 
     def _mutation_request_error(
         self,
@@ -451,6 +535,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 results.append(response)
         return results
 
+    @observe_rpc("storage", "GetAuction", _classify_ok)
     def GetAuction(
         self,
         request: pb2.StorageGetAuctionRequest,
@@ -484,6 +569,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 failure_reason=pb2.READ_FAILURE_REASON_NOT_FOUND,
             )
 
+    @observe_rpc("storage", "SearchAuctions", _classify_ok)
     def SearchAuctions(
         self,
         request: pb2.SearchAuctionsRequest,
@@ -687,6 +773,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             candidate_auction,
             idempotency_record,
         ):
+            record_commit_outcome("aborted")
             self._abort_on_synchronous_backup(
                 request_id,
                 candidate_auction.auction_id,
@@ -704,6 +791,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             candidate_auction,
             idempotency_record,
         ):
+            record_commit_outcome("aborted")
             self._abort_on_synchronous_backup(
                 request_id,
                 candidate_auction.auction_id,
@@ -717,6 +805,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             )
 
         if not self._complete_pending_backup_commit(request_id):
+            record_commit_outcome("unknown")
             return pb2.AuctionMutationResponse(
                 success=False,
                 current_version=candidate_auction.version,
@@ -724,11 +813,12 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 auction_id=candidate_auction.auction_id,
                 message="Commit is durable but backup acknowledgement is pending.",
             )
-
+        record_commit_outcome("committed")
         return success_response
 
     # Synchronous replication RPCs and commit-protocol helpers
 
+    @observe_rpc("storage", "PrepareAuctionMutation", _classify_success)
     def PrepareAuctionMutation(self, request, context):
         with self.state_lock:
             if self.replica_role != "backup":
@@ -836,6 +926,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 message="Mutation prepared.",
             )
 
+    @observe_rpc("storage", "CommitPreparedMutation", _classify_success)
     def CommitPreparedMutation(self, request, context):
         with self.state_lock:
             if self.replica_role != "backup":
@@ -942,6 +1033,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 message="Prepared mutation committed.",
             )
 
+    @observe_rpc("storage", "AbortPreparedMutation", _classify_success)
     def AbortPreparedMutation(self, request, context):
         with self.state_lock:
             if self.replica_role != "backup":
@@ -1034,6 +1126,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
 
     # Promotion and failover RPCs
 
+    @observe_rpc("storage", "BeginPrimaryPromotion", _classify_accepted)
     def BeginPrimaryPromotion(self, request, context):
         with self.state_lock:
             if request.epoch <= 0:
@@ -1067,10 +1160,14 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             previous_role = self.replica_role
             previous_epoch = self.current_epoch
             previous_ready = self.promotion_ready
+            previous_metrics_ready = getattr(
+                self, "_storage_metrics_ready", previous_ready
+            )
             previous_prepared_mutations = self.prepared_mutations
             self.replica_role = "primary"
             self.current_epoch = request.epoch
             self.promotion_ready = False
+            self._storage_metrics_ready = False
             self.prepared_mutations = {}
             try:
                 self._persist_state_to_disk()
@@ -1078,18 +1175,22 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 self.replica_role = previous_role
                 self.current_epoch = previous_epoch
                 self.promotion_ready = previous_ready
+                self._storage_metrics_ready = previous_metrics_ready
                 self.prepared_mutations = previous_prepared_mutations
+                self._refresh_storage_state_metrics_locked()
                 return pb2.BeginPrimaryPromotionResponse(
                     accepted=False,
                     epoch=self.current_epoch,
                     message=f"Could not persist promotion epoch: {error}",
                 )
+            self._refresh_storage_state_metrics_locked()
             return pb2.BeginPrimaryPromotionResponse(
                 accepted=True,
                 epoch=self.current_epoch,
                 message="Primary promotion begun.",
             )
 
+    @observe_rpc("storage", "ConfirmPromotionState", _classify_confirmed)
     def ConfirmPromotionState(self, request, context):
         with self.state_lock:
             if request.epoch <= 0 or request.epoch != self.current_epoch:
@@ -1130,6 +1231,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 message="Committed state confirmed for promotion.",
             )
 
+    @observe_rpc("storage", "CompletePrimaryPromotion", _classify_success)
     def CompletePrimaryPromotion(self, request, context):
         with self.state_lock:
             backup_address = request.backup_address.strip()
@@ -1164,26 +1266,26 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                         epoch=self.current_epoch,
                         message="Primary promotion already complete.",
                     )
-                if self.synchronous_backup_address:
-                    return pb2.CompletePrimaryPromotionResponse(
-                        success=False,
-                        epoch=self.current_epoch,
-                        message="Primary promotion completed with a different backup.",
-                    )
 
             previous_backup = self.synchronous_backup_address
+            previous_promotion_ready = self.promotion_ready
+            previous_storage_metrics_ready = self._storage_metrics_ready
             self.synchronous_backup_address = backup_address
             self.promotion_ready = True
+            self._storage_metrics_ready = True
             try:
                 self._persist_state_to_disk()
             except Exception as error:
                 self.synchronous_backup_address = previous_backup
-                self.promotion_ready = False
+                self.promotion_ready = previous_promotion_ready
+                self._storage_metrics_ready = previous_storage_metrics_ready
+                self._refresh_storage_state_metrics_locked()
                 return pb2.CompletePrimaryPromotionResponse(
                     success=False,
                     epoch=self.current_epoch,
                     message=f"Could not persist promotion completion: {error}",
                 )
+            self._refresh_storage_state_metrics_locked()
             self._reconcile_overdue_auctions(epoch=request.epoch)
             return pb2.CompletePrimaryPromotionResponse(
                 success=True,
@@ -1193,6 +1295,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
 
     # Full-state synchronization RPCs and replacement helpers
 
+    @observe_rpc("storage", "SyncFullState", _classify_ok)
     def SyncFullState(self, request, context):
         with self.state_lock:
             if self.replica_role != "primary":
@@ -1215,21 +1318,67 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 message="Sync state provided",
             )
 
+    @observe_rpc("storage", "SynchronizeFromPrimary", _classify_success)
     def SynchronizeFromPrimary(self, request, context):
         with self.state_lock:
+            _log_event(
+                logging.INFO,
+                "storage_synchronization_received",
+                target_replica=self.node_address,
+                source_primary=request.primary_address.strip() or "missing",
+                epoch=request.epoch,
+                recovery_generation="unavailable",
+                local_role=self.replica_role,
+                local_ready=getattr(
+                    self, "_storage_metrics_ready", self.promotion_ready
+                ),
+            )
             if self.replica_role != "backup":
+                _log_event(
+                    logging.WARNING,
+                    "storage_synchronization_finished",
+                    target_replica=self.node_address,
+                    source_primary=request.primary_address.strip() or "missing",
+                    epoch=request.epoch,
+                    recovery_generation="unavailable",
+                    success=False,
+                    failed_stage="state_fetch",
+                    reason="local_role_not_backup",
+                )
                 return pb2.SynchronizeFromPrimaryResponse(
                     success=False,
                     epoch=self.current_epoch,
                     message="Only a backup can synchronize from a primary.",
                 )
             if not request.primary_address.strip() or request.epoch <= 0:
+                _log_event(
+                    logging.WARNING,
+                    "storage_synchronization_finished",
+                    target_replica=self.node_address,
+                    source_primary=request.primary_address.strip() or "missing",
+                    epoch=request.epoch,
+                    recovery_generation="unavailable",
+                    success=False,
+                    failed_stage="state_fetch",
+                    reason="invalid_request",
+                )
                 return pb2.SynchronizeFromPrimaryResponse(
                     success=False,
                     epoch=self.current_epoch,
                     message="Primary address and positive epoch are required.",
                 )
             if request.epoch < self.current_epoch:
+                _log_event(
+                    logging.WARNING,
+                    "storage_synchronization_finished",
+                    target_replica=self.node_address,
+                    source_primary=request.primary_address,
+                    epoch=request.epoch,
+                    recovery_generation="unavailable",
+                    success=False,
+                    failed_stage="state_fetch",
+                    reason="stale_epoch",
+                )
                 return pb2.SynchronizeFromPrimaryResponse(
                     success=False,
                     epoch=self.current_epoch,
@@ -1251,23 +1400,143 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
 
     def _synchronize_from_primary(self, primary_address: str, epoch: int) -> bool:
         """Replace local state, then report matching-epoch readiness."""
+        self._last_synchronization_failure_retryable = True
+        self._last_synchronization_failure_reason = ""
+        common = dict(
+            source_primary=primary_address,
+            target_replica=self.node_address,
+            epoch=epoch,
+            generation="unavailable",
+            recovery_generation="unavailable",
+        )
+        failed_stage = "state_fetch"
+        reason = "completed"
         try:
+            _log_event(logging.INFO, "storage_state_fetch_started", **common)
             response = self.synchronization_client.fetch_full_state(
                 primary_address,
                 self.node_address,
                 epoch,
             )
-            if not self._replace_with_full_state(response, epoch=epoch):
+            if not response.ok:
+                failed_stage = "state_fetch"
+                reason = response.message or "source_rejected"
+                _log_event(
+                    logging.WARNING,
+                    "storage_state_fetch_rejected",
+                    **common,
+                    response_reason=reason,
+                    auction_count=0,
+                )
                 return False
-            if not self._report_synchronization_complete(
+            _log_event(
+                logging.INFO,
+                "storage_state_fetch_succeeded",
+                **common,
+                response_reason=response.message or "accepted",
+                auction_count=len(response.auctions),
+            )
+            failed_stage = "state_install"
+            _log_event(logging.INFO, "storage_state_install_started", **common)
+            if not self._replace_with_full_state(response, epoch=epoch):
+                failed_stage = "state_install"
+                reason = "validation_or_persistence_failed"
+                _log_event(
+                    logging.WARNING,
+                    "storage_state_install_failed",
+                    **common,
+                    reason=reason,
+                )
+                return False
+            _log_event(
+                logging.INFO,
+                "storage_state_install_succeeded",
+                **common,
+                reason="installed",
+            )
+            failed_stage = "completion_report"
+            _log_event(logging.INFO, "storage_completion_report_started", **common)
+            completion = self._report_synchronization_complete(
                 primary_address,
                 epoch=epoch,
-            ):
+            )
+            if not completion.success:
+                failed_stage = "completion_report"
+                terminal_standby = (
+                    completion.message
+                    == "No controller-owned synchronization is in progress."
+                )
+                reason = (
+                    "unsolicited_while_ready"
+                    if terminal_standby
+                    else completion.message or "controller_rejected"
+                )
+                self._last_synchronization_failure_retryable = not terminal_standby
+                self._last_synchronization_failure_reason = reason
+                _log_event(
+                    logging.WARNING,
+                    "storage_completion_report_rejected",
+                    **common,
+                    response_reason=reason,
+                )
                 return False
-            return self._configure_primary_backup(primary_address, epoch)
-        except Exception as error:
-            print(f"[Judge] Sync failed: {error}")
+            _log_event(
+                logging.INFO,
+                "storage_completion_report_succeeded",
+                **common,
+                response_reason="accepted",
+            )
+            failed_stage = "none"
+            with self.state_lock:
+                if self.replica_role == "backup" and self.current_epoch == epoch:
+                    self._storage_metrics_ready = True
+                    self._refresh_storage_state_metrics_locked()
+            return True
+        except grpc.RpcError as error:
+            reason = type(error).__name__
+            self._last_synchronization_failure_retryable = True
+            self._last_synchronization_failure_reason = reason
+            try:
+                rpc_status = error.code()
+            except Exception:
+                rpc_status = None
+            outcome = (
+                f"storage_{failed_stage}_timeout"
+                if rpc_status == grpc.StatusCode.DEADLINE_EXCEEDED
+                else f"storage_{failed_stage}_failed"
+            )
+            _log_event(
+                logging.WARNING,
+                outcome,
+                **common,
+                exception_type=reason,
+            )
             return False
+        except Exception as error:
+            reason = type(error).__name__
+            self._last_synchronization_failure_retryable = True
+            self._last_synchronization_failure_reason = reason
+            _log_event(
+                logging.ERROR,
+                f"storage_{failed_stage}_failed",
+                **common,
+                exception_type=reason,
+                reason=reason,
+            )
+            LOGGER.exception(
+                "Unexpected full synchronization failure target_replica=%s",
+                self.node_address,
+            )
+            return False
+        finally:
+            _log_event(
+                logging.INFO if failed_stage == "none" else logging.WARNING,
+                "storage_synchronization_finished",
+                **common,
+                success=failed_stage == "none",
+                failed_stage=failed_stage,
+                reason=reason,
+            )
 
     def _configure_primary_backup(self, primary_address: str, epoch: int) -> bool:
         """Tell the synchronized primary to start using this replica."""
@@ -1316,6 +1585,10 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             replacement_records[copied_record.request_id] = copied_record
 
         with self.state_lock:
+            if epoch is not None and (
+                self.replica_role != "backup" or epoch < self.current_epoch
+            ):
+                return False
             previous_collections = (
                 self.auction_store,
                 self.idempotency_records,
@@ -1324,6 +1597,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 self.pending_backup_commits,
                 self.current_epoch,
                 self.promotion_ready,
+                getattr(self, "_storage_metrics_ready", self.promotion_ready),
             )
             self.auction_store = replacement_auctions
             self.idempotency_records = replacement_records
@@ -1333,6 +1607,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             if epoch is not None:
                 self.current_epoch = epoch
             self.promotion_ready = False
+            self._storage_metrics_ready = False
             try:
                 self._persist_state_to_disk()
             except Exception as error:
@@ -1344,16 +1619,19 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                     self.pending_backup_commits,
                     self.current_epoch,
                     self.promotion_ready,
+                    self._storage_metrics_ready,
                 ) = previous_collections
+                self._refresh_storage_state_metrics_locked()
                 print(f"[Judge] Could not persist synchronized state: {error}")
                 return False
+            self._refresh_storage_state_metrics_locked()
         return True
 
     def _report_synchronization_complete(
         self,
         primary_address: str,
         epoch: int,
-    ) -> bool:
+    ) -> pb2.SynchronizationCompleteResponse:
         return self.synchronization_client.report_complete(
             self.node_address,
             primary_address,
@@ -1363,6 +1641,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
 
     # Health and local snapshot helpers
 
+    @observe_rpc("storage", "Heartbeat", _classify_alive)
     def Heartbeat(self, request, context):
         with self.state_lock:
             return pb2.HealthCheckResponse(
@@ -1418,6 +1697,8 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             self.current_epoch = snapshot.current_epoch
             self.promotion_ready = snapshot.promotion_ready
             self.synchronous_backup_address = snapshot.synchronous_backup_address
+            if self.promotion_ready and self.synchronous_backup_address:
+                self.replica_role = "primary"
         except Exception as e:
             raise RuntimeError(
                 f"Could not load local state snapshot {self.state_file_path!r}: {e}"

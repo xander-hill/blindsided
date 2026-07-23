@@ -134,7 +134,10 @@ def running_backend_stack():
             os.environ,
             {
                 "NODE_PORT": str(storage_port),
-                "POD_IP": "127.0.0.1",
+                # Storage advertises this address to the controller and the
+                # auction service; include the ephemeral port it actually
+                # binds below so in-process gRPC calls can reach it.
+                "POD_IP": f"127.0.0.1:{storage_port}",
                 "NODE_ROLE": "backup",
                 "PEER_ADDRESSES": "",
             },
@@ -239,13 +242,14 @@ def running_replicated_backend_stack():
             "PEER_ADDRESSES": "",
             "AUCTION_STORE_PATH": "",
         }, clear=False):
-            primary = StorageReplicaService()
+            primary = StorageReplicaService(initialize_connection=False)
         start_servicer(
             primary,
             pb2_grpc.add_StorageReplicaServiceServicer_to_server,
             primary_addr,
             workers=40,
         )
+        primary._initialize_connection()
 
         backup_addr = f"127.0.0.1:{free_port()}"
         with mock.patch.dict(os.environ, {
@@ -255,13 +259,14 @@ def running_replicated_backend_stack():
             "PEER_ADDRESSES": primary_addr,
             "AUCTION_STORE_PATH": "",
         }, clear=False):
-            backup = StorageReplicaService()
+            backup = StorageReplicaService(initialize_connection=False)
         start_servicer(
             backup,
             pb2_grpc.add_StorageReplicaServiceServicer_to_server,
             backup_addr,
             workers=40,
         )
+        backup._initialize_connection()
 
         auction_addr = f"127.0.0.1:{free_port()}"
         stack.enter_context(mock.patch.object(

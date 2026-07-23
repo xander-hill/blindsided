@@ -2,10 +2,13 @@ from concurrent import futures
 from contextlib import contextmanager
 import tempfile
 import threading
+import time
 from unittest import mock
 
 import grpc
 
+from blindsided.auction_service import service as auction_service_module
+from blindsided.auction_service.service import AuctionService
 from blindsided.controller.service import (
     ControllerService,
     PrimaryAssignment,
@@ -15,6 +18,7 @@ from blindsided.controller.service import (
 )
 from blindsided.generated import blindsided_pb2 as pb2
 from blindsided.generated import blindsided_pb2_grpc as pb2_grpc
+from blindsided.storage import service as storage_service_module
 from backend.tests.helpers import (
     BackendTestCase,
     NoopContext,
@@ -134,7 +138,281 @@ def running_promotion_cluster():
             server.stop(0).wait(timeout=5)
 
 
+@contextmanager
+def running_backup_failure_cluster():
+    """Three-replica READY topology used by backup_failure.sh."""
+    controller_address = f"127.0.0.1:{free_port()}"
+    primary_address = f"127.0.0.1:{free_port()}"
+    backup_address = f"127.0.0.1:{free_port()}"
+    standby_address = f"127.0.0.1:{free_port()}"
+    auction_address = f"127.0.0.1:{free_port()}"
+
+    controller = ControllerService(
+        heartbeat_timeout=0.2,
+        promotion_timeout=2.0,
+        synchronization_timeout=2.0,
+    )
+    primary = make_judge(
+        role="primary",
+        address=primary_address,
+        synchronous_backup_address=backup_address,
+        use_test_coordinator=False,
+    )
+    backup = make_judge(
+        role="backup",
+        address=backup_address,
+        use_test_coordinator=False,
+    )
+    standby = make_judge(
+        role="backup",
+        address=standby_address,
+        use_test_coordinator=False,
+    )
+    for replica in (primary, backup, standby):
+        replica.current_epoch = 1
+    primary.promotion_ready = True
+    primary._storage_metrics_ready = True
+    backup._storage_metrics_ready = True
+    standby._storage_metrics_ready = False
+
+    controller.nodes = {
+        primary_address: ReplicaRecord(
+            primary_address, 1.0, ReplicaSyncStatus.UNSYNCHRONIZED
+        ),
+        backup_address: ReplicaRecord(
+            backup_address, 1.0, ReplicaSyncStatus.SYNCHRONIZED, 1
+        ),
+        standby_address: ReplicaRecord(
+            standby_address, 1.0, ReplicaSyncStatus.UNSYNCHRONIZED
+        ),
+    }
+    controller.primary_assignment = PrimaryAssignment(
+        node_id=primary_address,
+        epoch=1,
+        status=PrimaryStatus.READY,
+        sync_backup_address=backup_address,
+    )
+    controller.last_primary_epoch = 1
+
+    servers = []
+    servers_by_address = {}
+    active_backup_server = None
+    patches = (
+        mock.patch.object(
+            storage_service_module, "CONTROLLER_ADDRESS", controller_address
+        ),
+        mock.patch.object(
+            auction_service_module, "CONTROLLER_ADDRESS", controller_address
+        ),
+    )
+    for patch in patches:
+        patch.start()
+    try:
+        services = (
+            (
+                controller_address,
+                controller,
+                pb2_grpc.add_ClusterControllerServicer_to_server,
+            ),
+            (
+                primary_address,
+                primary,
+                pb2_grpc.add_StorageReplicaServiceServicer_to_server,
+            ),
+            (
+                backup_address,
+                backup,
+                pb2_grpc.add_StorageReplicaServiceServicer_to_server,
+            ),
+            (
+                standby_address,
+                standby,
+                pb2_grpc.add_StorageReplicaServiceServicer_to_server,
+            ),
+            (
+                auction_address,
+                AuctionService(),
+                pb2_grpc.add_AuctionServiceServicer_to_server,
+            ),
+        )
+        for address, servicer, registration in services:
+            server = grpc.server(futures.ThreadPoolExecutor(max_workers=20))
+            registration(servicer, server)
+            server.add_insecure_port(address)
+            server.start()
+            servers.append(server)
+            servers_by_address[address] = server
+            if address == backup_address:
+                active_backup_server = server
+
+        for address, _, _ in services:
+            with grpc.insecure_channel(address) as channel:
+                grpc.channel_ready_future(channel).result(timeout=5)
+
+        yield {
+            "controller": controller,
+            "primary": primary,
+            "backup": backup,
+            "standby": standby,
+            "primary_address": primary_address,
+            "backup_address": backup_address,
+            "standby_address": standby_address,
+            "auction_address": auction_address,
+            "active_backup_server": active_backup_server,
+            "servers_by_address": servers_by_address,
+        }
+    finally:
+        for server in reversed(servers):
+            server.stop(0).wait(timeout=5)
+        for patch in reversed(patches):
+            patch.stop()
+
+
 class DistributedBehaviorTests(BackendTestCase):
+    def test_designated_backup_failure_reprotects_with_real_grpc_standby(self):
+        """Covers tools/evaluation/backup_failure.sh without protocol mocks."""
+        with running_backup_failure_cluster() as cluster:
+            controller = cluster["controller"]
+            primary = cluster["primary"]
+            standby = cluster["standby"]
+            with grpc.insecure_channel(cluster["auction_address"]) as channel:
+                auctions = pb2_grpc.AuctionServiceStub(channel)
+                before = auctions.CreateAuction(
+                    pb2.CreateAuctionRequest(
+                        seller_id="seller-a",
+                        title="Before backup failure",
+                        reserve_price=100.0,
+                        ends_at=future_timestamp(),
+                        request_id="backup-failure-before",
+                    ),
+                    timeout=5,
+                )
+                self.assertTrue(before.ok)
+
+                cluster["active_backup_server"].stop(0).wait(timeout=5)
+                unavailable = auctions.CreateAuction(
+                    pb2.CreateAuctionRequest(
+                        seller_id="seller-a",
+                        title="While backup unavailable",
+                        reserve_price=100.0,
+                        ends_at=future_timestamp(),
+                        request_id="backup-failure-unavailable",
+                    ),
+                    timeout=5,
+                )
+                self.assertFalse(unavailable.ok)
+
+                with self.assertLogs(level="INFO") as captured:
+                    for _ in range(3):
+                        controller._check_heartbeats_once()
+
+                    deadline = time.monotonic() + 5
+                    while time.monotonic() < deadline:
+                        with controller.lock:
+                            assignment = controller.primary_assignment
+                            recovered = bool(
+                                assignment
+                                and assignment.status == PrimaryStatus.READY
+                                and assignment.sync_backup_address
+                                == cluster["standby_address"]
+                            )
+                        if recovered:
+                            break
+                        time.sleep(0.01)
+                    self.assertTrue(recovered, "\n".join(captured.output))
+
+                after = auctions.CreateAuction(
+                    pb2.CreateAuctionRequest(
+                        seller_id="seller-a",
+                        title="After backup recovery",
+                        reserve_price=100.0,
+                        ends_at=future_timestamp(),
+                        request_id="backup-failure-recovered",
+                    ),
+                    timeout=5,
+                )
+
+            output = "\n".join(captured.output)
+            self.assertIn("event=replica_failure_classified", output)
+            self.assertIn("classification=active_backup", output)
+            self.assertIn("event=reprotection_entered", output)
+            self.assertIn("event=synchronization_dispatch_started", output)
+            self.assertIn("event=storage_state_fetch_succeeded", output)
+            self.assertIn("event=storage_state_install_succeeded", output)
+            self.assertIn("event=synchronization_completion_accepted", output)
+            self.assertIn("event=backup_activation_succeeded", output)
+            self.assertIn("event=reprotection_completed", output)
+            self.assertNotIn(cluster["backup_address"], controller.nodes)
+            self.assertTrue(after.ok)
+            self.assertEqual(
+                primary.synchronous_backup_address,
+                cluster["standby_address"],
+            )
+            self.assertTrue(standby._storage_metrics_ready)
+            self.assertIn(before.auction_id, standby.auction_store)
+            self.assertIn(after.auction_id, standby.auction_store)
+
+            restored = cluster["backup"]
+            restored_server = grpc.server(
+                futures.ThreadPoolExecutor(max_workers=10)
+            )
+            pb2_grpc.add_StorageReplicaServiceServicer_to_server(
+                restored, restored_server
+            )
+            restored_server.add_insecure_port(cluster["backup_address"])
+            restored_server.start()
+            try:
+                with grpc.insecure_channel(cluster["backup_address"]) as channel:
+                    grpc.channel_ready_future(channel).result(timeout=5)
+
+                with self.assertLogs(level="INFO") as restored_logs:
+                    restored._initialize_connection()
+
+                restored_output = "\n".join(restored_logs.output)
+                self.assertEqual(
+                    restored_output.count("event=storage_state_fetch_started"),
+                    1,
+                )
+                self.assertIn(
+                    "reason=unsolicited_while_ready",
+                    restored_output,
+                )
+                self.assertIn("event=storage_standby_settled", restored_output)
+                self.assertFalse(restored._storage_metrics_ready)
+                with grpc.insecure_channel(
+                    cluster["backup_address"]
+                ) as channel:
+                    heartbeat = pb2_grpc.StorageReplicaServiceStub(
+                        channel
+                    ).Heartbeat(
+                        pb2.HealthCheckRequest(request_source="test"),
+                        timeout=2,
+                    )
+                self.assertTrue(heartbeat.alive)
+
+                cluster["servers_by_address"][
+                    cluster["standby_address"]
+                ].stop(0).wait(timeout=5)
+                for _ in range(3):
+                    controller._check_heartbeats_once()
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    with controller.lock:
+                        assignment = controller.primary_assignment
+                        restored_selected = bool(
+                            assignment
+                            and assignment.status == PrimaryStatus.READY
+                            and assignment.sync_backup_address
+                            == cluster["backup_address"]
+                        )
+                    if restored_selected:
+                        break
+                    time.sleep(0.01)
+                self.assertTrue(restored_selected)
+                self.assertTrue(restored._storage_metrics_ready)
+            finally:
+                restored_server.stop(0).wait(timeout=5)
+
     def _mutation_case(self, mutation_name, request_id):
         auction_id = f"{mutation_name}-auction"
         if mutation_name == "create":
