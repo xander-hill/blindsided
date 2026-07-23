@@ -7,12 +7,14 @@ from blindsided.auction_service.service import AuctionService
 from blindsided.common.config import NODE_PORT
 from blindsided.generated import blindsided_pb2_grpc as pb2_grpc
 from blindsided.observability.server import start_metrics_server
+from blindsided.observability.logging import configure_logging
 
 
 SERVICE_PORT = os.getenv("SERVICE_PORT", NODE_PORT)
 
 
 def serve() -> None:
+    configure_logging()
     service_instance = AuctionService()
     start_metrics_server(8000)
 

@@ -11,7 +11,7 @@ services:
       - METRICS_ENABLED=true
       - METRICS_PORT=8000
 
-  storage-primary:
+  storage-0:
     build:
       context: ../..
       dockerfile: backend/Dockerfile
@@ -19,16 +19,16 @@ services:
     environment:
       - CONTROLLER_HOST=controller
       - NODE_PORT=50051
-      - POD_IP=storage-primary:50051
+      - POD_IP=storage-0:50051
       - AUCTION_STORE_PATH=/var/lib/blindsided/auction-state.pb
       - METRICS_ENABLED=true
       - METRICS_PORT=8000
     volumes:
-      - storage-primary-state:/var/lib/blindsided
+      - storage-0-state:/var/lib/blindsided
     depends_on:
       - controller
 
-  storage-backup:
+  storage-1:
     build:
       context: ../..
       dockerfile: backend/Dockerfile
@@ -36,12 +36,29 @@ services:
     environment:
       - CONTROLLER_HOST=controller
       - NODE_PORT=50051
-      - POD_IP=storage-backup:50051
+      - POD_IP=storage-1:50051
       - AUCTION_STORE_PATH=/var/lib/blindsided/auction-state.pb
       - METRICS_ENABLED=true
       - METRICS_PORT=8000
     volumes:
-      - storage-backup-state:/var/lib/blindsided
+      - storage-1-state:/var/lib/blindsided
+    depends_on:
+      - controller
+
+  storage-2:
+    build:
+      context: ../..
+      dockerfile: backend/Dockerfile
+    command: python -m blindsided.storage.server
+    environment:
+      - CONTROLLER_HOST=controller
+      - NODE_PORT=50051
+      - POD_IP=storage-2:50051
+      - AUCTION_STORE_PATH=/var/lib/blindsided/auction-state.pb
+      - METRICS_ENABLED=true
+      - METRICS_PORT=8000
+    volumes:
+      - storage-2-state:/var/lib/blindsided
     depends_on:
       - controller
 
@@ -81,8 +98,9 @@ services:
       - "--storage.tsdb.path=/prometheus"
     depends_on:
       - controller
-      - storage-primary
-      - storage-backup
+      - storage-0
+      - storage-1
+      - storage-2
       - service-node
 
   grafana:
@@ -101,7 +119,8 @@ services:
       - prometheus
 
 volumes:
-  storage-primary-state:
-  storage-backup-state:
+  storage-0-state:
+  storage-1-state:
+  storage-2-state:
   prometheus-data:
   grafana-data:

@@ -18,7 +18,7 @@ metadata:
   namespace: blindsided
 spec:
   serviceName: "storage-service"
-  replicas: 2
+  replicas: 3
   selector:
     matchLabels:
       app: storage

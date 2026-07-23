@@ -30,18 +30,14 @@ class ReplicaSynchronizationClient:
         primary_address: str,
         epoch: int,
         controller_address: str = CONTROLLER_ADDRESS,
-    ) -> bool:
-        try:
-            with grpc.insecure_channel(controller_address) as channel:
-                stub = pb2_grpc.ClusterControllerStub(channel)
-                response = stub.ReportSynchronizationComplete(
-                    pb2.SynchronizationCompleteRequest(
-                        replica_address=replica_address,
-                        source_primary_address=primary_address,
-                        epoch=epoch,
-                    ),
-                    timeout=SYNCHRONIZATION_REPORT_TIMEOUT_SECONDS,
-                )
-            return response.success
-        except grpc.RpcError:
-            return False
+    ) -> pb2.SynchronizationCompleteResponse:
+        with grpc.insecure_channel(controller_address) as channel:
+            stub = pb2_grpc.ClusterControllerStub(channel)
+            return stub.ReportSynchronizationComplete(
+                pb2.SynchronizationCompleteRequest(
+                    replica_address=replica_address,
+                    source_primary_address=primary_address,
+                    epoch=epoch,
+                ),
+                timeout=SYNCHRONIZATION_REPORT_TIMEOUT_SECONDS,
+            )

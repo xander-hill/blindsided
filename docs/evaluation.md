@@ -11,7 +11,7 @@ and failover guarantees.
 - Docker Compose deployment
 - 1 controller
 - 1 auction service
-- 2 storage replicas
+- 3 storage replicas
 - Prometheus scraping every 5 seconds
 - Grafana dashboards for visualization
 

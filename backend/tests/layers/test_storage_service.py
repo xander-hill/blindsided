@@ -20,6 +20,33 @@ class PrepareRpcError(grpc.RpcError):
 
 
 class StorageServiceTests(BackendTestCase):
+    def test_state_fetch_failure_logs_failed_stage_and_correlation(self):
+        judge = make_judge(role="backup", address="backup:50051")
+
+        with (
+            mock.patch.object(
+                judge.synchronization_client,
+                "fetch_full_state",
+                side_effect=PrepareRpcError(),
+            ),
+            self.assertLogs(
+                "blindsided.storage.service", level="INFO"
+            ) as captured,
+        ):
+            synchronized = judge._synchronize_from_primary(
+                "primary:50051", epoch=7
+            )
+
+        self.assertFalse(synchronized)
+        output = "\n".join(captured.output)
+        self.assertIn("event=storage_state_fetch_started", output)
+        self.assertIn("event=storage_state_fetch_failed", output)
+        self.assertIn("event=storage_synchronization_finished", output)
+        self.assertIn("failed_stage=state_fetch", output)
+        self.assertIn("source_primary=primary:50051", output)
+        self.assertIn("target_replica=backup:50051", output)
+        self.assertIn("recovery_generation=unavailable", output)
+
     def _backup_transaction_state(self):
         judge = make_judge(role="backup")
         judge.current_epoch = 7
@@ -2114,7 +2141,7 @@ class StorageServiceTests(BackendTestCase):
         self.assertFalse(response.success)
         self.assertIn("candidate", response.message)
 
-    def test_complete_primary_promotion_activates_and_retries_idempotently(self):
+    def test_complete_primary_promotion_activates_idempotently_and_reconfigures_backup(self):
         candidate = make_judge(role="backup", address="candidate:50051")
         candidate.BeginPrimaryPromotion(
             pb2.BeginPrimaryPromotionRequest(epoch=7), NoopContext()
@@ -2137,10 +2164,44 @@ class StorageServiceTests(BackendTestCase):
 
         self.assertTrue(first.success)
         self.assertTrue(repeated.success)
-        self.assertFalse(conflicting.success)
-        persist.assert_not_called()
+        self.assertTrue(conflicting.success)
+        persist.assert_called_once()
         self.assertTrue(candidate.promotion_ready)
-        self.assertEqual(candidate.synchronous_backup_address, "backup:50051")
+        self.assertEqual(
+            candidate.synchronous_backup_address,
+            "different-backup:50051",
+        )
+
+    def test_failed_backup_reconfiguration_preserves_ready_primary(self):
+        primary = make_judge(
+            role="primary",
+            address="primary:50051",
+            synchronous_backup_address="old-backup:50051",
+        )
+        primary.current_epoch = 7
+        primary.promotion_ready = True
+        primary._storage_metrics_ready = True
+
+        with mock.patch.object(
+            primary,
+            "_persist_state_to_disk",
+            side_effect=OSError("disk unavailable"),
+        ):
+            response = primary.CompletePrimaryPromotion(
+                pb2.CompletePrimaryPromotionRequest(
+                    epoch=7,
+                    backup_address="replacement:50051",
+                ),
+                NoopContext(),
+            )
+
+        self.assertFalse(response.success)
+        self.assertTrue(primary.promotion_ready)
+        self.assertTrue(primary._storage_metrics_ready)
+        self.assertEqual(
+            primary.synchronous_backup_address,
+            "old-backup:50051",
+        )
 
     def test_matching_promotion_completion_makes_storage_writable(self):
         candidate = make_judge(role="backup", address="candidate:50051")
@@ -2958,11 +3019,10 @@ class StorageServiceTests(BackendTestCase):
                 return_value=storage_stub,
             ),
             mock.patch.object(
-                judge, "_report_synchronization_complete", return_value=True
+                judge,
+                "_report_synchronization_complete",
+                return_value=pb2.SynchronizationCompleteResponse(success=True),
             ) as report,
-            mock.patch.object(
-                judge, "_configure_primary_backup", return_value=True
-            ) as configure,
         ):
             synchronized = judge._synchronize_from_primary(
                 "primary:50051",
@@ -2971,8 +3031,10 @@ class StorageServiceTests(BackendTestCase):
 
         self.assertTrue(synchronized)
         self.assertEqual(set(judge.auction_store), {"current-auction"})
+        self.assertEqual(judge.replica_role, "backup")
+        self.assertFalse(judge.promotion_ready)
+        self.assertTrue(judge._storage_metrics_ready)
         report.assert_called_once_with("primary:50051", epoch=7)
-        configure.assert_called_once_with("primary:50051", 7)
         sync_request = storage_stub.SyncFullState.call_args.args[0]
         self.assertEqual(sync_request.requester_id, "backup:50051")
         self.assertEqual(sync_request.epoch, 7)
@@ -3073,6 +3135,54 @@ class StorageServiceTests(BackendTestCase):
         synchronize.assert_called_once_with("primary:50051", epoch=7)
         self.assertEqual(judge.current_epoch, 7)
 
+    def test_unsolicited_ready_completion_settles_startup_as_non_ready_standby(self):
+        judge = make_judge(role="backup", address="restored:50051")
+        controller_stub = mock.Mock()
+        controller_stub.RegisterNode.return_value = pb2.RegisterResponse(
+            success=True,
+            is_primary=False,
+            epoch=7,
+        )
+        controller_stub.GetPrimary.return_value = pb2.GetPrimaryResponse(
+            success=True,
+            primary_address="primary:50051",
+            epoch=7,
+        )
+
+        def terminal_synchronization(*_args, **_kwargs):
+            judge._last_synchronization_failure_retryable = False
+            judge._last_synchronization_failure_reason = (
+                "unsolicited_while_ready"
+            )
+            return False
+
+        with (
+            mock.patch(
+                "blindsided.storage.service.grpc.insecure_channel",
+                return_value=ChannelContext(),
+            ),
+            mock.patch(
+                "blindsided.storage.service.pb2_grpc.ClusterControllerStub",
+                return_value=controller_stub,
+            ),
+            mock.patch.object(
+                judge,
+                "_synchronize_from_primary",
+                side_effect=terminal_synchronization,
+            ) as synchronize,
+            mock.patch("blindsided.storage.service.time.sleep") as sleep,
+        ):
+            judge._initialize_connection()
+
+        synchronize.assert_called_once_with("primary:50051", epoch=7)
+        sleep.assert_not_called()
+        self.assertEqual(judge.replica_role, "backup")
+        self.assertFalse(judge.promotion_ready)
+        self.assertFalse(judge._storage_metrics_ready)
+        self.assertTrue(
+            judge.Heartbeat(pb2.HealthCheckRequest(), NoopContext()).alive
+        )
+
     def test_synchronization_report_identifies_backup_and_source_primary(self):
         judge = make_judge(role="backup", address="backup:50051")
         controller_stub = mock.Mock()
@@ -3095,7 +3205,7 @@ class StorageServiceTests(BackendTestCase):
                 epoch=7,
             )
 
-        self.assertTrue(reported)
+        self.assertTrue(reported.success)
         request = controller_stub.ReportSynchronizationComplete.call_args.args[0]
         self.assertEqual(request.replica_address, "backup:50051")
         self.assertEqual(request.source_primary_address, "primary:50051")
@@ -3119,6 +3229,7 @@ class StorageServiceTests(BackendTestCase):
 
     def test_failed_synchronize_from_primary_does_not_report_completion(self):
         judge = make_judge(role="backup", address="backup:50051")
+        judge._storage_metrics_ready = False
         storage_stub = mock.Mock()
         storage_stub.SyncFullState.side_effect = PrepareRpcError()
         controller_stub = mock.Mock()
@@ -3143,6 +3254,8 @@ class StorageServiceTests(BackendTestCase):
             )
 
         self.assertFalse(synchronized)
+        self.assertFalse(judge.promotion_ready)
+        self.assertFalse(judge._storage_metrics_ready)
         controller_stub_factory.assert_not_called()
         controller_stub.ReportSynchronizationComplete.assert_not_called()
 

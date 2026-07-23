@@ -116,7 +116,9 @@ class StorageWatchObservabilityTests(TestCase):
         judge._refresh_storage_state_metrics_locked()
         judge.synchronization_client = mock.Mock()
         judge.synchronization_client.fetch_full_state.return_value = pb2.StateResponse(ok=True)
-        judge._report_synchronization_complete = mock.Mock(return_value=True)
+        judge._report_synchronization_complete = mock.Mock(
+            return_value=pb2.SynchronizationCompleteResponse(success=True)
+        )
         judge._configure_primary_backup = mock.Mock(return_value=True)
 
         self.assertTrue(judge._synchronize_from_primary("primary:1", 7))
