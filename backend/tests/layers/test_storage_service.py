@@ -1567,12 +1567,12 @@ class StorageServiceTests(BackendTestCase):
         self.assertIn("prepare-1", recovered.aborted_mutations)
         self.assertNotIn("prepare-1", recovered.prepared_mutations)
 
-    def test_abort_unknown_request_is_idempotent_and_identity_stable(self):
+    def test_abort_unknown_request_is_idempotent_noop_without_tombstone(self):
         judge = make_judge(role="backup")
         decision = self._decision_request(request_id="unknown-request")
 
-        first = judge.AbortPreparedMutation(decision, NoopContext())
         with mock.patch.object(judge, "_persist_state_to_disk") as persist:
+            first = judge.AbortPreparedMutation(decision, NoopContext())
             retry = judge.AbortPreparedMutation(decision, NoopContext())
         different_auction = judge.AbortPreparedMutation(
             self._decision_request(
@@ -1592,12 +1592,9 @@ class StorageServiceTests(BackendTestCase):
         self.assertTrue(first.success)
         self.assertEqual(retry, first)
         persist.assert_not_called()
-        self.assertFalse(different_auction.success)
-        self.assertFalse(different_primary.success)
-        self.assertEqual(
-            judge.aborted_mutations["unknown-request"],
-            decision,
-        )
+        self.assertTrue(different_auction.success)
+        self.assertTrue(different_primary.success)
+        self.assertEqual(judge.aborted_mutations, {})
 
     def test_abort_rejects_committed_request(self):
         judge = make_judge(role="backup")
@@ -1662,6 +1659,10 @@ class StorageServiceTests(BackendTestCase):
 
     def test_tombstoned_request_id_is_rejected_by_prepare_and_commit(self):
         judge = make_judge(role="backup")
+        initial_prepare = judge.PrepareAuctionMutation(
+            self._prepare_request(),
+            NoopContext(),
+        )
         abort = judge.AbortPreparedMutation(
             self._decision_request(),
             NoopContext(),
@@ -1694,6 +1695,7 @@ class StorageServiceTests(BackendTestCase):
             NoopContext(),
         )
 
+        self.assertTrue(initial_prepare.success)
         self.assertTrue(abort.success)
         self.assertFalse(prepare.success)
         self.assertFalse(commit.success)

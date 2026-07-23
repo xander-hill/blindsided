@@ -820,6 +820,286 @@ class DistributedBehaviorTests(BackendTestCase):
                     self.assertEqual(pair["backup"].auction_store[base.auction_id], backup_before)
                 self.assertNotIn(request.request_id, pair["backup"].idempotency_records)
 
+    def test_validation_failure_before_prepare_leaves_replicas_unchanged(self):
+        with running_storage_pair() as pair:
+            base, request = self._mutation_case("bid", "invalid-before-prepare")
+            self._install_committed_base(pair, base)
+            request.expected_version = base.version - 1
+            primary_before = pb2.Auction()
+            primary_before.CopyFrom(pair["primary"].auction_store[base.auction_id])
+            backup_before = pb2.Auction()
+            backup_before.CopyFrom(pair["backup"].auction_store[base.auction_id])
+
+            with mock.patch.object(
+                pair["primary"].replication_client,
+                "prepare",
+            ) as prepare, mock.patch.object(
+                pair["primary"].replication_client,
+                "commit",
+            ) as commit:
+                response = pair["primary"].ApplyAuctionMutation(
+                    request,
+                    NoopContext(),
+                )
+
+            prepare.assert_not_called()
+            commit.assert_not_called()
+            self.assertFalse(response.success)
+            self.assertFalse(response.replayed)
+            self.assertEqual(
+                response.failure_reason,
+                pb2.MUTATION_FAILURE_REASON_CONCURRENCY_CONFLICT,
+            )
+            self.assertEqual(response.current_version, base.version)
+            self.assertEqual(
+                pair["primary"].auction_store[base.auction_id],
+                primary_before,
+            )
+            self.assertEqual(
+                pair["backup"].auction_store[base.auction_id],
+                backup_before,
+            )
+            self.assertNotIn(request.request_id, pair["primary"].idempotency_records)
+            self.assertNotIn(request.request_id, pair["backup"].idempotency_records)
+            self.assertEqual(pair["primary"].pending_backup_commits, {})
+            self.assertEqual(pair["backup"].prepared_mutations, {})
+
+    def test_backup_prepare_failures_abort_without_committing_and_can_retry(self):
+        failures = (
+            (
+                "rejection",
+                pb2.PrepareMutationResponse(
+                    success=False,
+                    prepared_version=1,
+                    message="Prepare rejected.",
+                ),
+            ),
+            ("timeout", None),
+        )
+        for failure_name, prepare_result in failures:
+            with self.subTest(failure=failure_name), running_storage_pair() as pair:
+                base, request = self._mutation_case(
+                    "bid",
+                    f"prepare-{failure_name}-bid",
+                )
+                self._install_committed_base(pair, base)
+                primary_before = pb2.Auction()
+                primary_before.CopyFrom(pair["primary"].auction_store[base.auction_id])
+                backup_before = pb2.Auction()
+                backup_before.CopyFrom(pair["backup"].auction_store[base.auction_id])
+
+                with mock.patch.object(
+                    pair["primary"].replication_client,
+                    "prepare",
+                    return_value=prepare_result,
+                ), mock.patch.object(
+                    pair["primary"].replication_client,
+                    "commit",
+                ) as commit:
+                    first = pair["primary"].ApplyAuctionMutation(
+                        request,
+                        NoopContext(),
+                    )
+
+                commit.assert_not_called()
+                self.assertFalse(first.success)
+                self.assertFalse(first.replayed)
+                self.assertEqual(
+                    first.failure_reason,
+                    pb2.MUTATION_FAILURE_REASON_REPLICATION_FAILED,
+                )
+                self.assertEqual(first.current_version, base.version)
+                self.assertEqual(
+                    pair["primary"].auction_store[base.auction_id],
+                    primary_before,
+                )
+                self.assertEqual(
+                    pair["backup"].auction_store[base.auction_id],
+                    backup_before,
+                )
+                self.assertNotIn(
+                    request.request_id,
+                    pair["primary"].idempotency_records,
+                )
+                self.assertNotIn(
+                    request.request_id,
+                    pair["backup"].idempotency_records,
+                )
+                self.assertEqual(pair["primary"].pending_backup_commits, {})
+                self.assertEqual(pair["backup"].prepared_mutations, {})
+
+                retry = pair["primary"].ApplyAuctionMutation(
+                    request,
+                    NoopContext(),
+                )
+                self.assertTrue(retry.success)
+                self.assertFalse(retry.replayed)
+                self.assertEqual(retry.current_version, base.version + 1)
+                self.assertEqual(
+                    pair["primary"].auction_store[base.auction_id],
+                    pair["backup"].auction_store[base.auction_id],
+                )
+                self.assertEqual(
+                    pair["primary"].auction_store[base.auction_id].version,
+                    base.version + 1,
+                )
+                self.assertEqual(
+                    len(pair["primary"].auction_store[base.auction_id].bids),
+                    2,
+                )
+
+    def test_postcommit_backup_failures_preserve_decision_and_retry_once(self):
+        failures = (
+            (
+                "rejection",
+                pb2.MutationDecisionResponse(
+                    success=False,
+                    committed_version=1,
+                    message="Commit rejected.",
+                ),
+            ),
+            ("timeout", None),
+        )
+        for failure_name, commit_result in failures:
+            with self.subTest(failure=failure_name), running_storage_pair() as pair:
+                base, request = self._mutation_case(
+                    "bid",
+                    f"commit-{failure_name}-bid",
+                )
+                self._install_committed_base(pair, base)
+
+                with mock.patch.object(
+                    pair["primary"].replication_client,
+                    "commit",
+                    return_value=commit_result,
+                ):
+                    first = pair["primary"].ApplyAuctionMutation(
+                        request,
+                        NoopContext(),
+                    )
+
+                committed = pair["primary"].auction_store[base.auction_id]
+                authoritative = pair["primary"].GetAuction(
+                    pb2.StorageGetAuctionRequest(
+                        auction_id=base.auction_id,
+                        epoch=pair["primary"].current_epoch,
+                    ),
+                    NoopContext(),
+                )
+                self.assertFalse(first.success)
+                self.assertFalse(first.replayed)
+                self.assertEqual(
+                    first.failure_reason,
+                    pb2.MUTATION_FAILURE_REASON_ACKNOWLEDGEMENT_PENDING,
+                )
+                self.assertEqual(first.current_version, base.version + 1)
+                self.assertEqual(committed.version, base.version + 1)
+                self.assertEqual(len(committed.bids), 2)
+                self.assertIn(request.request_id, pair["primary"].idempotency_records)
+                self.assertIn(request.request_id, pair["primary"].pending_backup_commits)
+                self.assertEqual(
+                    pair["backup"].auction_store[base.auction_id],
+                    base,
+                )
+                self.assertIn(request.request_id, pair["backup"].prepared_mutations)
+                # ADR-013 makes primary committed state authoritative even while
+                # ADR-014 withholds mutation success pending backup acknowledgement.
+                self.assertTrue(authoritative.ok)
+                self.assertEqual(authoritative.auction, committed)
+
+                retry = pair["primary"].ApplyAuctionMutation(
+                    request,
+                    NoopContext(),
+                )
+                replay = pair["primary"].ApplyAuctionMutation(
+                    request,
+                    NoopContext(),
+                )
+                self.assertTrue(retry.success)
+                self.assertTrue(retry.replayed)
+                self.assertTrue(replay.success)
+                self.assertTrue(replay.replayed)
+                self.assertEqual(retry.current_version, base.version + 1)
+                self.assertEqual(replay.current_version, base.version + 1)
+                self.assertEqual(
+                    pair["primary"].auction_store[base.auction_id],
+                    pair["backup"].auction_store[base.auction_id],
+                )
+                self.assertEqual(
+                    len(pair["primary"].auction_store[base.auction_id].bids),
+                    2,
+                )
+                self.assertNotIn(
+                    request.request_id,
+                    pair["primary"].pending_backup_commits,
+                )
+                self.assertNotIn(
+                    request.request_id,
+                    pair["backup"].prepared_mutations,
+                )
+
+    def test_concurrent_retries_of_pending_commit_resolve_once(self):
+        with running_storage_pair() as pair:
+            base, request = self._mutation_case("bid", "concurrent-pending-bid")
+            self._install_committed_base(pair, base)
+            with mock.patch.object(
+                pair["primary"].replication_client,
+                "commit",
+                return_value=None,
+            ):
+                first = pair["primary"].ApplyAuctionMutation(request, NoopContext())
+            self.assertEqual(
+                first.failure_reason,
+                pb2.MUTATION_FAILURE_REASON_ACKNOWLEDGEMENT_PENDING,
+            )
+
+            barrier = threading.Barrier(2)
+            results = []
+            results_lock = threading.Lock()
+
+            def retry_pending():
+                barrier.wait()
+                result = pair["primary"].ApplyAuctionMutation(
+                    request,
+                    NoopContext(),
+                )
+                with results_lock:
+                    results.append(result)
+
+            threads = [threading.Thread(target=retry_pending) for _ in range(2)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=10)
+
+            self.assertFalse(any(thread.is_alive() for thread in threads))
+            self.assertEqual(len(results), 2)
+            self.assertTrue(all(result.success for result in results))
+            self.assertTrue(all(result.replayed for result in results))
+            self.assertTrue(
+                all(result.current_version == base.version + 1 for result in results)
+            )
+            self.assertEqual(
+                pair["primary"].auction_store[base.auction_id],
+                pair["backup"].auction_store[base.auction_id],
+            )
+            self.assertEqual(
+                pair["primary"].auction_store[base.auction_id].version,
+                base.version + 1,
+            )
+            self.assertEqual(
+                len(pair["primary"].auction_store[base.auction_id].bids),
+                2,
+            )
+            self.assertNotIn(
+                request.request_id,
+                pair["primary"].pending_backup_commits,
+            )
+            self.assertNotIn(
+                request.request_id,
+                pair["backup"].prepared_mutations,
+            )
+
     def test_acknowledged_success_commits_each_mutation_identically(self):
         for mutation_name in ("create", "bid", "withdraw", "reveal"):
             with self.subTest(mutation=mutation_name), running_storage_pair() as pair:

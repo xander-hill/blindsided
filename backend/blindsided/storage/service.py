@@ -1084,30 +1084,33 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 )
 
             prepared = self.prepared_mutations.get(request_id)
-            if prepared is not None:
-                if prepared.candidate_auction.auction_id != auction_id:
-                    return pb2.MutationDecisionResponse(
-                        success=False,
-                        committed_version=committed_version,
-                        message="Auction id does not match the prepared mutation.",
-                    )
-                if prepared.primary_id != primary_id:
-                    return pb2.MutationDecisionResponse(
-                        success=False,
-                        committed_version=committed_version,
-                        message="Primary id does not match the prepared mutation.",
-                    )
+            if prepared is None:
+                return pb2.MutationDecisionResponse(
+                    success=True,
+                    committed_version=committed_version,
+                    message="No prepared mutation to abort.",
+                )
+            if prepared.candidate_auction.auction_id != auction_id:
+                return pb2.MutationDecisionResponse(
+                    success=False,
+                    committed_version=committed_version,
+                    message="Auction id does not match the prepared mutation.",
+                )
+            if prepared.primary_id != primary_id:
+                return pb2.MutationDecisionResponse(
+                    success=False,
+                    committed_version=committed_version,
+                    message="Primary id does not match the prepared mutation.",
+                )
 
             tombstone = pb2.MutationDecisionRequest()
             tombstone.CopyFrom(request)
-            if prepared is not None:
-                del self.prepared_mutations[request_id]
+            del self.prepared_mutations[request_id]
             self.aborted_mutations[request_id] = tombstone
             try:
                 self._persist_state_to_disk()
             except Exception as error:
-                if prepared is not None:
-                    self.prepared_mutations[request_id] = prepared
+                self.prepared_mutations[request_id] = prepared
                 if previous_tombstone is None:
                     del self.aborted_mutations[request_id]
                 else:
