@@ -7,6 +7,7 @@ test('creates an auction and preserves the demo through backup and primary failu
 
   await page.goto('/')
   const initialEpoch = Number(await page.getByTestId('epoch').textContent())
+  const initialFailovers = Number(await page.getByTestId('failovers-completed').textContent())
   await page.getByRole('button', { name: 'Create demo auction' }).click()
   await expect(page.getByTestId('auction-state')).toHaveText('OPEN')
   await expect(page.getByTestId('auction-version')).not.toHaveText('—')
@@ -22,6 +23,10 @@ test('creates an auction and preserves the demo through backup and primary failu
   await expect(page.getByText('$1,400.00')).toBeVisible()
   await expect.poll(async () => Number(await page.getByTestId('auction-version').textContent()))
     .toBeGreaterThan(versionBeforeBid)
+  await expect(page.getByText('Bid committed. Awaiting watch confirmation.')).toHaveCount(0)
+
+  await page.getByRole('button', { name: 'Withdraw bid' }).click()
+  await expect(page.getByText('Withdrawal committed. Awaiting watch confirmation.')).toHaveCount(0)
 
   await page.getByRole('button', { name: 'Fail backup' }).click()
   await expect(page.getByTestId('cluster-state')).toHaveText(/REPROTECTING|READY/)
@@ -36,10 +41,16 @@ test('creates an auction and preserves the demo through backup and primary failu
   }).toBeGreaterThan(initialEpoch)
   await expect(page.getByTestId('cluster-state')).toHaveText('READY', { timeout: 90_000 })
   await expect(page.getByTestId('protection-status')).toHaveText('Synchronous')
+  await expect.poll(async () => Number(await page.getByTestId('failovers-completed').textContent()), {
+    timeout: 15_000,
+  }).toBeGreaterThan(initialFailovers)
+  await expect(page.getByTestId('last-failover')).toHaveText('Unknown')
 
   await page.getByRole('button', { name: 'Stop simulated bidders' }).click().catch(() => undefined)
   await page.getByRole('button', { name: 'Reveal auction' }).click()
   await expect(page.getByTestId('auction-state')).toHaveText('REVEALED')
   await expect(page.getByTestId('final-outcome')).toBeVisible()
+  await expect(page.getByTestId('watch-status')).toHaveText('complete')
+  await expect(page.getByText('Auction revealed. Awaiting watch confirmation.')).toHaveCount(0)
   await expect(page.getByRole('button', { name: /sealed bid/ })).toHaveCount(0)
 })

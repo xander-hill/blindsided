@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { config } from './app/config'
+import { confirmationObserved } from './app/auctionConfirmation'
+import type { PendingConfirmation } from './app/auctionConfirmation'
 import { AuctionPanel } from './components/auction/AuctionPanel'
 import { ControlRoom } from './components/cluster/ControlRoom'
 import { useAuctionWatch } from './hooks/useAuctionWatch'
@@ -22,6 +24,8 @@ export default function App() {
   const [ownBid, setOwnBid] = useState<number>()
   const [busy, setBusy] = useState('')
   const [message, setMessage] = useState('')
+  const [pendingConfirmation, setPendingConfirmation] = useState<PendingConfirmation | null>(null)
+  const [authoritativeReadCompleted, setAuthoritativeReadCompleted] = useState(false)
   const [localEvents, setLocalEvents] = useState<DemoEvent[]>([])
   const [systemEvents, setSystemEvents] = useState<DemoEvent[]>([])
   const [pendingAction, setPendingAction] = useState<DemoAction | ''>('')
@@ -41,6 +45,8 @@ export default function App() {
     const fetched = await getAuction(auctionId)
     setAuction(fetched.auction ?? null)
     setOwnBid(fetched.ownActiveBidAmount)
+    setAuthoritativeReadCompleted(true)
+    return fetched
   }, [auctionId])
 
   const visibleAuction = auction && watch.update ? {
@@ -56,6 +62,23 @@ export default function App() {
   }, [auctionId, refreshAuction])
 
   useEffect(() => {
+    if (!pendingConfirmation || !confirmationObserved(pendingConfirmation, {
+      update: watch.update,
+      auction,
+      ownBid,
+      authoritativeReadCompleted,
+    })) return
+    setMessage(pendingConfirmation.success)
+    setPendingConfirmation(null)
+  }, [auction, authoritativeReadCompleted, ownBid, pendingConfirmation, watch.update])
+
+  useEffect(() => {
+    if (!pendingConfirmation || watch.state !== 'connected') return
+    setAuthoritativeReadCompleted(false)
+    void refreshAuction().catch(() => undefined)
+  }, [pendingConfirmation, refreshAuction, watch.state])
+
+  useEffect(() => {
     let active = true
     const refresh = async () => {
       try {
@@ -68,13 +91,20 @@ export default function App() {
     return () => { active = false; window.clearInterval(timer) }
   }, [])
 
-  const execute = async (operation: string, action: () => Promise<void>, success: string) => {
+  const execute = async (
+    operation: string,
+    action: () => Promise<PendingConfirmation>,
+    success: string,
+  ) => {
     setBusy(operation); setMessage('')
     try {
-      const observedBefore = watch.receivedAt
-      await action()
-      await refreshAuction()
-      setMessage(observedBefore === watch.receivedAt ? `${success}. Awaiting watch confirmation.` : success)
+      const confirmation = await action()
+      setAuthoritativeReadCompleted(false)
+      setPendingConfirmation(confirmation)
+      setMessage(`${success}. Awaiting watch confirmation.`)
+      // A committed mutation remains pending if the reconciliation read is
+      // temporarily unavailable; the connected-watch effect retries it.
+      await refreshAuction().catch(() => undefined)
       addEvent(event(success, 'auction', 'success'))
     } catch (cause) {
       const detail = cause instanceof Error ? cause.message : 'Action failed'
@@ -97,14 +127,16 @@ export default function App() {
   const reset = () => {
     simulator.stop()
     setAuctionId(null); setAuction(null); setOwnBid(undefined); setMessage('')
+    setPendingConfirmation(null); setAuthoritativeReadCompleted(false)
     addEvent(event('Demo view reset', 'system'))
   }
 
   const runAction = async (action: DemoAction) => {
     setPendingAction(action)
     try {
-      const response = await runDemoAction(action)
-      addEvent(event(response.message, action.includes('primary') ? 'failover' : 'replication', action.startsWith('fail') ? 'warning' : 'info'))
+      await runDemoAction(action)
+      // The adapter records the successful action in /demo/events. Avoid a
+      // second local event with a different id for the same operation.
     } catch (cause) {
       addEvent(event(`${action.replaceAll('-', ' ')} failed`, 'system', 'critical', cause instanceof Error ? cause.message : undefined))
     } finally { setPendingAction('') }
@@ -140,16 +172,19 @@ export default function App() {
           writesAvailable={status?.writesAvailable ?? false}
           onCreate={create}
           onBid={amount => execute('bid', async () => {
-            if (!auctionId) return
-            await placeBid(auctionId, config.demoBidderId, amount, version)
+            if (!auctionId) throw new Error('No auction is active')
+            const response = await placeBid(auctionId, config.demoBidderId, amount, version)
+            return { kind: 'bid', success: ownBid === undefined ? 'Bid committed' : 'Bid replaced', amount, ...response }
           }, ownBid === undefined ? 'Bid committed' : 'Bid replaced')}
           onWithdraw={() => execute('withdraw', async () => {
-            if (!auctionId) return
-            await withdrawBid(auctionId, config.demoBidderId, version)
+            if (!auctionId) throw new Error('No auction is active')
+            const response = await withdrawBid(auctionId, config.demoBidderId, version)
+            return { kind: 'withdraw', success: 'Withdrawal committed', ...response }
           }, 'Withdrawal committed')}
           onReveal={() => execute('reveal', async () => {
-            if (!auctionId) return
-            await revealAuction(auctionId, version)
+            if (!auctionId) throw new Error('No auction is active')
+            const response = await revealAuction(auctionId, version)
+            return { kind: 'reveal', success: 'Auction revealed', ...response }
           }, 'Auction revealed')}
           onStartSimulation={simulator.start}
           onStopSimulation={simulator.stop}

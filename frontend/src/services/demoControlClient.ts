@@ -2,7 +2,10 @@ import { config } from '../app/config'
 import type { ClusterStatus, DemoAction, DemoEvent } from '../types/demo'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${config.demoControlUrl}${path}`, init)
+  const response = await fetch(`${config.demoControlUrl}${path}`, {
+    cache: 'no-store',
+    ...init,
+  })
   const payload = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(payload.error || `Demo control returned ${response.status}`)
   return payload as T

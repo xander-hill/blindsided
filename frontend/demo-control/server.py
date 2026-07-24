@@ -206,7 +206,13 @@ def perform_action(action: str) -> str:
         compose("start", service)
         LAST_FAILED.pop("primary", None)
         raise RuntimeError("Primary promotion did not complete within 90 seconds; failed replica was restored")
-    if action in {"restart-backup", "restart-primary"}:
+    if action == "restart-primary":
+        # Resolve at execution time: after failover the original primary may
+        # have returned as a backup, while a different service is authoritative.
+        service = service_for_role("primary")
+        compose("restart", service)
+        return f"Current primary {service} restarted"
+    if action == "restart-backup":
         role = action.removeprefix("restart-")
         service = LAST_FAILED.get(role)
         if not service:
@@ -236,6 +242,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
         self.cors()
         self.end_headers()
         self.wfile.write(body)

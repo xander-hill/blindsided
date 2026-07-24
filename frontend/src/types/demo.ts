@@ -1,7 +1,7 @@
 import type { AuctionResult, PublicAuction } from '../proto/blindsided'
 
 export type ClusterState = 'READY' | 'REPROTECTING' | 'FAILING_OVER' | 'UNAVAILABLE'
-export type WatchState = 'connected' | 'reconnecting' | 'disconnected' | 'error'
+export type WatchState = 'connected' | 'reconnecting' | 'disconnected' | 'complete' | 'error'
 
 export interface ReplicaStatus {
   id: string
