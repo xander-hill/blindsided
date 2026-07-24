@@ -6,7 +6,7 @@ marketplace or production administration surface.
 
 ## Start the demo
 
-Prerequisites: Docker Compose v2, Python 3.10+, and Node.js/npm.
+Prerequisites: Docker Compose v2, Python 3.11+, and Node.js 24/npm.
 
 From the repository root:
 
@@ -29,7 +29,7 @@ In another terminal:
 ```bash
 cd frontend
 cp .env.example .env.local
-npm install
+npm ci
 npm run dev
 ```
 
@@ -75,6 +75,8 @@ npm run test:e2e
 There is exactly one principal flow. It creates an auction, drives simulated
 and human bids, removes the backup and primary, waits on observable recovery,
 then reveals. It skips with an explicit reason if `/demo/status` is unavailable.
+Without the environment, `npx playwright test --list` still validates test
+discovery without launching the flow.
 
 ## Known limitations
 
@@ -92,3 +94,4 @@ then reveals. It skips with an explicit reason if `/demo/status` is unavailable.
   lifetime average as the latest event.
 - The adapter supports the repository’s local Compose service names only and is
   deliberately unsuitable for remote or production deployment.
+- The interface manages one active demo auction at a time.

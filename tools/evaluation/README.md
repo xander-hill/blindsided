@@ -5,10 +5,9 @@ normal Docker Compose operations. They do not patch application behavior or
 observability instrumentation. Every script prints the Grafana dashboard views
 and Prometheus metrics expected to move before it begins.
 
-The repository currently provisions Grafana and its Prometheus data source, but
-does not contain dashboard JSON. The dashboard names printed by these tools are
-the intended views for a manual demo; use the listed metrics in Grafana Explore
-or Prometheus until those dashboards are provisioned.
+The repository provisions Grafana, its Prometheus data source, and three
+dashboard definitions. The scripts print the dashboard views and Prometheus
+families expected to move during each scenario.
 
 ## Prerequisites
 
