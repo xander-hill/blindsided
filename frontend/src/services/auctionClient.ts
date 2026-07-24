@@ -36,6 +36,9 @@ export async function placeBid(auctionId: string, bidderId: string, amount: numb
     auctionId, bidderId, amount, expectedVersion: version, requestId: requestId('bid'),
   }).response
   if (!response.success) throw new Error(response.message || 'Bid was rejected')
+  // BidResponse does not expose the committed version. The caller correlates
+  // this mutation by its bidder-scoped authoritative state predicate.
+  return { minimumVersion: version + 1 }
 }
 
 export async function withdrawBid(auctionId: string, bidderId: string, version: number) {
@@ -43,6 +46,7 @@ export async function withdrawBid(auctionId: string, bidderId: string, version: 
     auctionId, bidderId, expectedVersion: version, requestId: requestId('withdraw'),
   }).response
   if (!response.success) throw new Error(response.message || 'Withdrawal was rejected')
+  return { minimumVersion: response.finalVersion || version + 1 }
 }
 
 export async function revealAuction(auctionId: string, version: number) {
@@ -50,6 +54,7 @@ export async function revealAuction(auctionId: string, version: number) {
     auctionId, sellerId: config.demoSellerId, expectedVersion: version, requestId: requestId('reveal'),
   }).response
   if (!response.ok) throw new Error(response.message || 'Reveal was rejected')
+  return { minimumVersion: response.finalVersion || version + 1 }
 }
 
 export function watchAuction(auctionId: string, signal: AbortSignal): AsyncIterable<AuctionUpdate> {

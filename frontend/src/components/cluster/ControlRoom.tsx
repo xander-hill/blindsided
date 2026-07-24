@@ -47,9 +47,9 @@ export function ControlRoom({ status, error, events, pendingAction, onAction }: 
       <section className="panel metrics-panel">
         <span className="eyebrow">Prometheus summary</span>
         <div className="metric-grid">
-          <div><strong>{metric(status?.metrics.failoversCompleted)}</strong><span>Failovers complete</span></div>
+          <div><strong data-testid="failovers-completed">{metric(status?.metrics.failoversCompleted)}</strong><span>Failovers complete</span></div>
           <div><strong>{metric(status?.metrics.reprotectionsCompleted)}</strong><span>Reprotections</span></div>
-          <div><strong>{metric(status?.metrics.lastFailoverSeconds, 's')}</strong><span>Last failover</span></div>
+          <div><strong data-testid="last-failover">{metric(status?.metrics.lastFailoverSeconds, 's')}</strong><span>Last failover</span></div>
           <div><strong>{metric(status?.metrics.mutationSuccesses)}</strong><span>Mutations accepted</span></div>
         </div>
       </section>
