@@ -128,12 +128,26 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                         timeout=2.0,
                     )
                     with self.state_lock:
+                        preserve_recovering_primary = (
+                            self.replica_role == "primary"
+                            and self.promotion_ready
+                            and self.current_epoch > 0
+                            and registration.epoch == self.current_epoch
+                        )
                         self.replica_role = (
-                            "primary" if registration.is_primary else "backup"
+                            "primary"
+                            if registration.is_primary
+                            or preserve_recovering_primary
+                            else "backup"
                         )
                         self.current_epoch = registration.epoch
-                        self.promotion_ready = self.replica_role == "primary"
-                        self._storage_metrics_ready = self.promotion_ready
+                        if not preserve_recovering_primary:
+                            self.promotion_ready = (
+                                self.replica_role == "primary"
+                            )
+                            self._storage_metrics_ready = (
+                                self.promotion_ready
+                            )
                         self._refresh_storage_state_metrics_locked()
 
                     if self.replica_role == "backup":

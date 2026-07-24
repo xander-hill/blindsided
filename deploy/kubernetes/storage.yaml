@@ -39,10 +39,12 @@ spec:
           value: "1"
         - name: NODE_PORT
           value: "50051"
-        - name: POD_IP 
+        - name: POD_NAME
           valueFrom:
             fieldRef:
               fieldPath: metadata.name
+        - name: POD_IP
+          value: "$(POD_NAME).storage-service:50051"
         - name: AUCTION_STORE_PATH
           value: "/var/lib/blindsided/auction-state.pb"
         ports:

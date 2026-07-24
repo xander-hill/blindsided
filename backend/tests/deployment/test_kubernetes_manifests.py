@@ -76,8 +76,39 @@ class KubernetesScalingAndReplicationManifestTests(BackendTestCase):
             name="storage",
         )
 
-        self.assertRegex(statefulset, r"name:\s*POD_IP\s*\n\s*valueFrom:")
+        self.assertRegex(statefulset, r"name:\s*POD_NAME\s*\n\s*valueFrom:")
         self.assertRegex(statefulset, r"fieldPath:\s*metadata.name")
+        self.assertRegex(
+            statefulset,
+            r'name:\s*POD_IP\s*\n\s*value:\s*"\$\(POD_NAME\)\.storage-service:50051"',
+        )
+
+    def test_only_service_node_has_cpu_autoscaling(self):
+        deployment = manifest_doc(
+            "deploy/kubernetes/service.yaml",
+            kind="Deployment",
+            name="service-node",
+        )
+        hpa = manifest_doc(
+            "deploy/kubernetes/service.yaml",
+            kind="HorizontalPodAutoscaler",
+            name="service-node",
+        )
+
+        self.assertRegex(deployment, r"requests:\s*\n\s*cpu:\s*100m")
+        self.assertRegex(deployment, r"limits:\s*\n\s*cpu:\s*500m")
+        self.assertEqual(int_field(hpa, "minReplicas"), 2)
+        self.assertEqual(int_field(hpa, "maxReplicas"), 6)
+        self.assertEqual(int_field(hpa, "averageUtilization"), 60)
+        self.assertEqual(int_field(hpa, "stabilizationWindowSeconds"), 300)
+        self.assertNotIn(
+            "HorizontalPodAutoscaler",
+            manifest_text("deploy/kubernetes/controller.yaml"),
+        )
+        self.assertNotIn(
+            "HorizontalPodAutoscaler",
+            manifest_text("deploy/kubernetes/storage.yaml"),
+        )
 
     def test_storage_statefulset_persists_local_snapshot_across_restarts(self):
         statefulset = manifest_doc(

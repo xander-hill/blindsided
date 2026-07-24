@@ -300,6 +300,10 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
                 and assignment.replacement_candidate_address is None
                 and address != assignment.primary_address
             ):
+                # A fresh registration is new evidence that a previously
+                # failed candidate is reachable again. Allow another bounded
+                # synchronization attempt for that replica.
+                assignment.attempted_backup_addresses.discard(address)
                 reprotection_args = (
                     assignment.primary_address,
                     assignment.epoch,
@@ -838,6 +842,8 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
                 )
                 return
             assignment = self.primary_assignment
+            if assignment.replacement_candidate_address is not None:
+                return
             healthy_nodes = sorted(
                 address
                 for address, node in self.nodes.items()

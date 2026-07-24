@@ -191,6 +191,30 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
         channel = grpc.insecure_channel(address)
         return pb2_grpc.StorageReplicaServiceStub(channel), channel
 
+    def _primary_assignment_is_serving(
+        self,
+        assignment: PrimaryAssignment,
+        timeout_seconds: float,
+    ) -> bool:
+        """Confirm an unchanged assignment has returned after a restart."""
+        try:
+            with grpc.insecure_channel(assignment.address) as channel:
+                response = pb2_grpc.StorageReplicaServiceStub(
+                    channel
+                ).Heartbeat(
+                    pb2.HealthCheckRequest(request_source="AUCTION_SERVICE"),
+                    timeout=timeout_seconds,
+                )
+            return bool(
+                response.alive
+                and response.role == "primary"
+                and response.promotion_ready
+                and response.epoch == assignment.epoch
+                and response.synchronous_backup_address
+            )
+        except grpc.RpcError:
+            return False
+
     def _mutation_retry_limit(self) -> int:
         """Compatibility accessor for tests that override retry configuration."""
         return self.mutation_retry_limit
@@ -201,9 +225,20 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
 
     # Primary recovery and retry classification
 
-    def _wait_for_ready_primary(self, context) -> PrimaryAssignment | None:
-        """Poll until failover publishes a ready primary or the request expires."""
+    def _wait_for_ready_primary(
+        self,
+        context,
+        failed_assignment: PrimaryAssignment | None = None,
+    ) -> PrimaryAssignment | None:
+        """Poll until recovery publishes a usable primary assignment.
+
+        After a storage RPC fails, the controller can briefly still advertise
+        the assignment whose endpoint just restarted. Do not immediately hand
+        that unchanged assignment back to the mutation retry loop; first
+        observe the controller withdraw it, or observe a different assignment.
+        """
         recovery_deadline = time.monotonic() + self._failover_recovery_window()
+        observed_recovery_transition = failed_assignment is None
         while True:
             if hasattr(context, "is_active") and not context.is_active():
                 return None
@@ -224,7 +259,20 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
             assignment = self._get_primary_assignment(
                 timeout_seconds=poll_timeout,
             )
-            if assignment is not None:
+            if assignment is None:
+                observed_recovery_transition = True
+            elif (
+                failed_assignment is None
+                or assignment != failed_assignment
+                or observed_recovery_transition
+            ):
+                return assignment
+            elif self._primary_assignment_is_serving(
+                assignment, poll_timeout
+            ):
+                # The same durable primary may return after a process restart.
+                # Retrying the identical request id against it is safe and
+                # resolves the persisted idempotency record.
                 return assignment
 
             delay = min(random.uniform(0.25, 0.5), remaining)
@@ -369,7 +417,9 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
             except grpc.RpcError as error:
                 if self._is_failover_rpc_error(error):
                     if attempt < mutation_retry_limit - 1:
-                        recovered_assignment = self._wait_for_ready_primary(context)
+                        recovered_assignment = self._wait_for_ready_primary(
+                            context, assignment
+                        )
                         if recovered_assignment is not None:
                             continue
                     return pb2.CreateAuctionResponse(
@@ -482,7 +532,9 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
             except grpc.RpcError as e:
                 if self._is_failover_rpc_error(e):
                     if attempt < mutation_retry_limit - 1:
-                        recovered_assignment = self._wait_for_ready_primary(context)
+                        recovered_assignment = self._wait_for_ready_primary(
+                            context, assignment
+                        )
                         if recovered_assignment is not None:
                             continue
                     return pb2.BidResponse(
@@ -607,7 +659,9 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
             except grpc.RpcError as e:
                 if self._is_failover_rpc_error(e):
                     if attempt < mutation_retry_limit - 1:
-                        recovered_assignment = self._wait_for_ready_primary(context)
+                        recovered_assignment = self._wait_for_ready_primary(
+                            context, assignment
+                        )
                         if recovered_assignment is not None:
                             continue
                     return pb2.WithdrawBidResponse(
@@ -728,7 +782,9 @@ class AuctionService(pb2_grpc.AuctionServiceServicer):
             except grpc.RpcError as e:
                 if self._is_failover_rpc_error(e):
                     if attempt < mutation_retry_limit - 1:
-                        recovered_assignment = self._wait_for_ready_primary(context)
+                        recovered_assignment = self._wait_for_ready_primary(
+                            context, assignment
+                        )
                         if recovered_assignment is not None:
                             continue
                     return pb2.RevealAuctionResponse(

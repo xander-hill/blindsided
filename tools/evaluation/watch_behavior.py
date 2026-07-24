@@ -251,6 +251,44 @@ def main() -> None:
         channel.close()
         if stopped_service:
             subprocess.run([*compose, "start", stopped_service], check=False)
+            recovery_deadline = time.monotonic() + args.timeout
+            while time.monotonic() < recovery_deadline:
+                registered = metric(
+                    args.prometheus_url,
+                    'blindsided_registered_replicas{job="controller"}',
+                )
+                healthy = metric(
+                    args.prometheus_url,
+                    'blindsided_healthy_replicas{job="controller"}',
+                )
+                ready_primary = query(
+                    args.prometheus_url,
+                    '(blindsided_storage_role{job="storage",role="primary"} == 1) '
+                    'and on(instance) (blindsided_storage_ready{job="storage"} == 1)',
+                )
+                ready_backup = query(
+                    args.prometheus_url,
+                    '(blindsided_storage_role{job="storage",role="backup"} == 1) '
+                    'and on(instance) (blindsided_storage_ready{job="storage"} == 1)',
+                )
+                active_streams = metric(
+                    args.prometheus_url,
+                    "sum(blindsided_active_watch_streams) or vector(0)",
+                )
+                if (
+                    registered == 3
+                    and healthy == 3
+                    and len(ready_primary) == 1
+                    and len(ready_backup) == 1
+                    and active_streams == 0
+                ):
+                    break
+                time.sleep(1)
+            else:
+                raise RuntimeError(
+                    "transition=watch-cleanup: restored replica/recovery work "
+                    "did not settle before deadline"
+                )
 
 
 if __name__ == "__main__":

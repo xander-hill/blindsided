@@ -4,7 +4,7 @@ metadata:
   name: service-node
   namespace: blindsided
 spec:
-  replicas: 3
+  replicas: 2
   selector:
     matchLabels:
       app: service-node
@@ -25,6 +25,13 @@ spec:
           value: "1"
         ports:
         - containerPort: 50051
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
 ---
 apiVersion: v1
 kind: Service
@@ -38,3 +45,30 @@ spec:
     - protocol: TCP
       port: 50051
       targetPort: 50051
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: service-node
+  namespace: blindsided
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: service-node
+  minReplicas: 2
+  maxReplicas: 6
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 60

@@ -831,6 +831,60 @@ class StorageServiceTests(BackendTestCase):
         self.assertIn("prepare-1", recovered.idempotency_records)
         self.assertIn("prepare-1", recovered.pending_backup_commits)
 
+    def test_committed_idempotency_replays_without_duplicate_after_restart_and_rejects_conflict(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = f"{temp_dir}/committed-replay.pb"
+            primary = make_judge(
+                role="primary",
+                state_file_path=state_path,
+            )
+            request = pb2.AuctionMutationRequest(
+                mutation_type=pb2.AUCTION_MUTATION_TYPE_CREATE,
+                request_id="restart-replay",
+                epoch=1,
+                auction=pb2.Auction(
+                    auction_id="restart-auction",
+                    seller_id="seller-a",
+                    title="Original",
+                    reserve_price=100,
+                    ends_at=future_timestamp(),
+                ),
+            )
+            committed = primary.ApplyAuctionMutation(request, NoopContext())
+
+            restarted = make_judge(
+                role="primary",
+                state_file_path=state_path,
+            )
+            restarted._load_state_from_disk()
+            before = restarted.auction_store["restart-auction"]
+            replayed = restarted.ApplyAuctionMutation(request, NoopContext())
+
+            conflicting = pb2.AuctionMutationRequest()
+            conflicting.CopyFrom(request)
+            conflicting.auction.title = "Different payload"
+            rejected = restarted.ApplyAuctionMutation(
+                conflicting, NoopContext()
+            )
+
+        self.assertTrue(committed.success)
+        self.assertTrue(replayed.success)
+        self.assertTrue(replayed.replayed)
+        self.assertEqual(replayed.current_version, committed.current_version)
+        self.assertEqual(len(restarted.auction_store), 1)
+        self.assertEqual(
+            restarted.auction_store["restart-auction"], before
+        )
+        self.assertFalse(rejected.success)
+        self.assertEqual(
+            rejected.failure_reason,
+            pb2.MUTATION_FAILURE_REASON_IDEMPOTENCY_CONFLICT,
+        )
+        self.assertEqual(
+            restarted.auction_store["restart-auction"].version,
+            committed.current_version,
+        )
+
     def test_ready_primary_role_is_restored_from_persisted_assignment_state(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             state_path = f"{temp_dir}/ready-primary.pb"

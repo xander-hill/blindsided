@@ -1050,6 +1050,59 @@ class AuctionServiceTests(BackendTestCase):
         jitter.assert_called_once_with(0.25, 0.5)
         sleep.assert_called_once_with(0.375)
 
+    def test_wait_for_ready_primary_does_not_reuse_failed_assignment_before_transition(self):
+        service = TestableAuctionService(FakeJudgeStub())
+        failed = PrimaryAssignment("restarting-primary:50051", 7)
+
+        with (
+            mock.patch.object(
+                service,
+                "_get_primary_assignment",
+                side_effect=[failed, None, failed],
+            ) as get_primary,
+            mock.patch.object(
+                service,
+                "_primary_assignment_is_serving",
+                return_value=False,
+            ),
+            mock.patch.object(service, "_failover_recovery_window", return_value=5),
+            mock.patch(
+                "blindsided.auction_service.service.random.uniform",
+                return_value=0.25,
+            ),
+            mock.patch("blindsided.auction_service.service.time.sleep"),
+        ):
+            assignment = service._wait_for_ready_primary(
+                NoopContext(), failed
+            )
+
+        self.assertEqual(assignment, failed)
+        self.assertEqual(get_primary.call_count, 3)
+
+    def test_wait_for_ready_primary_accepts_same_assignment_after_endpoint_recovers(self):
+        service = TestableAuctionService(FakeJudgeStub())
+        failed = PrimaryAssignment("restarting-primary:50051", 7)
+
+        with (
+            mock.patch.object(
+                service,
+                "_get_primary_assignment",
+                return_value=failed,
+            ),
+            mock.patch.object(
+                service,
+                "_primary_assignment_is_serving",
+                return_value=True,
+            ) as serving,
+            mock.patch.object(service, "_failover_recovery_window", return_value=5),
+        ):
+            assignment = service._wait_for_ready_primary(
+                NoopContext(), failed
+            )
+
+        self.assertEqual(assignment, failed)
+        serving.assert_called_once()
+
     def test_wait_for_ready_primary_stops_for_cancelled_or_expired_client(self):
         service = TestableAuctionService(FakeJudgeStub())
         cancelled = mock.Mock()
