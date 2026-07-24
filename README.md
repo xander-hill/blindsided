@@ -73,6 +73,10 @@ Run the frontend build check:
 npm run build --prefix frontend
 ```
 
+For the interactive auction simulation and replica-failure control room, see
+[`frontend/README.md`](frontend/README.md). It documents Compose startup,
+localhost-only failure controls, Grafana, and the Playwright demonstration.
+
 🧬 Core Technical Concepts
 The Fog of War (Opaque Range)
 Instead of broadcasting individual bids, the system broadcasts a Dynamic Range and Bidder Count. This prevents "bid-sniping" and keeps the true price hidden until the Gavel falls.
