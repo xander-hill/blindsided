@@ -60,7 +60,7 @@ jobs:
       - name: Check Python syntax
         run: python -m compileall -q backend tools scripts
       - name: Check changed-file formatting
-        run: git diff --check HEAD^ HEAD
+        run: git diff --check
 
   generated-code:
     name: Protobuf generated code
