@@ -6,7 +6,7 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  globalIgnores(['dist', 'src/proto/**']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [
@@ -17,6 +17,11 @@ export default defineConfig([
     ],
     languageOptions: {
       globals: globals.browser,
+    },
+    rules: {
+      // These effects subscribe to gRPC streams and polling sources, whose
+      // callbacks intentionally publish external state into React.
+      'react-hooks/set-state-in-effect': 'off',
     },
   },
 ])
