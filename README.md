@@ -6,6 +6,8 @@ durable idempotency, optimistic concurrency control, live gRPC streams,
 observability, and service-tier autoscaling. Its single-page frontend combines
 an auction simulation with a distributed-systems control room.
 
+![Blindsided Control Room](docs/assets/blindsided-control-room.png)
+
 ## Highlights
 
 - Mutations are acknowledged only after the primary and its designated
@@ -22,6 +24,13 @@ an auction simulation with a distributed-systems control room.
   replication, synchronization, and failover behavior.
 - Kubernetes scales the stateless auction-service tier independently of the
   fixed three-member storage cluster.
+
+## Demo
+
+The control room demonstrates auction behavior, replication, failover,
+reprotection, and reveal in a single workflow.
+
+![Blindsided Demo](docs/assets/blindsided-demo.gif)
 
 ## Architecture
 
@@ -70,6 +79,13 @@ The implementation provides:
 
 Writes intentionally become unavailable when synchronous protection cannot be
 established. This is primary-backup replication, not quorum consensus.
+
+## Failure Recovery
+
+Backup loss transitions the cluster into a reprotection workflow before
+full synchronous protection is restored.
+
+![Backup Failure and Reprotection](docs/assets/blindsided-reprotection.png)
 
 ## Quick start
 
@@ -141,6 +157,13 @@ because they manipulate isolated containers and take materially longer.
 Kubernetes scaling is a local known-cluster check. Exact commands and CI
 rationale are in [continuous integration](docs/continuous-integration.md) and
 [evaluation](tools/evaluation/README.md).
+
+## Final Auction Outcome
+
+Blind bids remain sealed until reveal. After reveal, the final permitted
+outcome becomes visible.
+
+![Auction Reveal](docs/assets/blindsided-reveal.png)
 
 ## Design tradeoffs
 
