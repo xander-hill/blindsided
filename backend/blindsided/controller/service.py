@@ -161,7 +161,9 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
             reported_epoch = max(0, request.epoch)
             current_assignment = self.primary_assignment
             reported_synchronized = (
-                request.role == "backup" and reported_epoch > 0
+                request.role == "backup"
+                and request.promotion_ready
+                and reported_epoch > 0
                 and (
                     current_assignment is None
                     or address == current_assignment.sync_backup_address
@@ -219,6 +221,15 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
                 and reported_backup.sync_status == ReplicaSyncStatus.SYNCHRONIZED
                 and reported_backup.synchronized_epoch == reported_epoch
             )
+            recovered_primary_needs_reprotection = bool(
+                request.role == "primary"
+                and reported_epoch > 0
+                and reported_epoch == self.last_primary_epoch
+                and request.promotion_ready
+                and reported_backup_address
+                and reported_backup_address != address
+                and reported_backup is not None
+            )
             if (
                 self.primary_assignment is None
                 and recovered_primary_is_ready
@@ -230,15 +241,73 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
                     sync_backup_address=reported_backup_address,
                 )
                 LOGGER.info("Recovered primary assignment from %s", address)
+            elif (
+                self.primary_assignment is None
+                and recovered_primary_needs_reprotection
+            ):
+                self.primary_assignment = PrimaryAssignment(
+                    node_id=address,
+                    epoch=reported_epoch,
+                    status=PrimaryStatus.REPROTECTING,
+                )
+                if any(node_address != address for node_address in self.nodes):
+                    reprotection_args = (address, reported_epoch)
+                LOGGER.info(
+                    "Recovered unprotected primary assignment from %s", address
+                )
             elif self.primary_assignment is None and self.last_primary_epoch == 0:
                 self.last_primary_epoch += 1
                 self.primary_assignment = PrimaryAssignment(
                     node_id=address,
                     epoch=self.last_primary_epoch,
-                    status=PrimaryStatus.READY,
+                    status=PrimaryStatus.REPROTECTING,
                 )
                 LOGGER.info("Initial replica assigned as primary: %s", address)
             assignment = self.primary_assignment
+            if (
+                assignment is not None
+                and assignment.status == PrimaryStatus.READY
+                and address == assignment.sync_backup_address
+                and not (
+                    request.role == "backup"
+                    and request.promotion_ready
+                    and reported_epoch == assignment.epoch
+                )
+            ):
+                previous_status = assignment.status
+                assignment.sync_backup_address = None
+                assignment.status = PrimaryStatus.REPROTECTING
+                assignment.attempted_backup_addresses.clear()
+                assignment.replacement_candidate_address = None
+                reprotection_args = (
+                    assignment.primary_address,
+                    assignment.epoch,
+                )
+                _log_event(
+                    logging.INFO,
+                    "reprotection_entered",
+                    trigger="active_backup_registration_unready",
+                    failed_backup=address,
+                    primary=assignment.primary_address,
+                    previous_status=previous_status,
+                    epoch=assignment.epoch,
+                    recovery_generation=assignment.recovery_generation,
+                    cluster_ready=False,
+                )
+            elif (
+                assignment is not None
+                and assignment.status == PrimaryStatus.REPROTECTING
+                and assignment.replacement_candidate_address is None
+                and address != assignment.primary_address
+            ):
+                # A fresh registration is new evidence that a previously
+                # failed candidate is reachable again. Allow another bounded
+                # synchronization attempt for that replica.
+                assignment.attempted_backup_addresses.discard(address)
+                reprotection_args = (
+                    assignment.primary_address,
+                    assignment.epoch,
+                )
             if (
                 assignment is not None
                 and assignment.status == PrimaryStatus.READY
@@ -773,6 +842,8 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
                 )
                 return
             assignment = self.primary_assignment
+            if assignment.replacement_candidate_address is not None:
+                return
             healthy_nodes = sorted(
                 address
                 for address, node in self.nodes.items()
@@ -1326,6 +1397,7 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
             # Snapshot membership before making any network calls.
             addresses = sorted(self.nodes)
         for address in addresses:
+            reprotection_args = None
             try:
                 with grpc.insecure_channel(address) as channel:
                     response = pb2_grpc.StorageReplicaServiceStub(
@@ -1355,7 +1427,46 @@ class ControllerService(pb2_grpc.ClusterControllerServicer):
                     replica.consecutive_heartbeat_failures = 0
                     if was_unhealthy:
                         record_health_transition("unhealthy_to_healthy")
+                    assignment = self.primary_assignment
+                    if (
+                        assignment is not None
+                        and assignment.status == PrimaryStatus.READY
+                        and address == assignment.sync_backup_address
+                        and not (
+                            response.role == "backup"
+                            and response.promotion_ready
+                            and response.epoch == assignment.epoch
+                        )
+                    ):
+                        previous_status = assignment.status
+                        assignment.sync_backup_address = None
+                        assignment.status = PrimaryStatus.REPROTECTING
+                        assignment.attempted_backup_addresses.clear()
+                        assignment.replacement_candidate_address = None
+                        reprotection_args = (
+                            assignment.primary_address,
+                            assignment.epoch,
+                        )
+                        _log_event(
+                            logging.INFO,
+                            "reprotection_entered",
+                            trigger="active_backup_heartbeat_unready",
+                            failed_backup=address,
+                            primary=assignment.primary_address,
+                            previous_status=previous_status,
+                            epoch=assignment.epoch,
+                            recovery_generation=assignment.recovery_generation,
+                            cluster_ready=False,
+                        )
+                    else:
+                        reprotection_args = None
                     self._refresh_gauges_locked()
+            if reprotection_args is not None:
+                threading.Thread(
+                    target=self._try_next_replacement_backup,
+                    args=reprotection_args,
+                    daemon=True,
+                ).start()
 
     def _record_heartbeat_failure(self, address: str) -> None:
         """Evict only after a short run of failed health checks."""

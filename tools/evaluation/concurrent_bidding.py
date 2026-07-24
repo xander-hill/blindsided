@@ -9,6 +9,8 @@ from pathlib import Path
 import sys
 import threading
 import time
+import urllib.parse
+import urllib.request
 from uuid import uuid4
 
 try:
@@ -50,7 +52,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--bidders", type=int, default=24)
     parser.add_argument("--timeout", type=float, default=20.0)
     parser.add_argument("--run-id", default=str(uuid4()))
+    parser.add_argument("--prometheus-url", default="http://localhost:9090")
     return parser.parse_args()
+
+
+def metric(url: str, query: str) -> float:
+    encoded = urllib.parse.urlencode({"query": query})
+    with urllib.request.urlopen(
+        f"{url}/api/v1/query?{encoded}", timeout=5
+    ) as response:
+        result = __import__("json").load(response)["data"]["result"]
+    return sum(float(item["value"][1]) for item in result)
 
 
 def future_timestamp() -> timestamp_pb2.Timestamp:
@@ -70,8 +82,8 @@ def main() -> int:
     for dashboard in DASHBOARDS:
         print(f"  - {dashboard}")
     print("Expected affected metrics:")
-    for metric in METRICS:
-        print(f"  - {metric}")
+    for metric_name in METRICS:
+        print(f"  - {metric_name}")
     print(f"\nScenario ID: {args.run_id}")
     print(f"Bidders: {args.bidders}; AuctionService: {args.address}")
 
@@ -102,9 +114,19 @@ def main() -> int:
 
     barrier = threading.Barrier(args.bidders)
 
-    def place_bid(index: int) -> tuple[int, bool, str]:
+    retry_before = metric(
+        args.prometheus_url,
+        'sum(blindsided_concurrency_retries_total{outcome="retried"}) or vector(0)',
+    )
+    conflict_before = metric(
+        args.prometheus_url,
+        'sum(blindsided_concurrency_retries_total{outcome="exhausted"}) or vector(0)',
+    )
+
+    def place_bid(index: int) -> tuple[int, bool, str, float]:
         bidder = f"evaluation-bidder-{index:03d}"
         barrier.wait(timeout=args.timeout)
+        started = time.perf_counter()
         with grpc.insecure_channel(args.address) as worker_channel:
             worker = pb2_grpc.AuctionServiceStub(worker_channel)
             try:
@@ -118,9 +140,14 @@ def main() -> int:
                     ),
                     timeout=args.timeout,
                 )
-                return index, response.success, response.message
+                return index, response.success, response.message, time.perf_counter() - started
             except grpc.RpcError as error:
-                return index, False, f"{error.code().name}: {error.details()}"
+                return (
+                    index,
+                    False,
+                    f"{error.code().name}: {error.details()}",
+                    time.perf_counter() - started,
+                )
 
     results = []
     started = time.perf_counter()
@@ -132,7 +159,7 @@ def main() -> int:
 
     successes = [result for result in results if result[1]]
     failures = [result for result in results if not result[1]]
-    for index, _, message in sorted(failures):
+    for index, _, message, _ in sorted(failures):
         print(f"[rejected] bidder {index}: {message}")
 
     with grpc.insecure_channel(args.address) as channel:
@@ -156,13 +183,87 @@ def main() -> int:
             f"{final.auction.bidder_count} stored bidders"
         )
 
+    expected_version = 1 + len(successes)
+    if len(successes) < 2:
+        raise RuntimeError("Fewer than two bidders committed; cannot verify tie-breaking")
+    tie_indexes = sorted(result[0] for result in successes)[:2]
+    tie_requests = []
+    with grpc.insecure_channel(args.address) as channel:
+        stub = pb2_grpc.AuctionServiceStub(channel)
+        for offset, index in enumerate(tie_indexes):
+            request = pb2.BidRequest(
+                auction_id=created.auction_id,
+                bidder_id=f"evaluation-bidder-{index:03d}",
+                amount=1000.0,
+                expected_version=expected_version + offset,
+                request_id=f"{args.run_id}:tie:{index}",
+            )
+            response = stub.PlaceBid(request, timeout=args.timeout)
+            if not response.success:
+                raise RuntimeError(f"tie setup failed: {response.message}")
+            tie_requests.append(request)
+
+        for request in tie_requests:
+            replay = stub.PlaceBid(request, timeout=args.timeout)
+            if not replay.success:
+                raise RuntimeError(f"idempotency replay failed: {replay.message}")
+
+        reveal = stub.RevealAuction(
+            pb2.RevealAuctionRequest(
+                auction_id=created.auction_id,
+                seller_id=f"concurrency-seller-{args.run_id}",
+                expected_version=expected_version + 2,
+                request_id=f"{args.run_id}:reveal",
+            ),
+            timeout=args.timeout,
+        )
+        if not reveal.ok or reveal.final_version != expected_version + 3:
+            raise RuntimeError(
+                f"final version mismatch: expected {expected_version + 3}, "
+                f"got {reveal.final_version}"
+            )
+        revealed = stub.GetAuction(
+            pb2.GetAuctionRequest(auction_id=created.auction_id),
+            timeout=args.timeout,
+        )
+    expected_winner = f"evaluation-bidder-{tie_indexes[0]:03d}"
+    if (
+        not revealed.ok
+        or not revealed.auction.HasField("result")
+        or revealed.auction.result.winning_bidder_id != expected_winner
+    ):
+        raise RuntimeError("equal bids did not use deterministic acceptance order")
+
+    metric_deadline = time.monotonic() + min(args.timeout, 15)
+    while True:
+        retry_after = metric(
+            args.prometheus_url,
+            'sum(blindsided_concurrency_retries_total{outcome="retried"}) or vector(0)',
+        )
+        conflict_after = metric(
+            args.prometheus_url,
+            'sum(blindsided_concurrency_retries_total{outcome="exhausted"}) or vector(0)',
+        )
+        if (
+            retry_after > retry_before
+            or conflict_after > conflict_before
+            or time.monotonic() >= metric_deadline
+        ):
+            break
+        time.sleep(0.5)
+    latencies = sorted(result[3] for result in results)
+    p95 = latencies[min(len(latencies) - 1, int(len(latencies) * 0.95))]
+
     print(
         f"\nCompleted in {elapsed:.3f}s: {len(successes)} committed, "
-        f"{len(failures)} rejected, final bidder_count={final.auction.bidder_count}."
+        f"{len(failures)} rejected, final bidder_count={final.auction.bidder_count}, "
+        f"p95={p95 * 1000:.1f}ms."
     )
     print(
-        "Concurrency retry activity is timing-dependent; increase --bidders if "
-        "blindsided_concurrency_retries_total does not move."
+        f"Retries={int(retry_after - retry_before)}, "
+        f"conflicts={len(failures)} "
+        f"(metric exhausted={int(conflict_after - conflict_before)}), "
+        f"deterministic winner={expected_winner}, final_version={reveal.final_version}."
     )
     return 0
 

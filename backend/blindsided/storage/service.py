@@ -128,12 +128,26 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                         timeout=2.0,
                     )
                     with self.state_lock:
+                        preserve_recovering_primary = (
+                            self.replica_role == "primary"
+                            and self.promotion_ready
+                            and self.current_epoch > 0
+                            and registration.epoch == self.current_epoch
+                        )
                         self.replica_role = (
-                            "primary" if registration.is_primary else "backup"
+                            "primary"
+                            if registration.is_primary
+                            or preserve_recovering_primary
+                            else "backup"
                         )
                         self.current_epoch = registration.epoch
-                        self.promotion_ready = self.replica_role == "primary"
-                        self._storage_metrics_ready = self.promotion_ready
+                        if not preserve_recovering_primary:
+                            self.promotion_ready = (
+                                self.replica_role == "primary"
+                            )
+                            self._storage_metrics_ready = (
+                                self.promotion_ready
+                            )
                         self._refresh_storage_state_metrics_locked()
 
                     if self.replica_role == "backup":
@@ -168,7 +182,13 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             address=self.node_address,
             role=self.replica_role,
             epoch=self.current_epoch,
-            promotion_ready=self.promotion_ready,
+            # For a primary this is promotion readiness.  For a backup it is
+            # the local proof that synchronization completed for current_epoch.
+            # A restarted backup deliberately starts with this false even when
+            # its persisted epoch is current.
+            promotion_ready=getattr(
+                self, "_storage_metrics_ready", self.promotion_ready
+            ),
             synchronous_backup_address=self.synchronous_backup_address,
         )
 
@@ -1084,30 +1104,33 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 )
 
             prepared = self.prepared_mutations.get(request_id)
-            if prepared is not None:
-                if prepared.candidate_auction.auction_id != auction_id:
-                    return pb2.MutationDecisionResponse(
-                        success=False,
-                        committed_version=committed_version,
-                        message="Auction id does not match the prepared mutation.",
-                    )
-                if prepared.primary_id != primary_id:
-                    return pb2.MutationDecisionResponse(
-                        success=False,
-                        committed_version=committed_version,
-                        message="Primary id does not match the prepared mutation.",
-                    )
+            if prepared is None:
+                return pb2.MutationDecisionResponse(
+                    success=True,
+                    committed_version=committed_version,
+                    message="No prepared mutation to abort.",
+                )
+            if prepared.candidate_auction.auction_id != auction_id:
+                return pb2.MutationDecisionResponse(
+                    success=False,
+                    committed_version=committed_version,
+                    message="Auction id does not match the prepared mutation.",
+                )
+            if prepared.primary_id != primary_id:
+                return pb2.MutationDecisionResponse(
+                    success=False,
+                    committed_version=committed_version,
+                    message="Primary id does not match the prepared mutation.",
+                )
 
             tombstone = pb2.MutationDecisionRequest()
             tombstone.CopyFrom(request)
-            if prepared is not None:
-                del self.prepared_mutations[request_id]
+            del self.prepared_mutations[request_id]
             self.aborted_mutations[request_id] = tombstone
             try:
                 self._persist_state_to_disk()
             except Exception as error:
-                if prepared is not None:
-                    self.prepared_mutations[request_id] = prepared
+                self.prepared_mutations[request_id] = prepared
                 if previous_tombstone is None:
                     del self.aborted_mutations[request_id]
                 else:
@@ -1649,7 +1672,11 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
                 role=self.replica_role,
                 message="Alive",
                 epoch=self.current_epoch,
-                promotion_ready=self.promotion_ready,
+                # Backup readiness is reported on the existing readiness bit so
+                # the controller can revoke READY when local protection is lost.
+                promotion_ready=getattr(
+                    self, "_storage_metrics_ready", self.promotion_ready
+                ),
                 synchronous_backup_address=self.synchronous_backup_address,
             )
 
@@ -1699,6 +1726,7 @@ class StorageReplicaService(pb2_grpc.StorageReplicaServiceServicer):
             self.synchronous_backup_address = snapshot.synchronous_backup_address
             if self.promotion_ready and self.synchronous_backup_address:
                 self.replica_role = "primary"
+                self._storage_metrics_ready = True
         except Exception as e:
             raise RuntimeError(
                 f"Could not load local state snapshot {self.state_file_path!r}: {e}"

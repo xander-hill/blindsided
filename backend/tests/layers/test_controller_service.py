@@ -295,6 +295,7 @@ class ControllerServiceTests(BackendTestCase):
             address="backup:50051",
             role="backup",
             epoch=6,
+            promotion_ready=True,
         ), NoopContext())
         current = restarted.RegisterNode(pb2.RegisterRequest(
             address="current-primary:50051",
@@ -325,6 +326,7 @@ class ControllerServiceTests(BackendTestCase):
             address="backup:50051",
             role="backup",
             epoch=6,
+            promotion_ready=True,
         )
 
         for order in (
@@ -354,6 +356,7 @@ class ControllerServiceTests(BackendTestCase):
             address="backup:50051",
             role="backup",
             epoch=7,
+            promotion_ready=True,
         ), NoopContext())
         primary = restarted.RegisterNode(pb2.RegisterRequest(
             address="primary:50051",
@@ -405,6 +408,7 @@ class ControllerServiceTests(BackendTestCase):
                 restarted = ControllerService()
                 restarted.RegisterNode(pb2.RegisterRequest(
                     address="backup:50051", role="backup", epoch=7,
+                    promotion_ready=True,
                 ), NoopContext())
                 response = restarted.RegisterNode(registration, NoopContext())
 

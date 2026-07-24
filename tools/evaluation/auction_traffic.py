@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import queue
 import sys
+import threading
 import time
 from uuid import uuid4
 
@@ -151,93 +153,204 @@ def main() -> int:
             print("\nCreate-only scenario completed successfully.")
             return 0
 
-        fetched = call(
-            "GetAuction",
+        print("\nTimeline:")
+        updates: queue.Queue = queue.Queue()
+        watch_stop = threading.Event()
+
+        def watch() -> None:
+            try:
+                stream = stub.WatchAuction(
+                    pb2.AuctionRequest(auction_id=auction_id, user_id="demo-watcher"),
+                    timeout=args.timeout,
+                )
+                for update in stream:
+                    updates.put(update)
+                    if update.state == pb2.AUCTION_STATE_REVEALED:
+                        return
+                    if watch_stop.is_set():
+                        stream.cancel()
+                        return
+            except grpc.RpcError as error:
+                if not watch_stop.is_set():
+                    updates.put(error)
+
+        watcher = threading.Thread(target=watch, daemon=True)
+        watcher.start()
+
+        committed_versions = []
+
+        def await_version(version: int):
+            deadline = time.monotonic() + args.timeout
+            while time.monotonic() < deadline:
+                try:
+                    update = updates.get(timeout=max(0.01, deadline - time.monotonic()))
+                except queue.Empty as error:
+                    raise RuntimeError(
+                        f"watch did not observe committed version {version}"
+                    ) from error
+                if isinstance(update, grpc.RpcError):
+                    raise RuntimeError(
+                        f"watch failed: {update.code().name}: {update.details()}"
+                    )
+                require(
+                    update.version in set(committed_versions) | {version},
+                    f"watch emitted uncommitted version {update.version}",
+                )
+                require(
+                    not update.HasField("result")
+                    if update.state == pb2.AUCTION_STATE_OPEN
+                    else True,
+                    "pre-reveal watch update exposed auction outcome",
+                )
+                print(
+                    f"  watch version={update.version} "
+                    f"bidders={update.bidder_count} state={update.state}"
+                )
+                if update.version == version:
+                    return update
+            raise RuntimeError(f"watch deadline expired for version {version}")
+
+        committed_versions.append(1)
+        initial = await_version(1)
+        require(initial.bidder_count == 0, "created auction has unexpected bidders")
+
+        mutations = (
+            (
+                "bid bidder-a",
+                stub.PlaceBid,
+                pb2.BidRequest(
+                    auction_id=auction_id,
+                    bidder_id="bidder-a",
+                    amount=125.0,
+                    expected_version=1,
+                    request_id=f"{args.run_id}:bid:a",
+                ),
+                2,
+                1,
+            ),
+            (
+                "bid bidder-b",
+                stub.PlaceBid,
+                pb2.BidRequest(
+                    auction_id=auction_id,
+                    bidder_id="bidder-b",
+                    amount=160.0,
+                    expected_version=2,
+                    request_id=f"{args.run_id}:bid:b",
+                ),
+                3,
+                2,
+            ),
+            (
+                "replace bidder-a",
+                stub.PlaceBid,
+                pb2.BidRequest(
+                    auction_id=auction_id,
+                    bidder_id="bidder-a",
+                    amount=175.0,
+                    expected_version=3,
+                    request_id=f"{args.run_id}:replace:a",
+                ),
+                4,
+                2,
+            ),
+        )
+        for label, rpc, request, version, bidder_count in mutations:
+            response = call(label, rpc, request, args.timeout)
+            require(response.success, f"{label} failed: {response.message}")
+            committed_versions.append(version)
+            update = await_version(version)
+            require(
+                update.bidder_count == bidder_count,
+                f"{label} produced bidder_count={update.bidder_count}",
+            )
+
+        conflict = call(
+            "reject changed idempotency payload",
+            stub.PlaceBid,
+            pb2.BidRequest(
+                auction_id=auction_id,
+                bidder_id="bidder-a",
+                amount=180.0,
+                expected_version=4,
+                request_id=f"{args.run_id}:replace:a",
+            ),
+            args.timeout,
+        )
+        require(not conflict.success, "changed idempotency payload was accepted")
+
+        withdrawn = call(
+            "withdraw bidder-b",
+            stub.WithdrawBid,
+            pb2.WithdrawBidRequest(
+                auction_id=auction_id,
+                bidder_id="bidder-b",
+                expected_version=4,
+                request_id=f"{args.run_id}:withdraw:b",
+            ),
+            args.timeout,
+        )
+        require(withdrawn.success and withdrawn.final_version == 5, withdrawn.message)
+        committed_versions.append(5)
+        require(await_version(5).bidder_count == 1, "withdraw did not remove bidder-b")
+
+        before_reveal = call(
+            "privacy read",
             stub.GetAuction,
             pb2.GetAuctionRequest(auction_id=auction_id, bidder_id="bidder-a"),
             args.timeout,
         )
-        require(fetched.ok, f"GetAuction failed: {fetched.message}")
-
-        searched = call(
-            "SearchAuctions",
-            stub.SearchAuctions,
-            pb2.SearchAuctionsRequest(query="Observability", category="evaluation"),
-            args.timeout,
-        )
-        require(searched.ok, f"SearchAuctions failed: {searched.message}")
+        require(before_reveal.ok, before_reveal.message)
+        require(before_reveal.HasField("own_active_bid_amount"), "own bid is hidden")
         require(
-            any(item.auction_id == auction_id for item in searched.auctions),
-            "SearchAuctions did not return the created auction",
+            abs(before_reveal.own_active_bid_amount - 175.0) < 0.001,
+            "replacement bid amount is incorrect",
         )
-
-        first_bid = call(
-            "PlaceBid(first)",
-            stub.PlaceBid,
-            pb2.BidRequest(
-                auction_id=auction_id,
-                bidder_id="bidder-a",
-                amount=125.0,
-                expected_version=1,
-                request_id=f"{args.run_id}:bid:1",
-            ),
-            args.timeout,
+        require(
+            not before_reveal.auction.HasField("result"),
+            "pre-reveal public auction exposed result or reserve outcome",
         )
-        require(first_bid.success, f"First bid failed: {first_bid.message}")
-
-        withdrawn = call(
-            "WithdrawBid",
-            stub.WithdrawBid,
-            pb2.WithdrawBidRequest(
-                auction_id=auction_id,
-                bidder_id="bidder-a",
-                expected_version=2,
-                request_id=f"{args.run_id}:withdraw",
-            ),
-            args.timeout,
-        )
-        require(withdrawn.success, f"WithdrawBid failed: {withdrawn.message}")
-
-        second_bid = call(
-            "PlaceBid(second)",
-            stub.PlaceBid,
-            pb2.BidRequest(
-                auction_id=auction_id,
-                bidder_id="bidder-b",
-                amount=150.0,
-                expected_version=3,
-                request_id=f"{args.run_id}:bid:2",
-            ),
-            args.timeout,
-        )
-        require(second_bid.success, f"Second bid failed: {second_bid.message}")
 
         revealed = call(
-            "RevealAuction",
+            "reveal",
             stub.RevealAuction,
             pb2.RevealAuctionRequest(
                 auction_id=auction_id,
                 seller_id=f"evaluation-seller-{args.run_id}",
-                expected_version=4,
+                expected_version=5,
                 request_id=f"{args.run_id}:reveal",
             ),
             args.timeout,
         )
-        require(revealed.ok, f"RevealAuction failed: {revealed.message}")
+        require(revealed.ok and revealed.final_version == 6, revealed.message)
+        committed_versions.append(6)
+        reveal_update = await_version(6)
+        require(reveal_update.HasField("result"), "reveal watch update has no result")
+        require(reveal_update.result.reserve_met, "reserve should be met")
+        require(reveal_update.result.has_winner, "reveal has no winner")
+        require(
+            reveal_update.result.winning_bidder_id == "bidder-a"
+            and abs(reveal_update.result.winning_amount - 175.0) < 0.001,
+            "reveal chose the wrong winner or amount",
+        )
 
         final = call(
             "GetAuction(final)",
             stub.GetAuction,
-            pb2.GetAuctionRequest(auction_id=auction_id, bidder_id="bidder-b"),
+            pb2.GetAuctionRequest(auction_id=auction_id),
             args.timeout,
         )
-        require(final.ok, f"Final GetAuction failed: {final.message}")
+        require(final.ok and final.auction.HasField("result"), final.message)
+        require(final.auction.bidder_count == 1, "final bidder count is not one")
         require(
-            final.auction.state == pb2.AUCTION_STATE_REVEALED,
-            "Final auction state is not REVEALED",
+            final.auction.result == reveal_update.result,
+            "final read and watch reveal outcomes differ",
         )
+        watch_stop.set()
+        watcher.join(timeout=args.timeout)
+        require(not watcher.is_alive(), "watch stream did not terminate after reveal")
 
-    print("\nAuction lifecycle completed successfully.")
+    print("\nAuction lifecycle completed: versions 1→6, privacy preserved.")
     return 0
 
 

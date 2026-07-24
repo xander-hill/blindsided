@@ -108,7 +108,7 @@ class ControllerObservabilityTests(TestCase):
         self.assertTrue(response.success)
         self.assertEqual(self.value("blindsided_registered_replicas"), 1)
         self.assertEqual(self.value("blindsided_healthy_replicas"), 1)
-        self.assertEqual(self.value("blindsided_cluster_ready"), 1)
+        self.assertEqual(self.value("blindsided_cluster_ready"), 0)
         self.assertEqual(self.value("blindsided_primary_epoch"), 1)
         self.assertEqual(self.value(
             "blindsided_replica_health_transitions_total",
@@ -125,6 +125,7 @@ class ControllerObservabilityTests(TestCase):
             "backup:1",
             role="backup",
             epoch=7,
+            promotion_ready=True,
         )
         self.assertFalse(backup.is_primary)
         self.assertEqual(self.value("blindsided_cluster_ready"), 0)

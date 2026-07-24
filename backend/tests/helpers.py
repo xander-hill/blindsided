@@ -1,5 +1,6 @@
 import os
 import socket
+import time
 import unittest
 from itertools import count
 from concurrent import futures
@@ -11,7 +12,7 @@ from google.protobuf import timestamp_pb2
 
 from blindsided.auction_service import service as auction_service_module
 from blindsided.auction_service.service import AuctionService
-from blindsided.controller.service import ControllerService
+from blindsided.controller.service import ControllerService, PrimaryStatus
 from blindsided.generated import blindsided_pb2 as pb2
 from blindsided.generated import blindsided_pb2_grpc as pb2_grpc
 from blindsided.storage import service as storage_service_module
@@ -178,6 +179,41 @@ def running_backend_stack():
         storage_server.add_insecure_port(storage_addr)
         start(storage_server)
 
+        backup_port = free_port()
+        backup_addr = f"127.0.0.1:{backup_port}"
+        with mock.patch.dict(
+            os.environ,
+            {
+                "NODE_PORT": str(backup_port),
+                "POD_IP": backup_addr,
+                "NODE_ROLE": "backup",
+                "PEER_ADDRESSES": "",
+            },
+            clear=False,
+        ), mock.patch.object(
+            storage_service_module,
+            "NODE_PORT",
+            str(backup_port),
+        ):
+            backup_node = StorageReplicaService(initialize_connection=False)
+        backup_server = grpc.server(futures.ThreadPoolExecutor(max_workers=40))
+        pb2_grpc.add_StorageReplicaServiceServicer_to_server(
+            backup_node, backup_server
+        )
+        backup_server.add_insecure_port(backup_addr)
+        start(backup_server)
+        backup_node._initialize_connection()
+
+        readiness_deadline = time.monotonic() + 5
+        while time.monotonic() < readiness_deadline:
+            with controller_service.lock:
+                assignment = controller_service.primary_assignment
+                if assignment and assignment.status == PrimaryStatus.READY:
+                    break
+            time.sleep(0.01)
+        else:
+            raise RuntimeError("Test backend stack did not become protected.")
+
         auction_server = grpc.server(futures.ThreadPoolExecutor(max_workers=80))
         stack.enter_context(mock.patch.object(
             auction_service_module,
@@ -199,6 +235,7 @@ def running_backend_stack():
         yield {
             "controller_service": controller_service,
             "storage_node": storage_node,
+            "backup_node": backup_node,
             "auction_addr": auction_addr,
             "storage_addr": storage_addr,
             "controller_addr": controller_addr,

@@ -129,3 +129,41 @@ sum by (outcome) (increase(blindsided_synchronization_attempts_total[10m]))
 
 Controller recovery events are low-frequency, so `increase()` over the complete
 demo window is generally clearer than a short `rate()`.
+
+## Final demo scenario matrix
+
+Run each command from the repository root. Every driver prints its transition
+timeline and exits nonzero at the first failed transition.
+
+```bash
+# 1. Normal lifecycle, privacy, deterministic result, and committed watch updates
+venv/bin/python tools/evaluation/auction_traffic.py
+
+# 2. Concurrent bids, retry/conflict/latency report, idempotency, and tie-breaking
+venv/bin/python tools/evaluation/concurrent_bidding.py --bidders 24
+
+# 3. Designated synchronous-backup loss and automatic reprotection
+bash tools/evaluation/backup_failure.sh
+
+# 4. Primary loss, synchronized promotion, epoch advance, and old-primary return
+bash tools/evaluation/primary_failover.sh
+
+# 5. Ambiguous mutation response and same-request replay
+venv/bin/python tools/evaluation/ambiguous_outcome.py
+
+# 6. Durable storage restart and deterministic reveal
+venv/bin/python tools/evaluation/restart_durability.py
+
+# 7. Multiple watchers, privacy, rejected mutations, failover, and cancellation
+venv/bin/python tools/evaluation/watch_behavior.py
+
+# 8. Verify populated Prometheus families and provisioned Grafana dashboards
+venv/bin/python tools/evaluation/observability_check.py
+
+# 9. Kubernetes stateless-tier autoscaling and fixed storage membership
+bash tools/evaluation/kubernetes_scaling.sh
+```
+
+The Kubernetes driver intentionally fails at `autoscaling-policy` when the
+deployed manifests do not define a `HorizontalPodAutoscaler`; it does not create
+an autoscaling architecture on behalf of the evaluation.

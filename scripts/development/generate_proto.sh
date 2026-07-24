@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
 # 1. Setup Paths
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PROTO_DIR="$ROOT/api/proto"
 PY_OUT_DIR="$ROOT/backend/blindsided/generated"
 TS_OUT_DIR="$ROOT/frontend/src/proto"
-VENV_PYTHON="$ROOT/venv/bin/python"
+DEFAULT_PYTHON="$ROOT/venv/bin/python"
+if [[ ! -x "$DEFAULT_PYTHON" ]]; then
+  DEFAULT_PYTHON="python3"
+fi
+PROTOC_PYTHON="${PROTOC_PYTHON:-$DEFAULT_PYTHON}"
 PROTO_NAME="blindsided"
 
 # Ensure output directories exist
@@ -19,7 +23,7 @@ rm -rf "$TS_OUT_DIR"/*
 echo "🚀 Generating gRPC code for Triple-Threat Backend (Python)..."
 
 # 2. Python Generation (Backend)
-$VENV_PYTHON -m grpc_tools.protoc \
+"$PROTOC_PYTHON" -m grpc_tools.protoc \
     -I "$PROTO_DIR" \
     --python_out="$PY_OUT_DIR" \
     --pyi_out="$PY_OUT_DIR" \
@@ -37,7 +41,7 @@ fi
 # 4. Modern TypeScript Generation (Frontend)
 TS_PLUGIN="$ROOT/frontend/node_modules/.bin/protoc-gen-ts"
 
-protoc -I "$PROTO_DIR" \
+"$PROTOC_PYTHON" -m grpc_tools.protoc -I "$PROTO_DIR" \
   --plugin=protoc-gen-ts="$TS_PLUGIN" \
   --ts_out "$TS_OUT_DIR" \
   --ts_opt generate_dependencies \
