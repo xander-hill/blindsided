@@ -1,0 +1,102 @@
+name: Manual system evaluation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: manual-evaluation-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  compose-scenarios:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Normal flow
+            slug: normal-flow
+            command: python tools/evaluation/auction_traffic.py --run-id ci-normal
+            timeout: 180
+          - name: Concurrent bidding
+            slug: concurrent-bidding
+            command: python tools/evaluation/concurrent_bidding.py --bidders 24 --run-id ci-concurrent
+            timeout: 300
+          - name: Backup failure
+            slug: backup-failure
+            command: bash tools/evaluation/backup_failure.sh
+            timeout: 600
+          - name: Primary failover
+            slug: primary-failover
+            command: bash tools/evaluation/primary_failover.sh
+            timeout: 600
+          - name: Restart durability
+            slug: restart-durability
+            command: python tools/evaluation/restart_durability.py --run-id ci-restart --timeout 45
+            timeout: 600
+          - name: Watch behavior
+            slug: watch-behavior
+            command: python tools/evaluation/watch_behavior.py --run-id ci-watch --timeout 45
+            timeout: 600
+          - name: Observability check
+            slug: observability
+            command: python tools/evaluation/observability_check.py --run-id ci-observability --timeout 90
+            timeout: 900
+    env:
+      COMPOSE_FILE: deploy/compose/docker-compose.yaml
+      ARTIFACT_DIR: evaluation-artifacts/${{ matrix.slug }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - name: Create artifact directory
+        run: mkdir -p "$ARTIFACT_DIR"
+      - name: Start Docker Compose
+        run: |
+          set -o pipefail
+          timeout 12m docker compose -f "$COMPOSE_FILE" up --build -d --remove-orphans 2>&1 |
+            tee "$ARTIFACT_DIR/compose-startup.log"
+      - name: Wait for cluster readiness
+        run: |
+          set -o pipefail
+          timeout 5m bash -c '
+            until curl --fail --silent --get \
+              --data-urlencode "query=blindsided_cluster_ready == 1" \
+              http://localhost:9090/api/v1/query |
+              grep -q "\"result\":\\[{"; do
+              sleep 5
+            done
+          ' 2>&1 | tee "$ARTIFACT_DIR/readiness.log"
+      - name: Run ${{ matrix.name }}
+        env:
+          SCENARIO_COMMAND: ${{ matrix.command }}
+          SCENARIO_TIMEOUT: ${{ matrix.timeout }}
+        run: |
+          set -o pipefail
+          timeout --signal=TERM --kill-after=15s "$SCENARIO_TIMEOUT" \
+            bash -lc "$SCENARIO_COMMAND" 2>&1 |
+            tee "$ARTIFACT_DIR/timeline.log"
+      - name: Capture Compose state and logs
+        if: always()
+        run: |
+          docker compose -f "$COMPOSE_FILE" ps -a > "$ARTIFACT_DIR/compose-ps.log" 2>&1 || true
+          docker compose -f "$COMPOSE_FILE" logs --no-color > "$ARTIFACT_DIR/compose.log" 2>&1 || true
+      - name: Upload scenario timeline and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evaluation-${{ matrix.slug }}-${{ github.run_attempt }}
+          path: ${{ env.ARTIFACT_DIR }}
+          if-no-files-found: error
+          retention-days: 14
+      - name: Clean up Docker Compose
+        if: always()
+        run: timeout 3m docker compose -f "$COMPOSE_FILE" down -v --remove-orphans

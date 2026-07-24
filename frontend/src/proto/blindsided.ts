@@ -629,6 +629,18 @@ export interface HealthCheckResponse {
      * @generated from protobuf field: string message = 3
      */
     message: string;
+    /**
+     * @generated from protobuf field: int64 epoch = 4
+     */
+    epoch: bigint;
+    /**
+     * @generated from protobuf field: bool promotion_ready = 5
+     */
+    promotionReady: boolean;
+    /**
+     * @generated from protobuf field: string synchronous_backup_address = 6
+     */
+    synchronousBackupAddress: string;
 }
 /**
  * @generated from protobuf message blindsided.BeginPrimaryPromotionRequest
@@ -690,6 +702,22 @@ export interface RegisterRequest {
      * @generated from protobuf field: string address = 1
      */
     address: string;
+    /**
+     * @generated from protobuf field: string role = 2
+     */
+    role: string;
+    /**
+     * @generated from protobuf field: int64 epoch = 3
+     */
+    epoch: bigint;
+    /**
+     * @generated from protobuf field: bool promotion_ready = 4
+     */
+    promotionReady: boolean;
+    /**
+     * @generated from protobuf field: string synchronous_backup_address = 5
+     */
+    synchronousBackupAddress: string;
 }
 /**
  * @generated from protobuf message blindsided.RegisterResponse
@@ -3098,7 +3126,10 @@ class HealthCheckResponse$Type extends MessageType<HealthCheckResponse> {
         super("blindsided.HealthCheckResponse", [
             { no: 1, name: "alive", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
             { no: 2, name: "role", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 3, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+            { no: 3, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "epoch", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 5, name: "promotion_ready", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 6, name: "synchronous_backup_address", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<HealthCheckResponse>): HealthCheckResponse {
@@ -3106,6 +3137,9 @@ class HealthCheckResponse$Type extends MessageType<HealthCheckResponse> {
         message.alive = false;
         message.role = "";
         message.message = "";
+        message.epoch = 0n;
+        message.promotionReady = false;
+        message.synchronousBackupAddress = "";
         if (value !== undefined)
             reflectionMergePartial<HealthCheckResponse>(this, message, value);
         return message;
@@ -3123,6 +3157,15 @@ class HealthCheckResponse$Type extends MessageType<HealthCheckResponse> {
                     break;
                 case /* string message */ 3:
                     message.message = reader.string();
+                    break;
+                case /* int64 epoch */ 4:
+                    message.epoch = reader.int64().toBigInt();
+                    break;
+                case /* bool promotion_ready */ 5:
+                    message.promotionReady = reader.bool();
+                    break;
+                case /* string synchronous_backup_address */ 6:
+                    message.synchronousBackupAddress = reader.string();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -3145,6 +3188,15 @@ class HealthCheckResponse$Type extends MessageType<HealthCheckResponse> {
         /* string message = 3; */
         if (message.message !== "")
             writer.tag(3, WireType.LengthDelimited).string(message.message);
+        /* int64 epoch = 4; */
+        if (message.epoch !== 0n)
+            writer.tag(4, WireType.Varint).int64(message.epoch);
+        /* bool promotion_ready = 5; */
+        if (message.promotionReady !== false)
+            writer.tag(5, WireType.Varint).bool(message.promotionReady);
+        /* string synchronous_backup_address = 6; */
+        if (message.synchronousBackupAddress !== "")
+            writer.tag(6, WireType.LengthDelimited).string(message.synchronousBackupAddress);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -3379,12 +3431,20 @@ export const PromotionStateConfirmationResponse = new PromotionStateConfirmation
 class RegisterRequest$Type extends MessageType<RegisterRequest> {
     constructor() {
         super("blindsided.RegisterRequest", [
-            { no: 1, name: "address", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+            { no: 1, name: "address", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "role", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "epoch", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 4, name: "promotion_ready", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 5, name: "synchronous_backup_address", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<RegisterRequest>): RegisterRequest {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.address = "";
+        message.role = "";
+        message.epoch = 0n;
+        message.promotionReady = false;
+        message.synchronousBackupAddress = "";
         if (value !== undefined)
             reflectionMergePartial<RegisterRequest>(this, message, value);
         return message;
@@ -3396,6 +3456,18 @@ class RegisterRequest$Type extends MessageType<RegisterRequest> {
             switch (fieldNo) {
                 case /* string address */ 1:
                     message.address = reader.string();
+                    break;
+                case /* string role */ 2:
+                    message.role = reader.string();
+                    break;
+                case /* int64 epoch */ 3:
+                    message.epoch = reader.int64().toBigInt();
+                    break;
+                case /* bool promotion_ready */ 4:
+                    message.promotionReady = reader.bool();
+                    break;
+                case /* string synchronous_backup_address */ 5:
+                    message.synchronousBackupAddress = reader.string();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -3412,6 +3484,18 @@ class RegisterRequest$Type extends MessageType<RegisterRequest> {
         /* string address = 1; */
         if (message.address !== "")
             writer.tag(1, WireType.LengthDelimited).string(message.address);
+        /* string role = 2; */
+        if (message.role !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.role);
+        /* int64 epoch = 3; */
+        if (message.epoch !== 0n)
+            writer.tag(3, WireType.Varint).int64(message.epoch);
+        /* bool promotion_ready = 4; */
+        if (message.promotionReady !== false)
+            writer.tag(4, WireType.Varint).bool(message.promotionReady);
+        /* string synchronous_backup_address = 5; */
+        if (message.synchronousBackupAddress !== "")
+            writer.tag(5, WireType.LengthDelimited).string(message.synchronousBackupAddress);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
